@@ -13,7 +13,7 @@ on:
         description: xnu MACHINE_CONFIG
         default: SWEET
       board:
-        description: sweet / ginkgo (ARMv8.0 variant of the SWEET config, see xnu/board-overlay.py)
+        description: sweet (Redmi Note 10 Pro) / ginkgo (Redmi Note 8, ARMv8.0 variant, see xnu/board-overlay.py)
         default: sweet
       keep_going:
         description: make -k (collect all compile errors in one run)
