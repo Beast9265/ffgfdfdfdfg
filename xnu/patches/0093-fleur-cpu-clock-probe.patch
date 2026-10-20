@@ -1,19 +1,9 @@
 diff --git a/iokit/Kernel/arm/SweetCPU.cpp b/iokit/Kernel/arm/SweetCPU.cpp
-index 2545cf9..5d65d3b 100644
+index 2545cf9..9b1e2f7 100644
 --- a/iokit/Kernel/arm/SweetCPU.cpp
 +++ b/iokit/Kernel/arm/SweetCPU.cpp
-@@ -200,12 +200,37 @@ SweetCPU::initCPU(bool boot)
- 	 * Waiting here with DAIF.I set would deadlock every secondary. */
- 	signalCPU(this);
- 	setCPUState(kIOCPUStateRunning);
--	kprintf("SWEET CPU: cpu=%u entered initCPU mpidr=0x%llx EL%llu IRQs=%u\n",
-+	unsigned mhz = sweet_cpu_mhz();
-+	kprintf("SWEET CPU: cpu=%u entered initCPU mpidr=0x%llx EL%llu IRQs=%u clock=%u MHz\n",
- 	    getCPUNumber(), __builtin_arm_rsr64("MPIDR_EL1") & 0xffffULL,
--	    __builtin_arm_rsr64("CurrentEL") >> 2, ml_get_interrupts_enabled());
-+	    __builtin_arm_rsr64("CurrentEL") >> 2, ml_get_interrupts_enabled(), mhz);
-+	IOLog("SWEET CPU: cpu=%u clock=%u MHz\n", getCPUNumber(), mhz);
- 	__atomic_store_n(&initialized, 1, __ATOMIC_RELEASE);
+@@ -185,6 +185,29 @@ SweetCPU::free(void)
+ 	IOCPU::free();
  }
  
 +/*
@@ -40,5 +30,19 @@ index 2545cf9..5d65d3b 100644
 +}
 +
  void
- SweetCPU::signalCPU(IOCPU *target)
+ SweetCPU::initCPU(bool boot)
  {
+@@ -200,9 +223,11 @@ SweetCPU::initCPU(bool boot)
+ 	 * Waiting here with DAIF.I set would deadlock every secondary. */
+ 	signalCPU(this);
+ 	setCPUState(kIOCPUStateRunning);
+-	kprintf("SWEET CPU: cpu=%u entered initCPU mpidr=0x%llx EL%llu IRQs=%u\n",
++	unsigned mhz = sweet_cpu_mhz();
++	kprintf("SWEET CPU: cpu=%u entered initCPU mpidr=0x%llx EL%llu IRQs=%u clock=%u MHz\n",
+ 	    getCPUNumber(), __builtin_arm_rsr64("MPIDR_EL1") & 0xffffULL,
+-	    __builtin_arm_rsr64("CurrentEL") >> 2, ml_get_interrupts_enabled());
++	    __builtin_arm_rsr64("CurrentEL") >> 2, ml_get_interrupts_enabled(), mhz);
++	IOLog("SWEET CPU: cpu=%u clock=%u MHz\n", getCPUNumber(), mhz);
+ 	__atomic_store_n(&initialized, 1, __ATOMIC_RELEASE);
+ }
+ 
