@@ -27,7 +27,8 @@
 #define FB_W			1080
 #define FB_H			2340
 #define BOARD_MPIDR(i)		((uint64_t)(i))
-#define BOARD_XNU_MPIDR		4UL		/* exercises the ginkgo hand-off */
+/* ginkgo's xnu core; virt with GICv3 numbers vCPU 16 as Aff1=1 (-smp 17) */
+#define BOARD_XNU_MPIDR		0x100UL
 #define BOARD_HAS_UFS		0
 #define IMEM_RESTART_REASON	0UL
 #define PSHOLD			0UL

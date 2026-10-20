@@ -47,6 +47,9 @@ GINKGO_ECID = 0x47494e4b474f0001  # 'GINKGO' + 1, synthetic
 # QEMU virt (-M virt,gic-version=3 -cpu cortex-a76): GICD/GICR and the generic timer's CNTFRQ
 QEMU_GICD, QEMU_GICR, QEMU_TIMEBASE = 0x08000000, 0x080a0000, 62500000
 QEMU_VTIMER_INTID = 27
+# virt's first redistributor region; ginkgo's xnu core (MPIDR 0x100) is vCPU 16
+# there (-smp 17), past the 8 frames GICR_SIZE covers.
+QEMU_GICR_SIZE = 0xf60000
 
 BOOT_MANIFEST_HASH = hashlib.sha384(b'sweet boot manifest').digest()
 
@@ -95,9 +98,11 @@ def build(seed=None, qemu=False, highmem=False, board='sweet'):
         phys_base, mem_size = (HIGH_PHYS_BASE, HIGH_MEM_SIZE) if highmem else (PHYS_BASE, MEM_SIZE)
         gicd, gicr = GICD, GICR
         fb, fb_size, fb_h, ecid = FB, FB_SIZE, FB_H, SWEET_ECID
-    timebase = TIMEBASE
+    timebase, gicr_size = TIMEBASE, GICR_SIZE
     if qemu:
         gicd, gicr, timebase = QEMU_GICD, QEMU_GICR, QEMU_TIMEBASE
+        if ginkgo:
+            gicr_size = QEMU_GICR_SIZE
     seed = seed if seed is not None else os.urandom(64)
     phandle = iter(range(1, 1000))
     ph = lambda: ('AAPL,phandle', u32(next(phandle)))
@@ -187,7 +192,7 @@ def build(seed=None, qemu=False, highmem=False, board='sweet'):
         ('compatible', cstr('arm,gic-v3')),
         ('interrupt-controller', b''),
         ('virtual-timer-intid', u32(QEMU_VTIMER_INTID if qemu else VTIMER_INTID)),
-        ('reg', u64(gicd - SOC_BASE, GICD_SIZE, gicr - SOC_BASE, GICR_SIZE)),
+        ('reg', u64(gicd - SOC_BASE, GICD_SIZE, gicr - SOC_BASE, gicr_size)),
     ])
     arm_io = node('arm-io', [
         ph(),

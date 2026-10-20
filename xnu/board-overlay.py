@@ -53,6 +53,10 @@ EDITS = {
         ('0065-sweet-smp-psci.patch',
          '+\tif (topology->boot_cpu->cpu_id != 0 || topology->boot_cpu->phys_id != 0) {\n',
          '+\tif (topology->boot_cpu->cpu_id != 0 || topology->boot_cpu->phys_id != 0x100) {\n'),
+        # SweetCPU matches the ADT cpu nodes' compatible (mkadt.py: kryo260 on ginkgo).
+        ('0018-sweet-boot-cpu-driver.patch',
+         '+    "     \'IONameMatch\'     = \'qcom,kryo470\';"\n',
+         '+    "     \'IONameMatch\'     = \'qcom,kryo260\';"\n'),
         ('0078-sweet-smp-8-cores.patch',
          '+\tif (cpu->phys_id > 0x700 || (cpu->phys_id & 0xff) != 0 ||\n',
          '+\tif ((cpu->phys_id & ~0x3u) != 0x100 ||\n'),
