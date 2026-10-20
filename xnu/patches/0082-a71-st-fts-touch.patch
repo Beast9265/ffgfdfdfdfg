@@ -1,0 +1,170 @@
+--- a/bsd/dev/sweet_touch.c	2026-10-21 03:58:57
++++ b/bsd/dev/sweet_touch.c	2026-10-21 04:00:19
+@@ -32,11 +32,28 @@
+ #define TOUCH_MAX        10u
+ #define TOUCH_GOODIX     1
+ #define TOUCH_FTS        2
++#define TOUCH_ST_FTS     3
+ /* GT9896 is Yellowstone in Xiaomi sweet-r-oss, not the Berlin protocol. */
+ #define GOODIX_PID_REG   0x4022u
+ #define GOODIX_EVENT_REG 0x4180u
+ #define GOODIX_HEAD_LEN  8u
+ #define GOODIX_POINT_LEN 8u
++/*
++ * STMicroelectronics "FTS" family (board's st_fts@49, e.g. FTS5CU56A on
++ * Samsung a71/sdmmagpie variants). A 16-byte event FIFO, not a register
++ * snapshot: 0x60 reads one event plus the remaining queue depth in
++ * byte[7] bits[4:0]; 0x61 drains the rest. event_id = byte[0] bits[1:0]
++ * (0 = coordinate). Protocol decoded from Samsung's GPL kernel source for
++ * this exact chip (drivers/input/touchscreen/stm/fts5cu56a/fts_ts.c),
++ * not from a public datasheet. Same QUP SE7 bus and reset/IRQ GPIOs (8/9)
++ * as the Goodix path above: board wiring is shared, only the IC differs.
++ */
++#define STFTS_I2C_ADDR     0x49u
++#define STFTS_EVENT_SIZE   16u
++#define STFTS_CMD_READ_ONE 0x60u
++#define STFTS_CMD_READ_ALL 0x61u
++#define STFTS_FIFO_MAX     8u    /* bound; vendor driver's cap is similar */
++#define STFTS_EVT_COORDINATE 0u
+ 
+ #define SE_STATUS       0x040u
+ #define SE_MCLK         0x048u
+@@ -482,7 +499,80 @@
+ 	}
+ 	if (active != n) {
+ 		return EIO;
++	}
++	touch_report(mask, x, y);
++	return 0;
++}
++
++/*
++ * One pass: read the event FIFO (one event, then the rest if queued),
++ * fold coordinate events into a final per-finger mask like the Goodix/
++ * Focaltech paths, and report once. Non-coordinate events (status,
++ * gesture, vendor) are read to drain the FIFO but otherwise ignored:
++ * no AOD/gesture support is implemented here.
++ */
++static int
++touch_st_fts(void)
++{
++	uint8_t data[(STFTS_FIFO_MAX + 1u) * STFTS_EVENT_SIZE];
++	int x[TOUCH_MAX] = {0}, y[TOUCH_MAX] = {0};
++	uint32_t mask = 0, touched = 0;
++
++	int err = touch_read(STFTS_I2C_ADDR, STFTS_CMD_READ_ONE, false,
++	    data, STFTS_EVENT_SIZE);
++	if (err) {
++		return err;
++	}
++	unsigned left = data[7] & 0x1fu;
++	if (left > STFTS_FIFO_MAX) {
++		return EIO; /* implausible queue depth: untrusted byte */
++	}
++	if (left) {
++		err = touch_read(STFTS_I2C_ADDR, STFTS_CMD_READ_ALL, false,
++		    data + STFTS_EVENT_SIZE, STFTS_EVENT_SIZE * left);
++		if (err) {
++			return err;
++		}
++	}
++	mask = st.active;
++	for (unsigned ev = 0; ev <= left; ++ev) {
++		const uint8_t *p = data + ev * STFTS_EVENT_SIZE;
++		unsigned eid = p[0] & 3u;
++		if (eid != STFTS_EVT_COORDINATE) {
++			continue;
++		}
++		unsigned tid = (p[0] >> 2) & 0xfu;
++		unsigned action = (p[0] >> 6) & 3u; /* 0 none,1 press,2 move,3 release */
++		if (tid >= TOUCH_MAX) {
++			return EIO;
++		}
++		if (action == 3u) {
++			mask &= ~(1u << tid);
++			continue;
++		}
++		if (action != 1u && action != 2u) {
++			continue; /* "none": no state change */
++		}
++		unsigned px = ((unsigned)p[1] << 4) | (p[3] & 0xfu);
++		unsigned py = ((unsigned)p[2] << 4) | ((p[3] >> 4) & 0xfu);
++		if (px > 1079u || py > 2399u) {
++			return EIO;
++		}
++		/* st,x-flip / st,y-flip in the board's overlay: the IC's native
++		 * axes are mirrored against the panel sweetfb presents. */
++		x[tid] = (int)(1079u - px);
++		y[tid] = (int)(2399u - py);
++		mask |= 1u << tid;
++		touched |= 1u << tid;
+ 	}
++	/* Carry forward last-known coordinates for ids not touched this pass
++	 * (a release-only or status-only batch), as touch_report expects. */
++	for (unsigned id = 0; id < TOUCH_MAX; ++id) {
++		if ((mask & (1u << id)) && !(touched & (1u << id))) {
++			x[id] = st.x[id];
++			y[id] = st.y[id];
++		}
++	}
+ 	touch_report(mask, x, y);
+ 	return 0;
+ }
+@@ -599,23 +689,51 @@
+ 	int fe2 = touch_read(0x38, 0x9f, false, &fid2, 1);
+ 	printf("SWEET TOUCH: probe 0x38 err=%d/%d chip-id=%02x:%02x irq=%#x\n",
+ 	    fe1, fe2, fid1, fid2, st.irq_status);
++	/*
++	 * ST's "FTS" family has no static ID register at a known offset (it
++	 * identifies itself through the event stream, not a readable product
++	 * string); accept a clean FIFO read at its address as the signal,
++	 * same rigor as checking for a specific byte pattern elsewhere here.
++	 */
++	uint8_t stf[STFTS_EVENT_SIZE] = {0};
++	int se = touch_read(STFTS_I2C_ADDR, STFTS_CMD_READ_ONE, false, stf, sizeof(stf));
++	bool st_fts_all_ff = true, st_fts_all_00 = true;
++	for (unsigned i = 0; i < sizeof(stf); ++i) {
++		if (stf[i] != 0xffu) {
++			st_fts_all_ff = false;
++		}
++		if (stf[i] != 0x00u) {
++			st_fts_all_00 = false;
++		}
++	}
++	/* No static ID register at a known offset to check (unlike the two
++	 * probes above): accept a clean ack whose queue-depth field is in
++	 * range and whose body isn't a bus-float sentinel (all 0xff/0x00). */
++	bool st_fts_plausible = !se && (stf[7] & 0x1fu) <= STFTS_FIFO_MAX &&
++	    !st_fts_all_ff && !st_fts_all_00;
++	printf("SWEET TOUCH: probe 0x49 err=%d event0=%02x%02x%02x%02x irq=%#x\n",
++	    se, stf[0], stf[1], stf[2], stf[3], st.irq_status);
+ 	st.probing = false;
+ 	bool goodix = !ge && gid[0] == '9' && gid[1] == '8' && gid[2] == '9' && gid[3] == '6';
+ 	bool fts = !fe1 && !fe2 && fid1 == 0x54 && fid2 == 0x52;
+-	if (st.dead || goodix == fts) {
+-		printf("SWEET TOUCH: no unique supported IC (goodix=%d fts=%d dead=%d); stopping\n",
+-		    goodix, fts, st.dead);
++	bool st_fts = st_fts_plausible && !goodix && !fts;
++	unsigned found = (unsigned)goodix + (unsigned)fts + (unsigned)st_fts;
++	if (st.dead || found != 1u) {
++		printf("SWEET TOUCH: no unique supported IC (goodix=%d fts=%d st_fts=%d dead=%d); stopping\n",
++		    goodix, fts, st_fts, st.dead);
+ 		goto out;
+ 	}
+-	st.kind = goodix ? TOUCH_GOODIX : TOUCH_FTS;
++	st.kind = goodix ? TOUCH_GOODIX : (fts ? TOUCH_FTS : TOUCH_ST_FTS);
+ 	printf("SWEET TOUCH: selected %s, 1080x2400, poll=10ms irq-hint=%d\n",
+-	    goodix ? "GT9896 Yellowstone" : "Focaltech 54:52", st.irq_hint);
++	    goodix ? "GT9896 Yellowstone" : (fts ? "Focaltech 54:52" : "ST FTS5CU56A"),
++	    st.irq_hint);
+ 	unsigned errors = 0, ticks = 0;
+ 	while (!st.dead) {
+ 		/* Optional IRQ hint still reads every 100ms, and always while down. */
+ 		if (!st.irq_hint || st.active || !(touch_rd(st.gpio, TOUCH_GPIO_IO(9)) & 1u) ||
+ 		    (++ticks % 10u) == 0) {
+-			int err = st.kind == TOUCH_GOODIX ? touch_goodix() : touch_focaltech();
++			int err = st.kind == TOUCH_GOODIX ? touch_goodix() :
++			    st.kind == TOUCH_FTS ? touch_focaltech() : touch_st_fts();
+ 			if (err) {
+ 				if ((errors++ % 100u) == 0) {
+ 					printf("SWEET TOUCH: report err=%d irq=%#x\n", err, st.irq_status);
