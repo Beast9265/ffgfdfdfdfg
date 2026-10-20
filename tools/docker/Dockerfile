@@ -7,7 +7,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu gcc libc6-dev make \
         qemu-system-arm python3 cpio gzip gawk android-sdk-libsparse-utils \
-        device-tree-compiler llvm file xxd ca-certificates curl \
+        device-tree-compiler llvm clang git patch file xxd ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 # Ubuntu's mkbootimg package lacks its gki module: use AOSP's
 RUN mkdir -p /opt/mkbootimg \
