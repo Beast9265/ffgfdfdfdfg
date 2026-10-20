@@ -1,11 +1,11 @@
---- a/bsd/dev/sweet_touch.c	2026-10-21 03:58:57
-+++ b/bsd/dev/sweet_touch.c	2026-10-21 04:00:19
+--- a/bsd/dev/a71_touch.c	2026-10-21 03:58:57
++++ b/bsd/dev/a71_touch.c	2026-10-21 04:00:19
 @@ -32,11 +32,28 @@
  #define TOUCH_MAX        10u
  #define TOUCH_GOODIX     1
  #define TOUCH_FTS        2
 +#define TOUCH_ST_FTS     3
- /* GT9896 is Yellowstone in Xiaomi sweet-r-oss, not the Berlin protocol. */
+ /* GT9896 is Yellowstone in Xiaomi a71-r-oss, not the Berlin protocol. */
  #define GOODIX_PID_REG   0x4022u
  #define GOODIX_EVENT_REG 0x4180u
  #define GOODIX_HEAD_LEN  8u
@@ -93,7 +93,7 @@
 +			return EIO;
 +		}
 +		/* st,x-flip / st,y-flip in the board's overlay: the IC's native
-+		 * axes are mirrored against the panel sweetfb presents. */
++		 * axes are mirrored against the panel a71fb presents. */
 +		x[tid] = (int)(1079u - px);
 +		y[tid] = (int)(2399u - py);
 +		mask |= 1u << tid;
@@ -112,7 +112,7 @@
  }
 @@ -599,23 +689,51 @@
  	int fe2 = touch_read(0x38, 0x9f, false, &fid2, 1);
- 	printf("SWEET TOUCH: probe 0x38 err=%d/%d chip-id=%02x:%02x irq=%#x\n",
+ 	printf("A71 TOUCH: probe 0x38 err=%d/%d chip-id=%02x:%02x irq=%#x\n",
  	    fe1, fe2, fid1, fid2, st.irq_status);
 +	/*
 +	 * ST's "FTS" family has no static ID register at a known offset (it
@@ -136,24 +136,24 @@
 +	 * range and whose body isn't a bus-float sentinel (all 0xff/0x00). */
 +	bool st_fts_plausible = !se && (stf[7] & 0x1fu) <= STFTS_FIFO_MAX &&
 +	    !st_fts_all_ff && !st_fts_all_00;
-+	printf("SWEET TOUCH: probe 0x49 err=%d event0=%02x%02x%02x%02x irq=%#x\n",
++	printf("A71 TOUCH: probe 0x49 err=%d event0=%02x%02x%02x%02x irq=%#x\n",
 +	    se, stf[0], stf[1], stf[2], stf[3], st.irq_status);
  	st.probing = false;
  	bool goodix = !ge && gid[0] == '9' && gid[1] == '8' && gid[2] == '9' && gid[3] == '6';
  	bool fts = !fe1 && !fe2 && fid1 == 0x54 && fid2 == 0x52;
 -	if (st.dead || goodix == fts) {
--		printf("SWEET TOUCH: no unique supported IC (goodix=%d fts=%d dead=%d); stopping\n",
+-		printf("A71 TOUCH: no unique supported IC (goodix=%d fts=%d dead=%d); stopping\n",
 -		    goodix, fts, st.dead);
 +	bool st_fts = st_fts_plausible && !goodix && !fts;
 +	unsigned found = (unsigned)goodix + (unsigned)fts + (unsigned)st_fts;
 +	if (st.dead || found != 1u) {
-+		printf("SWEET TOUCH: no unique supported IC (goodix=%d fts=%d st_fts=%d dead=%d); stopping\n",
++		printf("A71 TOUCH: no unique supported IC (goodix=%d fts=%d st_fts=%d dead=%d); stopping\n",
 +		    goodix, fts, st_fts, st.dead);
  		goto out;
  	}
 -	st.kind = goodix ? TOUCH_GOODIX : TOUCH_FTS;
 +	st.kind = goodix ? TOUCH_GOODIX : (fts ? TOUCH_FTS : TOUCH_ST_FTS);
- 	printf("SWEET TOUCH: selected %s, 1080x2400, poll=10ms irq-hint=%d\n",
+ 	printf("A71 TOUCH: selected %s, 1080x2400, poll=10ms irq-hint=%d\n",
 -	    goodix ? "GT9896 Yellowstone" : "Focaltech 54:52", st.irq_hint);
 +	    goodix ? "GT9896 Yellowstone" : (fts ? "Focaltech 54:52" : "ST FTS5CU56A"),
 +	    st.irq_hint);
@@ -167,4 +167,4 @@
 +			    st.kind == TOUCH_FTS ? touch_focaltech() : touch_st_fts();
  			if (err) {
  				if ((errors++ % 100u) == 0) {
- 					printf("SWEET TOUCH: report err=%d irq=%#x\n", err, st.irq_status);
+ 					printf("A71 TOUCH: report err=%d irq=%#x\n", err, st.irq_status);
