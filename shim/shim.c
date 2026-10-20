@@ -26,8 +26,6 @@
 #define GICR_ISPENDR0		(GICR_SGI + 0x200)
 #define GICR_ISACTIVER0		(GICR_SGI + 0x300)
 #define GICR_ICFGR1		(GICR_SGI + 0xc04)
-#define VTIMER_INTID		19	/* DT: <GIC_PPI 3 ...>, not the usual 27 */
-#define PTIMER_INTID		18	/* DT: <GIC_PPI 2 ...> */
 #define SGI_INTID		1
 
 #define PSCI_VERSION		0x84000000UL
@@ -76,7 +74,7 @@ static uint64_t smc(uint64_t fn, uint64_t a1, uint64_t a2, uint64_t a3)
 	register uint64_t x1 __asm__("x1") = a1;
 	register uint64_t x2 __asm__("x2") = a2;
 	register uint64_t x3 __asm__("x3") = a3;
-	__asm__ volatile("smc #0"
+	__asm__ volatile(PSCI_CALL
 			 : "+r"(x0), "+r"(x1), "+r"(x2), "+r"(x3)
 			 :
 			 : "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11",
