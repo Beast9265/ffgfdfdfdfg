@@ -8,6 +8,8 @@ atomics and no PAN. The SWEET machine config targets ARMv8.2 (A55/A76).
 The early framebuffer console (0010, 0012) hard-codes sweet's splash
 address 0x9c000000, which is kernel RAM on ginkgo (splash at 0x5c000000,
 1080x2340). 0012's context lines repeat 0010's result, so both change.
+The A53s cannot use xnu's 16K pages, so the kernel's CPU topology checks
+(0065, 0078) accept the A73 cluster instead of sweet's Aff1 numbering.
 Each edit replaces one line in place, so hunk line counts stay valid.
 """
 import os, sys
@@ -44,6 +46,14 @@ EDITS = {
         ('0012-sweet-keep-debug-console-after-ttbr0.patch',
          ' #define EARLY_HEIGHT 2400u\n',
          ' #define EARLY_HEIGHT 2340u\n'),
+        # Cortex-A53 has no 16K granule: xnu runs on the four A73s only
+        # (MPIDR 0x100-0x103); the shim starts it on 0x100 (shim/board.h).
+        ('0065-sweet-smp-psci.patch',
+         '+\tif (topology->boot_cpu->cpu_id != 0 || topology->boot_cpu->phys_id != 0) {\n',
+         '+\tif (topology->boot_cpu->cpu_id != 0 || topology->boot_cpu->phys_id != 0x100) {\n'),
+        ('0078-sweet-smp-8-cores.patch',
+         '+\tif (cpu->phys_id > 0x700 || (cpu->phys_id & 0xff) != 0 ||\n',
+         '+\tif ((cpu->phys_id & ~0x3u) != 0x100 ||\n'),
     ],
 }
 

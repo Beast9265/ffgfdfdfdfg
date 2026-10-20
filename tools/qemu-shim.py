@@ -6,11 +6,53 @@ as ABL does on the phone. Without a SWEETXNU payload it runs its
 diagnostics; with --cpu cortex-a53 the ISA line must read lse=0 pan=0.
 
   qemu-shim.py shim/out/Image OUTDIR [--cpu cortex-a53] [--smp 8] [--secs 8] [--initrd FILE]
+               [--test-payload]
+
+--test-payload (needs aarch64-linux-gnu-as/objcopy): instead of xnu, a tiny
+SWEETXNU payload that paints a green band through boot_args->Video and
+stores the MPIDR of the core it runs on; checks the loader and the
+BOARD_XNU_MPIDR hand-off end to end.
 """
-import argparse, json, os, socket, struct, subprocess, sys, time, zlib
+import argparse, json, os, socket, struct, subprocess, sys, tempfile, time, zlib
 
 FB_BASE, FB_W, FB_H = 0x5c000000, 1080, 2340
 FB_STRIDE = FB_W * 4
+
+TEST_PHYS = 0x80000000
+TEST_CODE_OFF, TEST_ADT_OFF, TEST_MARK = 0x1000, 0x2000, 0x800
+TEST_ASM = f"""
+	ldr	x1, [x0, #40]		// boot_args->Video.v_baseAddr
+	mrs	x2, mpidr_el1
+	movz	w3, #0xff00
+	movk	w3, #0xff00, lsl #16	// green
+	ldr	x4, ={FB_W * 200}
+1:	str	w3, [x1], #4
+	subs	x4, x4, #1
+	b.ne	1b
+	ldr	x5, ={TEST_PHYS + TEST_MARK}
+	orr	x2, x2, #(1 << 63)
+	str	x2, [x5]
+	str	x0, [x5, #8]
+2:	wfe
+	b	2b
+	.ltorg
+"""
+
+
+def test_payload(path):
+    """SWEETXNU v1 payload (tools/mkpayload.py layout) around TEST_ASM."""
+    with tempfile.TemporaryDirectory() as d:
+        open(f'{d}/t.S', 'w').write(TEST_ASM)
+        subprocess.check_call(['aarch64-linux-gnu-as', '-o', f'{d}/t.o', f'{d}/t.S'])
+        subprocess.check_call(['aarch64-linux-gnu-objcopy', '-O', 'binary', '-j', '.text', f'{d}/t.o', f'{d}/t.bin'])
+        code = open(f'{d}/t.bin', 'rb').read()
+    assert len(code) <= TEST_MARK
+    hdr = b'SWEETXNU' + struct.pack('<2I7Q', 1, 1, TEST_PHYS, TEST_PHYS, TEST_ADT_OFF, 16,
+                                    TEST_PHYS + 0x4000, TEST_PHYS, 0x10000000)
+    hdr += b'test'.ljust(608, b'\0') + struct.pack('<4Q', TEST_PHYS, 0x4000, TEST_CODE_OFF, len(code))
+    blob = hdr.ljust(TEST_CODE_OFF, b'\0') + code
+    blob = blob.ljust(TEST_ADT_OFF, b'\0') + b'\0' * 16
+    open(path, 'wb').write(blob)
 
 
 def write_png(path, raw):
@@ -54,15 +96,19 @@ def main():
     ap.add_argument('--smp', type=int, default=8)
     ap.add_argument('--secs', type=float, default=8)
     ap.add_argument('--initrd', help='ramdisk (default: none; the shim then reports "no initrd")')
+    ap.add_argument('--test-payload', action='store_true', help='boot a tiny test payload instead of xnu')
     a = ap.parse_args()
 
     out = os.path.abspath(a.outdir)
     os.makedirs(out, exist_ok=True)
+    if a.test_payload:
+        a.initrd = f'{out}/test-payload.bin'
+        test_payload(a.initrd)
     mon = f'{out}/qmp.sock'
     if os.path.exists(mon):
         os.unlink(mon)
     cmd = ['qemu-system-aarch64', '-M', 'virt,gic-version=3', '-cpu', a.cpu, '-smp', str(a.smp), '-m', '4G',
-           '-nographic', '-serial', 'none', '-monitor', 'none', '-qmp', f'unix:{mon},server,nowait',
+           '-nographic', '-nic', 'none', '-serial', 'none', '-monitor', 'none', '-qmp', f'unix:{mon},server,nowait',
            '-d', 'int,guest_errors,unimp', '-D', f'{out}/qemu.log', '-no-reboot', '-kernel', a.image]
     if a.initrd:
         cmd += ['-initrd', a.initrd]
@@ -74,8 +120,9 @@ def main():
         if p.poll() is not None:
             print(f'qemu exited early: {p.returncode}', file=sys.stderr)
             return 1
-        _, regs, _ = qmp(mon, ('stop', {}), ('human-monitor-command', {'command-line': 'info registers'}),
-                         ('pmemsave', {'val': FB_BASE, 'size': FB_STRIDE * FB_H, 'filename': f'{out}/fb.raw'}))
+        _, regs, _, _ = qmp(mon, ('stop', {}), ('human-monitor-command', {'command-line': 'info registers -a'}),
+                            ('pmemsave', {'val': FB_BASE, 'size': FB_STRIDE * FB_H, 'filename': f'{out}/fb.raw'}),
+                            ('pmemsave', {'val': TEST_PHYS + TEST_MARK, 'size': 16, 'filename': f'{out}/mark.raw'}))
         open(f'{out}/regs.txt', 'w').write(regs.get('return', str(regs)))
     finally:
         if p.poll() is None:
@@ -83,8 +130,17 @@ def main():
             p.wait()
     write_png(f'{out}/fb.png', open(f'{out}/fb.raw', 'rb').read())
     os.unlink(f'{out}/fb.raw')
+    mpidr, x0 = struct.unpack('<2Q', open(f'{out}/mark.raw', 'rb').read())
+    os.unlink(f'{out}/mark.raw')
+    rc = 0
+    if a.test_payload:
+        if mpidr >> 63:
+            print(f'test payload ran on MPIDR {mpidr & 0xffffff:#x} with x0 (boot_args) = {x0:#x}')
+        else:
+            print('test payload did not run')
+            rc = 1
     print(f'{out}/fb.png  {out}/regs.txt  {out}/qemu.log', file=sys.stderr)
-    return 0
+    return rc
 
 
 if __name__ == '__main__':

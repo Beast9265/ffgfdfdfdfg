@@ -5,6 +5,8 @@
  * BOARD_MPIDR(i): MPIDR (Aff1:Aff0) of physical core i, the value PSCI
  * CPU_ON expects. IMEM_RESTART_REASON / PSHOLD: 0 = not known for the
  * board yet; reset() then relies on PSCI SYSTEM_RESET alone.
+ * BOARD_XNU_MPIDR: if defined, xnu is started on that core with PSCI
+ * CPU_ON (x0 = boot_args) instead of on the core ABL entered us on.
  */
 
 /* Qualcomm numbers the architected timer PPIs 1/2/3/0, not the usual 13/14/11/10 */
@@ -25,6 +27,7 @@
 #define FB_W			1080
 #define FB_H			2340
 #define BOARD_MPIDR(i)		((uint64_t)(i))
+#define BOARD_XNU_MPIDR		4UL		/* exercises the ginkgo hand-off */
 #define BOARD_HAS_UFS		0
 #define IMEM_RESTART_REASON	0UL
 #define PSHOLD			0UL
@@ -44,6 +47,8 @@
 #define FB_W			1080
 #define FB_H			2340
 #define BOARD_MPIDR(i)		((((uint64_t)(i) >> 2) << 8) | ((uint64_t)(i) & 3))
+/* ABL enters on cpu0, a Cortex-A53: no 16K granule. The A73s have it. */
+#define BOARD_XNU_MPIDR		0x100UL
 #define BOARD_HAS_UFS		0		/* eMMC on sdhc_1 */
 #define IMEM_RESTART_REASON	0UL		/* TODO: qcom,msm-imem restart_reason from the stock DTB */
 #define PSHOLD			0UL		/* TODO: qcom,pshold from the stock DTB */

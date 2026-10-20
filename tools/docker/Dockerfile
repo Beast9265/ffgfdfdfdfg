@@ -6,6 +6,12 @@ FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu gcc libc6-dev make \
-        qemu-system-arm python3 cpio gzip mkbootimg android-sdk-libsparse-utils \
-        device-tree-compiler llvm file xxd ca-certificates \
+        qemu-system-arm python3 cpio gzip gawk android-sdk-libsparse-utils \
+        device-tree-compiler llvm file xxd ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
+# Ubuntu's mkbootimg package lacks its gki module: use AOSP's
+RUN mkdir -p /opt/mkbootimg \
+    && curl -fsSL https://android.googlesource.com/platform/system/tools/mkbootimg/+archive/refs/heads/main.tar.gz \
+       | tar xz -C /opt/mkbootimg \
+    && ln -sf /opt/mkbootimg/mkbootimg.py /usr/local/bin/mkbootimg \
+    && ln -sf /opt/mkbootimg/unpack_bootimg.py /usr/local/bin/unpack_bootimg

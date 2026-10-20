@@ -4,6 +4,8 @@
 
 **Nothing below has run on a ginkgo yet.** The user's phone: bootloader still locked (Mi Unlock pending), stock DTB not extracted, no backups yet.
 
+**16K PAGES: Cortex-A53 has no 16K translation granule (TRM: ID_AA64MMFR0_EL1.TGran16 = 0), Cortex-A73 has it (TGran16 = 1).** Found in QEMU (cortex-a53: the shim's 16K MMU test took a permission-fault loop). xnu/iOS need 16K, so on ginkgo **xnu runs on the four A73s only**: ADT lists cpu0-3 = MPIDR 0x100-0x103; the shim (entered by ABL on cpu0, an A53) starts xnu with PSCI CPU_ON on 0x100 (x0 = boot_args) and turns itself off (`BOARD_XNU_MPIDR`); the overlay adapts the kernel topology checks (0065 boot MPIDR 0x100, 0078 A73 cluster). Boot ginkgo with `cpus=4` at most. Qualcomm TZ allowing CPU_OFF of cpu0 is unverified (if CPU_OFF fails the shim parks cpu0 in WFE).
+
 Hardware differences from sweet (source: mainline `sm6125.dtsi`, `sm6125-xiaomi-ginkgo-common.dtsi`; touch from the 2026-09 LKML RFC "sm6125-ginkgo: display, backlight, and touch support"):
 - CPU: 4x Cortex-A53 (MPIDR 0x000-0x003) + 4x Cortex-A73 (0x100-0x103) = **ARMv8.0: no LSE atomics, no PAN, no RCpc**. Biggest risk: if the iOS 16.7.16 iPhone X arm64 userland/shared cache uses LSE or LDAPR, every such instruction traps on ginkgo. Check with `tools/check-isa.py dyld_shared_cache_arm64*` before anything else (not run yet; needs the extracted cache).
 - RAM from 0x40000000; fixed carve-outs end below 0x61a00000, sdsp/adsp at 0xf3000000 -> kernel range 0x62000000-0xf3000000 (2.27 GiB, fits the 3 GiB variant).
@@ -19,7 +21,9 @@ Done on the branch (not booted):
 - Kernel: workflow input `board=ginkgo` runs `xnu/board-overlay.py` on the copied patches: `-march=armv8-a+crypto -DSWEET_GINKGO`, no `__ARM_PAN_AVAILABLE__`, early fb console (0010/0012) at 0x5c000000 / 2340 lines (sweet's 0x9c000000 is kernel RAM on ginkgo). Artifact `xnu-kernel-ginkgo`. Not built yet.
 - `tools/check-isa.py`: counts LSE/RCpc/PAN/PAuth/RDM/DotProd/FP16 instructions in Mach-O files and shared caches (encodings checked against Capstone, 1M random words).
 
-First ginkgo boot must disable the sweet drivers that poke sweet MMIO: `sweetusb=0 sweetkeys=0 sweettouch=0`, and `cpus=1` (0078's topology check expects sweet's Aff1 numbering). No root device yet (no eMMC driver): next milestone is a RAM-disk root like the QEMU test (`tools/mkinit.py`).
+**QEMU / Docker test setup (2026-10-20, Windows host with Docker Desktop):** `docker build -t ios-sweet-dev tools/docker` (Ubuntu 24.04: aarch64 gcc, QEMU 8.2, AOSP mkbootimg; Ubuntu's mkbootimg package is broken). `.gitattributes` forces LF (CRLF checkouts broke every script in Linux). `BOARD=qemu` shim = ginkgo framebuffer layout + virt GIC/timer PPIs/HVC PSCI + hand-off to MPIDR 4; `tools/qemu-shim.py IMAGE OUT --cpu cortex-a53 [--test-payload]`. Results: shim builds without warnings for sweet/ginkgo/qemu (ginkgo also with HEADER_VERSION=1); cortex-a53 x8: lse=0 pan=0, tg16=0 on all cores, MMU test skipped, vtimer 29 IRQs/300 ms, 10/10 SGIs, no aborts; test payload hand-off ran on MPIDR 0x4 with x0 = boot_args; cortex-a76: 16K MMU test rc=0. QEMU cannot model A73 (ARMv8.0 + 16K): kernel checks = cortex-a76 in QEMU for function plus `tools/check-isa.py` on the kernel for LSE/PAN.
+
+First ginkgo boot must disable the sweet drivers that poke sweet MMIO: `sweetusb=0 sweetkeys=0 sweettouch=0`, and `cpus=1` first (then up to 4). No root device yet (no eMMC driver): next milestone is a RAM-disk root like the QEMU test (`tools/mkinit.py`).
 
 Next steps: (1) user: unlock bootloader, back up partitions, send `adb shell cat /proc/cpuinfo` and the stock boot.img; (2) boot the diagnostic shim (no payload) -> confirms ISA, GIC, PSCI, MPIDRs; (3) run check-isa.py on the shared cache; (4) CI kernel `board=ginkgo`, boot to the RAM-disk init; (5) eMMC driver, then keys, Novatek SPI touch.
 

@@ -149,15 +149,13 @@ def build(seed=None, qemu=False, highmem=False, board='sweet'):
     # 6-7 Cortex-A76), one homogeneous cluster. The kernel defaults to one
     # and uses cpus=N to select an initial prefix (N <= 8).
     # QEMU retains its original single-CPU tree: its MPIDRs differ from sweet.
-    # GINKGO: cpu0-3 Cortex-A53 (MPIDR 0x000-0x003), cpu4-7 Cortex-A73
-    # (0x100-0x103), one L2 per cluster, no L3. Still described as one SMP
-    # cluster; patch 0078's topology check expects sweet's Aff1 numbering,
-    # so boot ginkgo with cpus=1 until the kernel side is adapted.
+    # GINKGO: only the Cortex-A73 cluster (MPIDR 0x100-0x103, shared L2).
+    # The A53s (0x000-0x003) have no 16K translation granule; the shim
+    # starts xnu on 0x100 (shim/board.h BOARD_XNU_MPIDR).
     cpu_nodes = []
-    for core in range(1 if qemu else 8):
+    for core in range(1 if qemu else 4 if ginkgo else 8):
         if ginkgo:
-            mpidr, l2, compat = ((core >> 2) << 8) | (core & 3), core >> 2, 'qcom,kryo260'
-            clock = 2000000000 if core >= 4 else 1804800000
+            mpidr, l2, compat, clock = 0x100 | core, 0, 'qcom,kryo260', 2000000000
         else:
             mpidr, l2, compat = core << 8, core, 'qcom,kryo470'  # distinct per-core L2 nodes in live FDT
             clock = 2304000000 if core >= 6 else 1804800000
