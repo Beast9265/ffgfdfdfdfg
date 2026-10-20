@@ -5,7 +5,7 @@ The shim is entered like a Linux Image (EL1, x0 = DTB, initrd in /chosen),
 as ABL does on the phone. Without a SWEETXNU payload it runs its
 diagnostics; with --cpu cortex-a53 the ISA line must read lse=0 pan=0.
 
-  qemu-shim.py shim/out/Image OUTDIR [--cpu cortex-a53] [--smp 8] [--secs 8] [--initrd FILE]
+  qemu-shim.py shim/out/Image OUTDIR [--cpu cortex-a53] [--smp 8] [--secs 8] [--initrd FILE] [--live PORT]
                [--test-payload]
 
 --test-payload (needs aarch64-linux-gnu-as/objcopy): instead of xnu, a tiny
@@ -55,7 +55,35 @@ def test_payload(path):
     open(path, 'wb').write(blob)
 
 
-def write_png(path, raw):
+LIVE_HTML = b'''<!doctype html><meta charset="utf-8"><title>ginkgo QEMU screen</title>
+<body style="margin:0;background:#222;display:flex;justify-content:center">
+<img id="s" src="fb.png" style="height:100vh;image-rendering:auto">
+<script>
+const s = document.getElementById('s');
+setInterval(() => { const n = new Image(); n.onload = () => { s.src = n.src; };
+  n.src = 'fb.png?' + Date.now(); }, 1000);
+</script>'''
+
+
+def serve_live(out, port):
+    """Serve OUT/index.html (self-refreshing) and OUT/fb.png on 0.0.0.0:PORT."""
+    import functools, http.server, threading
+    open(f'{out}/index.html', 'wb').write(LIVE_HTML)
+
+    class Quiet(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def end_headers(self):
+            self.send_header('Cache-Control', 'no-store')
+            super().end_headers()
+
+    srv = http.server.ThreadingHTTPServer(('0.0.0.0', port), functools.partial(Quiet, directory=out))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    print(f'live screen: http://localhost:{port}/', file=sys.stderr)
+
+
+def write_png(path, raw, level=6):
     rows = []
     for y in range(FB_H):
         line = raw[y * FB_STRIDE:(y + 1) * FB_STRIDE]
@@ -64,8 +92,9 @@ def write_png(path, raw):
         rows.append(b'\0' + bytes(rgb))
     chunk = lambda t, d: struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d))
     png = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', FB_W, FB_H, 8, 2, 0, 0, 0))
-    png += chunk(b'IDAT', zlib.compress(b''.join(rows), 6)) + chunk(b'IEND', b'')
-    open(path, 'wb').write(png)
+    png += chunk(b'IDAT', zlib.compress(b''.join(rows), level)) + chunk(b'IEND', b'')
+    open(path + '.tmp', 'wb').write(png)
+    os.replace(path + '.tmp', path)
 
 
 def qmp(sock_path, *cmds):
@@ -97,6 +126,8 @@ def main():
     ap.add_argument('--secs', type=float, default=8)
     ap.add_argument('--initrd', help='ramdisk (default: none; the shim then reports "no initrd")')
     ap.add_argument('--test-payload', action='store_true', help='boot a tiny test payload instead of xnu')
+    ap.add_argument('--live', type=int, metavar='PORT',
+                    help='serve the screen at http://localhost:PORT/, refreshed every second (no exception log)')
     a = ap.parse_args()
 
     out = os.path.abspath(a.outdir)
@@ -109,14 +140,23 @@ def main():
         os.unlink(mon)
     cmd = ['qemu-system-aarch64', '-M', 'virt,gic-version=3', '-cpu', a.cpu, '-smp', str(a.smp), '-m', '4G',
            '-nographic', '-nic', 'none', '-serial', 'none', '-monitor', 'none', '-qmp', f'unix:{mon},server,nowait',
-           '-d', 'int,guest_errors,unimp', '-D', f'{out}/qemu.log', '-no-reboot', '-kernel', a.image]
+           '-d', 'guest_errors,unimp' if a.live else 'int,guest_errors,unimp', '-D', f'{out}/qemu.log',
+           '-no-reboot', '-kernel', a.image]
     if a.initrd:
         cmd += ['-initrd', a.initrd]
     p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL)
     try:
+        if a.live:
+            serve_live(out, a.live)
         t0 = time.time()
         while p.poll() is None and time.time() - t0 < a.secs:
-            time.sleep(0.2)
+            if a.live:
+                time.sleep(1)
+                if os.path.exists(mon):
+                    qmp(mon, ('pmemsave', {'val': FB_BASE, 'size': FB_STRIDE * FB_H, 'filename': f'{out}/live.raw'}))
+                    write_png(f'{out}/fb.png', open(f'{out}/live.raw', 'rb').read(), level=1)
+            else:
+                time.sleep(0.2)
         if p.poll() is not None:
             print(f'qemu exited early: {p.returncode}', file=sys.stderr)
             return 1
