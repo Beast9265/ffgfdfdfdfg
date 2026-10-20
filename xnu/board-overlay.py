@@ -5,6 +5,8 @@ Usage: board-overlay.py BOARD PATCH_DIR   (BOARD: sweet = no changes, ginkgo)
 
 ginkgo (Redmi Note 8, SM6125) has Cortex-A53/A73 cores: ARMv8.0, so no LSE
 atomics and no PAN. The SWEET machine config targets ARMv8.2 (A55/A76).
+-march alone is not enough: with -arch arm64 Apple clang defaults to
+-mcpu=apple-m1 and keeps its LSE/RCpc features, so the CPU is named.
 The early framebuffer console (0010, 0012) hard-codes sweet's splash
 address 0x9c000000, which is kernel RAM on ginkgo (splash at 0x5c000000,
 1080x2340). 0012's context lines repeat 0010's result, so both change.
@@ -18,7 +20,7 @@ EDITS = {
     'ginkgo': [
         ('0004-sweet-machine-config.patch',
          '+MACHINE_FLAGS_ARM64_SWEET = -DARM64_BOARD_CONFIG_SWEET                -march=armv8.2-a+crypto\n',
-         '+MACHINE_FLAGS_ARM64_SWEET = -DARM64_BOARD_CONFIG_SWEET -DSWEET_GINKGO -march=armv8-a+crypto\n'),
+         '+MACHINE_FLAGS_ARM64_SWEET = -DARM64_BOARD_CONFIG_SWEET -DSWEET_GINKGO -mcpu=cortex-a73+crypto\n'),
         ('0004-sweet-machine-config.patch',
          '+#define __ARM_PAN_AVAILABLE__     1\n',
          '+/* ginkgo: Cortex-A53/A73 are ARMv8.0, no PAN */\n'),
