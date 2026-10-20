@@ -1,5 +1,28 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## ginkgo port (Redmi Note 8, SM6125, M1908C3JC China) - branch `ginkgo`, started 2026-10-20
+
+**Nothing below has run on a ginkgo yet.** The user's phone: bootloader still locked (Mi Unlock pending), stock DTB not extracted, no backups yet.
+
+Hardware differences from sweet (source: mainline `sm6125.dtsi`, `sm6125-xiaomi-ginkgo-common.dtsi`; touch from the 2026-09 LKML RFC "sm6125-ginkgo: display, backlight, and touch support"):
+- CPU: 4x Cortex-A53 (MPIDR 0x000-0x003) + 4x Cortex-A73 (0x100-0x103) = **ARMv8.0: no LSE atomics, no PAN, no RCpc**. Biggest risk: if the iOS 16.7.16 iPhone X arm64 userland/shared cache uses LSE or LDAPR, every such instruction traps on ginkgo. Check with `tools/check-isa.py dyld_shared_cache_arm64*` before anything else (not run yet; needs the extracted cache).
+- RAM from 0x40000000; fixed carve-outs end below 0x61a00000, sdsp/adsp at 0xf3000000 -> kernel range 0x62000000-0xf3000000 (2.27 GiB, fits the 3 GiB variant).
+- GICv3 GICD 0x0f200000, GICR 0x0f300000; vtimer INTID 19 (same PPI numbering as sweet).
+- Splash framebuffer 0x5c000000, 1080x2340 (cont_splash_mem).
+- **Storage is eMMC** (sdhc_1 at 0x04744000, sdhci-msm-v5, 8-bit, CQE) - no UFS: sweet_ufs.c does not apply, a new SDHCI driver is needed for the root.
+- Touch: **Novatek NT36672A over GENI SPI**, needs its SRAM firmware (`novatek/nt36672a_tianma.bin`, 118784 B for the Tianma panel; other panels exist) - from the phone's vendor partition.
+- Keys: power + volume down on PM6125 PON, volume up on PM6125 GPIO5. Power: RPM SMD (not RPMh). Battery: PMI632 QG. SPMI arbiter at 0x01c40000.
+
+Done on the branch (not booted):
+- `shim/board.h` + `BOARD=ginkgo shim/build.sh` (also `DTB=`, `HEADER_VERSION=1` for a DTB appended to the kernel if ABL refuses header v2). Without a payload the ginkgo shim skips the UFS probe and shows: ISA (`lse=`/`pan=` from ID_AA64ISAR0/MMFR1, 0 = absent), MIDR, MMU/PSCI/GIC tests, PSCI CPU_ON of cores 1-7 with ginkgo MPIDRs. `IMEM_RESTART_REASON`/`PSHOLD` are 0 (unknown) for ginkgo: fill them from the stock DTB (`qcom,msm-imem` restart_reason, `qcom,pshold`).
+- `tools/mkadt.py --board ginkgo` (sweet output verified byte-identical to before for default/--highmem/--qemu).
+- Kernel: workflow input `board=ginkgo` runs `xnu/board-overlay.py` on the copied patches: `-march=armv8-a+crypto -DSWEET_GINKGO`, no `__ARM_PAN_AVAILABLE__`, early fb console (0010/0012) at 0x5c000000 / 2340 lines (sweet's 0x9c000000 is kernel RAM on ginkgo). Artifact `xnu-kernel-ginkgo`. Not built yet.
+- `tools/check-isa.py`: counts LSE/RCpc/PAN/PAuth/RDM/DotProd/FP16 instructions in Mach-O files and shared caches (encodings checked against Capstone, 1M random words).
+
+First ginkgo boot must disable the sweet drivers that poke sweet MMIO: `sweetusb=0 sweetkeys=0 sweettouch=0`, and `cpus=1` (0078's topology check expects sweet's Aff1 numbering). No root device yet (no eMMC driver): next milestone is a RAM-disk root like the QEMU test (`tools/mkinit.py`).
+
+Next steps: (1) user: unlock bootloader, back up partitions, send `adb shell cat /proc/cpuinfo` and the stock boot.img; (2) boot the diagnostic shim (no payload) -> confirms ISA, GIC, PSCI, MPIDRs; (3) run check-isa.py on the shared cache; (4) CI kernel `board=ginkgo`, boot to the RAM-disk init; (5) eMMC driver, then keys, Novatek SPI touch.
+
 ## Agent handoff / active work (2026-10-15, latest)
 
 ### >>> UPDATE 2026-10-18 (read first, then the 10-17 handoff below) <<<

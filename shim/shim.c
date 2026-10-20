@@ -12,12 +12,8 @@
 #include "loader.h"
 #include "ufs.h"
 
-#define IMEM_RESTART_REASON	0x146aa65cUL	/* qcom,msm-imem restart_reason@65c */
 #define RESTART_BOOTLOADER	0x77665500U
-#define PSHOLD			0x0c264000UL
 
-#define GICD_BASE		0x17a00000UL
-#define GICR_BASE		0x17a60000UL
 #define GICR_SIZE		0x100000UL
 #define GICR_PE_SIZE		0x20000UL
 #define GICR_TYPER		0x08
@@ -106,10 +102,12 @@ static void __attribute__((noreturn)) reset(unsigned after_s)
 	con_skip();
 	con_str("RESET", after_s > 20 ? "in 40s" : "in 20s");
 	delay_ms(after_s * 1000);
-	wr32(IMEM_RESTART_REASON, RESTART_BOOTLOADER);
+	if (IMEM_RESTART_REASON)
+		wr32(IMEM_RESTART_REASON, RESTART_BOOTLOADER);
 	__asm__ volatile("dsb sy" ::: "memory");
 	smc(PSCI_SYSTEM_RESET, 0, 0, 0);
-	wr32(PSHOLD, 0);
+	if (PSHOLD)
+		wr32(PSHOLD, 0);
 	for (;;)
 		__asm__ volatile("wfe");
 }
@@ -183,23 +181,31 @@ void secondary_main(uint64_t idx)
 	smc(PSCI_CPU_OFF, 0, 0, 0);
 }
 
-static void __attribute__((unused)) test_smp(void)
+static int64_t smp_ret[NR_CPUS];
+
+/* MMU off: the secondaries write sec_mpidr uncached, so read it uncached too. */
+static void __attribute__((unused)) smp_start(void)
 {
 	stage = "smp";
-	uint64_t self = rsr("mpidr_el1") & 0xffffff;
-	int64_t ret[NR_CPUS];
-
 	for (int i = 1; i < NR_CPUS; i++)
-		ret[i] = smc(PSCI_CPU_ON, (uint64_t)i << 8, (uintptr_t)secondary_entry, i);
+		smp_ret[i] = smc(PSCI_CPU_ON, BOARD_MPIDR(i), (uintptr_t)secondary_entry, i);
 	delay_ms(500);
+	for (int i = 1; i < NR_CPUS; i++)
+		smp_ret[i] = (smp_ret[i] & 0xffffffff) | (sec_mpidr[i] << 32);
+}
+
+static void __attribute__((unused)) smp_report(void)
+{
+	uint64_t self = rsr("mpidr_el1") & 0xffffff;
+
 	for (int i = 1; i < NR_CPUS; i++) {
+		uint32_t ret = (uint32_t)smp_ret[i], mpidr = (uint32_t)(smp_ret[i] >> 32);
 		char label[] = "CPU0";
 		label[3] = '0' + i;
-		if (((uint64_t)i << 8) == self)
+		if (BOARD_MPIDR(i) == self)
 			con_str(label, "is boot cpu");
 		else
-			con_hex2(label, "ret=", (uint32_t)ret[i], "mpidr=",
-				 (uint32_t)sec_mpidr[i] | (sec_mpidr[i] ? 0 : 0xdead0000));
+			con_hex2(label, "ret=", ret, "mpidr=", mpidr | (mpidr ? 0 : 0xdead0000));
 	}
 }
 
@@ -377,12 +383,13 @@ void shim_main(uint64_t dtb)
 	/* An xnu payload in the ramdisk means: boot it (MMU stays off). */
 	stage = "loader";
 	con_clear(RED);
-	con_str("SHIM", "sweet milestone 4: xnu loader");
+	con_str("SHIM", BOARD_NAME " milestone 4: xnu loader");
 	con_skip();
 	const char *why = loader_boot(dtb);
 	con_str("LOADER", why);
 	con_skip();
 
+#if BOARD_HAS_UFS
 	/* No payload: probe the internal UFS while the MMU is still off. */
 	stage = "ufs";
 	test_ufs();
@@ -391,6 +398,10 @@ void shim_main(uint64_t dtb)
 	con_str("UFS", "probe done, reset in ~3 min");
 	delay_ms(180000);
 	reset(20);
+#endif
+#if !BOARD_SWEET
+	smp_start();
+#endif
 
 	stage = "fill off";
 	uint64_t fill_off = ticks_fill(RED);
@@ -405,8 +416,11 @@ void shim_main(uint64_t dtb)
 	if (rc)
 		con_clear(RED);
 
-	con_str("SHIM", "sweet milestone 3");
+	con_str("SHIM", BOARD_NAME " milestone 3");
 	con_skip();
+	/* ISAR0 bits 23:20 = LSE atomics, MMFR1 bits 23:20 = PAN (0 = absent: ARMv8.0) */
+	con_hex2("ISA", "lse=", (rsr("id_aa64isar0_el1") >> 20) & 0xf, "pan=", (rsr("id_aa64mmfr1_el1") >> 20) & 0xf);
+	con_hex("MIDR", rsr("midr_el1"));
 	con_hex2("DTB", "at=", dtb, "magic=", dtb ? __builtin_bswap32(rd32(dtb)) : 0);
 	con_hex2("IMAGE", "lo=", mi.img_lo, "hi=", mi.img_hi);
 	con_hex2("MMU", "rc=", rc, "l3=", mi.n_l3);
@@ -429,6 +443,10 @@ void shim_main(uint64_t dtb)
 	con_hex2("PSCI", "ver=", smc(PSCI_VERSION, 0, 0, 0), "smccc=", smc(SMCCC_VERSION, 0, 0, 0));
 	con_skip();
 	test_gic();
+#if !BOARD_SWEET
+	con_skip();
+	smp_report();
+#endif
 
 	stage = "done";
 	reset(40);
