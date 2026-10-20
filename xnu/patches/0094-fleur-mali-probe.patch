@@ -12,10 +12,10 @@ index 10c7f95..eb68fa2 100644
  bsd/dev/sweet_usb.c			standard
 diff --git a/bsd/dev/fleur_gpu.c b/bsd/dev/fleur_gpu.c
 new file mode 100644
-index 0000000..152bf6e
+index 0000000..844982a
 --- /dev/null
 +++ b/bsd/dev/fleur_gpu.c
-@@ -0,0 +1,631 @@
+@@ -0,0 +1,633 @@
 +/*
 + * fleur (Redmi Note 11S, MT6781) GPU probe: ARM Mali-G57 MC2 (Valhall v9,
 + * job manager) at 0x13000000. Phase 1 of GPU acceleration: power the GPU
@@ -56,6 +56,8 @@ index 0000000..152bf6e
 +#include <pexpert/pexpert.h>
 +
 +extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
++/* Mach MIG declaration is not included by BSD's exported thread.h (as sweet_touch.c). */
++extern kern_return_t thread_terminate(thread_t);
 +void fleur_gpu_probe(void);
 +
 +#define GPU_PA           0x13000000u /* DT mali@13000000, 0x4000 */
