@@ -8,15 +8,23 @@ Only what is needed leaves Apple's CDN: the root filesystem and cryptex
 images are a fraction of the restore file's other contents (firmware,
 ramdisks). Stored and deflated members are supported; ZIP64 sizes too.
 """
-import os, struct, sys, urllib.request, zlib
+import os, struct, sys, time, urllib.request, zlib
 
 CHUNK = 8 << 20
 
 
-def get(url, start, end):
+def get(url, start, end, tries=20):
     req = urllib.request.Request(url, headers={'Range': f'bytes={start}-{end}'})
-    with urllib.request.urlopen(req, timeout=120) as r:
-        return r.read()
+    for attempt in range(tries):
+        try:
+            with urllib.request.urlopen(req, timeout=120) as r:
+                data = r.read()
+            if len(data) == end - start + 1:
+                return data
+        except OSError as e:
+            print(f'\nretry {attempt + 1}/{tries}: {e}', file=sys.stderr)
+        time.sleep(min(60, 2 ** attempt))
+    raise SystemExit(f'range {start}-{end}: giving up')
 
 
 def size_of(url):
