@@ -903,7 +903,118 @@ diff --git a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
 diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
 --- a/osfmk/arm64/start.s
 +++ b/osfmk/arm64/start.s
-@@ -222,5 +222,23 @@
+@@ -19,43 +19,67 @@
+  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+  * Please see the License for the specific language governing rights and
+  * limitations under the License.
+  *
+  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+  */
+ #include <arm64/proc_reg.h>
+ #include <arm64/asm.h>
+ #include <arm64/machine_machdep.h>
+ #include <arm64/proc_reg.h>
+ #include <pexpert/arm64/board_config.h>
+ #include <mach_assert.h>
+ #include <machine/asm.h>
+ #include "assym.s"
+ #include <arm64/tunables/tunables.s>
+ #include <arm64/exception_asm.h>
+-
++
++#if defined(MARBLE)
++/* Inline only: clobbers x9-x13 and NZCV; no stack, x0 or lr access.
++ * Call only where x9-x13 and flags are dead. VA=PA also after MMU enable.
++ * Each tile stays within x=64..575, y=2368..2399 (stride 4320).
++ */
++.macro MARBLE_BOOT_MARK stage, xpos, color
++	MOV64 x9, (0xb8000000 + 2368 * 4320 + \xpos * 4)
++	MOV64 x10, \color
++	mov x11, #32
++Lmarble_boot_\stage\()_row:
++	mov x12, #64
++	mov x13, x9
++Lmarble_boot_\stage\()_pixel:
++	str w10, [x13], #4
++	subs x12, x12, #1
++	b.ne Lmarble_boot_\stage\()_pixel
++	add x9, x9, #1, lsl #12
++	add x9, x9, #224
++	subs x11, x11, #1
++	b.ne Lmarble_boot_\stage\()_row
++	dsb sy
++.endmacro
++#endif
++
+ #if __ARM_KERNEL_PROTECT__
+ #include <arm/pmap.h>
+ #endif /* __ARM_KERNEL_PROTECT__ */
+-
++
+-
++
+-
++
+ .macro MSR_VBAR_EL1_X0
+ #if defined(KERNEL_INTEGRITY_KTRR)
+-	mov	x1, lr
++	mov	x1, lr
+-	bl		EXT(pinst_set_vbar)
++	bl		EXT(pinst_set_vbar)
+-	mov	lr, x1
++	mov	lr, x1
+ #else
+-	msr		VBAR_EL1, x0
++	msr		VBAR_EL1, x0
+ #endif
+ .endmacro
+-
++
+ .macro MSR_TCR_EL1_X1
+ #if defined(KERNEL_INTEGRITY_KTRR)
+-	mov		x0, x1
++	mov		x0, x1
+-	mov		x1, lr
++	mov		x1, lr
+-	bl		EXT(pinst_set_tcr)
++	bl		EXT(pinst_set_tcr)
+-	mov		lr, x1
++	mov		lr, x1
+ #else
+@@ -203,70 +227,88 @@
+ LEXT(SleepToken)
+-	.space	(stSize_NUM),0
++	.space	(stSize_NUM),0
+ #endif
+-
++
+-	.section __DATA_CONST,__const
++	.section __DATA_CONST,__const
+-	.align	3
++	.align	3
+-	.globl  EXT(ResetHandlerData)
++	.globl  EXT(ResetHandlerData)
+ LEXT(ResetHandlerData)
+-	.space  (rhdSize_NUM),0		// (filled with 0s)
++	.space  (rhdSize_NUM),0		// (filled with 0s)
+-	.text
++	.text
+-
++
+-
++
+ /*
+  * __start trampoline is located at a position relative to LowResetVectorBase
+  * so that iBoot can compute the reset vector position to set IORVBAR using
+  * only the kernel entry point.  Reset vector = (__start & ~0xfff)
+  */
+-	.align	3
++	.align	3
+-	.globl EXT(_start)
++	.globl EXT(_start)
  LEXT(_start)
 +#if defined(MARBLE)
 +	/* entry: 64x32 physical framebuffer breadcrumb; preserve boot_args in x0. */
@@ -930,7 +1041,119 @@ diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
 -
 +
  /*
-@@ -507,15 +525,39 @@
+  * Provides an early-boot exception vector so that the processor will spin
+  * and preserve exception information (e.g., ELR_EL1) when early CPU bootstrap
+  * code triggers an exception. This is copied to the second physical page
+  * during CPU bootstrap (see cpu.c).
+  */
+-	.align 12, 0
++	.align 12, 0
+-	.global	EXT(LowExceptionVectorBase)
++	.global	EXT(LowExceptionVectorBase)
+ LEXT(LowExceptionVectorBase)
+-	/* EL1 SP 0 */
++	/* EL1 SP 0 */
+-	b		.
++	b		.
+-	.align	7
++	.align	7
+-	b		.
++	b		.
+-	.align	7
++	.align	7
+-	b		.
++	b		.
+-	.align	7
++	.align	7
+-	b		.
++	b		.
+-	/* EL1 SP1 */
++	/* EL1 SP1 */
+-	.align	7
++	.align	7
+-	b		.
++	b		.
+-	.align	7
++	.align	7
+-	b		.
++	b		.
+-	.align	7
++	.align	7
+-	b		.
++	b		.
+-	.align	7
++	.align	7
+-	b		.
++	b		.
+-	/* EL0 64 */
++	/* EL0 64 */
+-	.align	7
++	.align	7
+-	b		.
++	b		.
+-	.align	7
++	.align	7
+-	b		.
++	b		.
+-	.align	7
++	.align	7
+-	b		.
++	b		.
+-	.align	7
++	.align	7
+-	b		.
++	b		.
+-	/* EL0 32 */
++	/* EL0 32 */
+-	.align	7
++	.align	7
+-	b		.
++	b		.
+-	.align	7
++	.align	7
+-	b		.
++	b		.
+-	.align	7
++	.align	7
+-	b		.
++	b		.
+-	.align	7
++	.align	7
+-	b		.
++	b		.
+-	.align 12, 0
++	.align 12, 0
+-
++
+ #if defined(KERNEL_INTEGRITY_KTRR) || defined(KERNEL_INTEGRITY_CTRR)
+@@ -490,143 +532,179 @@
+-
++
+-	/* entries left to map - advance base pointers */
++	/* entries left to map - advance base pointers */
+-	add 	$0, $0, $5, lsl #(ARM_TT_L2_SHIFT)
++	add 	$0, $0, $5, lsl #(ARM_TT_L2_SHIFT)
+-	add 	$1, $1, $5, lsl #(ARM_TT_L2_SHIFT)
++	add 	$1, $1, $5, lsl #(ARM_TT_L2_SHIFT)
+-
++
+-	mov	$5, #(TTE_PGENTRIES)  /* subsequent loops map (up to) a whole L2 page */
++	mov	$5, #(TTE_PGENTRIES)  /* subsequent loops map (up to) a whole L2 page */
+-	b	3b
++	b	3b
+ 2:
+ .endmacro
+-
++
+ /*
+  * _start_first_cpu
+  * Cold boot init routine.  Called from __start
+  *   x0 - Boot args
+  */
+-	.align 2
++	.align 2
+-	.globl EXT(start_first_cpu)
++	.globl EXT(start_first_cpu)
  LEXT(start_first_cpu)
 -
 +
@@ -976,11 +1199,267 @@ diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
  	mov		w1, #-1
  	mov		x2, #32
  	mov		x4, #4320
-@@ -693,6 +735,28 @@
+ Lsweet_mark_row:
+-	mov		x3, #64
++	mov		x3, #64
+-	mov		x5, x0
++	mov		x5, x0
+ Lsweet_mark_pixel:
+-	str		w1, [x5], #4
++	str		w1, [x5], #4
+-	subs	x3, x3, #1
++	subs	x3, x3, #1
+-	b.ne	Lsweet_mark_pixel
++	b.ne	Lsweet_mark_pixel
+-	add		x0, x0, x4
++	add		x0, x0, x4
+-	subs	x2, x2, #1
++	subs	x2, x2, #1
+-	b.ne	Lsweet_mark_row
++	b.ne	Lsweet_mark_row
+-	dsb		sy
++	dsb		sy
+ #endif
+-
++
+-	// Set low reset vector before attempting any loads
++	// Set low reset vector before attempting any loads
+-	adrp	x0, EXT(LowExceptionVectorBase)@page
++	adrp	x0, EXT(LowExceptionVectorBase)@page
+-	add		x0, x0, EXT(LowExceptionVectorBase)@pageoff
++	add		x0, x0, EXT(LowExceptionVectorBase)@pageoff
+-	MSR_VBAR_EL1_X0
++	MSR_VBAR_EL1_X0
++#if defined(MARBLE)
++	/* A: low VBAR installed; x9-x13 and NZCV dead here. */
++	MARBLE_BOOT_MARK A, 64, 0xffffff00
++#endif
+-
++
+-
++
+-	// Get the kernel memory parameters from the boot args
++	// Get the kernel memory parameters from the boot args
+-	ldr		x22, [x20, BA_VIRT_BASE]			// Get the kernel virt base
++	ldr		x22, [x20, BA_VIRT_BASE]			// Get the kernel virt base
+-	ldr		x23, [x20, BA_PHYS_BASE]			// Get the kernel phys base
++	ldr		x23, [x20, BA_PHYS_BASE]			// Get the kernel phys base
+-	ldr		x24, [x20, BA_MEM_SIZE]				// Get the physical memory size
++	ldr		x24, [x20, BA_MEM_SIZE]				// Get the physical memory size
+-	adrp	x25, EXT(bootstrap_pagetables)@page	// Get the start of the page tables
++	adrp	x25, EXT(bootstrap_pagetables)@page	// Get the start of the page tables
+-	ldr		x26, [x20, BA_BOOT_FLAGS]			// Get the kernel boot flags
++	ldr		x26, [x20, BA_BOOT_FLAGS]			// Get the kernel boot flags
++#if defined(MARBLE)
++	/* B: boot_args loaded; x9-x13 and NZCV dead here. */
++	MARBLE_BOOT_MARK B, 128, 0xffff00ff
++#endif
+-
++
+-	// Clear the registers that will be used to store the userspace thread pointer and CPU number.
++	// Clear the registers that will be used to store the userspace thread pointer and CPU number.
+-	// We may not actually be booting from ordinal CPU 0, so this register will be updated
++	// We may not actually be booting from ordinal CPU 0, so this register will be updated
+-	// in ml_parse_cpu_topology(), which happens later in bootstrap.
++	// in ml_parse_cpu_topology(), which happens later in bootstrap.
+-	msr		TPIDRRO_EL0, xzr
++	msr		TPIDRRO_EL0, xzr
+-	msr		TPIDR_EL0, xzr
++	msr		TPIDR_EL0, xzr
+-
++
+-	// Set up exception stack pointer
++	// Set up exception stack pointer
+-	adrp	x0, EXT(excepstack_top)@page		// Load top of exception stack
++	adrp	x0, EXT(excepstack_top)@page		// Load top of exception stack
+-	add		x0, x0, EXT(excepstack_top)@pageoff
++	add		x0, x0, EXT(excepstack_top)@pageoff
+-	add		x0, x0, x22							// Convert to KVA
++	add		x0, x0, x22							// Convert to KVA
+-	sub		x0, x0, x23
++	sub		x0, x0, x23
+-
++
+-	// Set SP_EL1 to exception stack
++	// Set SP_EL1 to exception stack
+ #if defined(KERNEL_INTEGRITY_KTRR) || defined(KERNEL_INTEGRITY_CTRR)
+-	bl		EXT(pinst_spsel_1)
++	bl		EXT(pinst_spsel_1)
+ #else
+-	msr		SPSel, #1
++	msr		SPSel, #1
+ #endif
+-
++
+-	mov		sp, x0
++	mov		sp, x0
+-
++
+-	// Set up interrupt stack pointer
++	// Set up interrupt stack pointer
+-	adrp	x0, EXT(intstack_top)@page			// Load top of irq stack
++	adrp	x0, EXT(intstack_top)@page			// Load top of irq stack
+-	add		x0, x0, EXT(intstack_top)@pageoff
++	add		x0, x0, EXT(intstack_top)@pageoff
+-	add		x0, x0, x22							// Convert to KVA
++	add		x0, x0, x22							// Convert to KVA
+-	sub		x0, x0, x23
++	sub		x0, x0, x23
+-	msr		SPSel, #0							// Set SP_EL0 to interrupt stack
++	msr		SPSel, #0							// Set SP_EL0 to interrupt stack
+-	mov		sp, x0
++	mov		sp, x0
+-
++
+-	// Load address to the C init routine into link register
++	// Load address to the C init routine into link register
+-	adrp	lr, EXT(arm_init)@page
++	adrp	lr, EXT(arm_init)@page
+-	add		lr, lr, EXT(arm_init)@pageoff
++	add		lr, lr, EXT(arm_init)@pageoff
+-	add		lr, lr, x22							// Convert to KVA
++	add		lr, lr, x22							// Convert to KVA
+-	sub		lr, lr, x23
++	sub		lr, lr, x23
++#if defined(MARBLE)
++	/* C: both stacks and KVA arm_init LR ready; x9-x13 and NZCV dead here. */
++	MARBLE_BOOT_MARK C, 192, 0xff0080ff
++#endif
+-
++
+-	/*
++	/*
+-	 * Set up the bootstrap page tables with a single block entry for the V=P
++	 * Set up the bootstrap page tables with a single block entry for the V=P
+-	 * mapping, a single block entry for the trampolined kernel address (KVA),
++	 * mapping, a single block entry for the trampolined kernel address (KVA),
+-	 * and all else invalid. This requires four pages:
++	 * and all else invalid. This requires four pages:
+-	 *	Page 1 - V=P L1 table
++	 *	Page 1 - V=P L1 table
+-	 *	Page 2 - V=P L2 table
++	 *	Page 2 - V=P L2 table
+-	 *	Page 3 - KVA L1 table
++	 *	Page 3 - KVA L1 table
+-	 *	Page 4 - KVA L2 table
++	 *	Page 4 - KVA L2 table
+-	 */
++	 */
+-
++
+-	// Invalidate all entries in the bootstrap page tables
++	// Invalidate all entries in the bootstrap page tables
+-	mov		x0, #(ARM_TTE_EMPTY)				// Load invalid entry template
++	mov		x0, #(ARM_TTE_EMPTY)				// Load invalid entry template
+-	mov		x1, x25								// Start at V=P pagetable root
++	mov		x1, x25								// Start at V=P pagetable root
+-	mov		x2, #(TTE_PGENTRIES)				// Load number of entries per page
++	mov		x2, #(TTE_PGENTRIES)				// Load number of entries per page
+-	lsl		x2, x2, #2							// Shift by 2 for num entries on 4 pages
++	lsl		x2, x2, #2							// Shift by 2 for num entries on 4 pages
+-
++
+ Linvalidate_bootstrap:							// do {
+-	str		x0, [x1], #(1 << TTE_SHIFT)			//   Invalidate and advance
++	str		x0, [x1], #(1 << TTE_SHIFT)			//   Invalidate and advance
+-	subs	x2, x2, #1							//   entries--
++	subs	x2, x2, #1							//   entries--
+-	b.ne	Linvalidate_bootstrap				// } while (entries != 0)
++	b.ne	Linvalidate_bootstrap				// } while (entries != 0)
+-
++
+-	/*
++	/*
+-	 * In order to reclaim memory on targets where TZ0 (or some other entity)
++	 * In order to reclaim memory on targets where TZ0 (or some other entity)
+-	 * must be located at the base of memory, iBoot may set the virtual and
++	 * must be located at the base of memory, iBoot may set the virtual and
+-	 * physical base addresses to immediately follow whatever lies at the
++	 * physical base addresses to immediately follow whatever lies at the
+-	 * base of physical memory.
++	 * base of physical memory.
+-	 *
++	 *
+-	 * If the base address belongs to TZ0, it may be dangerous for xnu to map
++	 * If the base address belongs to TZ0, it may be dangerous for xnu to map
+-	 * it (as it may be prefetched, despite being technically inaccessible).
++	 * it (as it may be prefetched, despite being technically inaccessible).
+-	 * In order to avoid this issue while keeping the mapping code simple, we
++	 * In order to avoid this issue while keeping the mapping code simple, we
+-	 * may continue to use block mappings, but we will only map the kernelcache
++	 * may continue to use block mappings, but we will only map the kernelcache
+-	 * mach header to the end of memory.
++	 * mach header to the end of memory.
+-	 *
++	 *
+-	 * Given that iBoot guarantees that the unslid kernelcache base address
++	 * Given that iBoot guarantees that the unslid kernelcache base address
+-	 * will begin on an L2 boundary, this should prevent us from accidentally
++	 * will begin on an L2 boundary, this should prevent us from accidentally
+-	 * mapping TZ0.
++	 * mapping TZ0.
+-	 */
++	 */
+-	adrp	x0, EXT(_mh_execute_header)@page	// address of kernel mach header
++	adrp	x0, EXT(_mh_execute_header)@page	// address of kernel mach header
+-	add		x0, x0, EXT(_mh_execute_header)@pageoff
++	add		x0, x0, EXT(_mh_execute_header)@pageoff
+-	ldr		w1, [x0, #0x18]						// load mach_header->flags
++	ldr		w1, [x0, #0x18]						// load mach_header->flags
+-	tbz		w1, #0x1f, Lkernelcache_base_found	// if MH_DYLIB_IN_CACHE unset, base is kernel mach header
++	tbz		w1, #0x1f, Lkernelcache_base_found	// if MH_DYLIB_IN_CACHE unset, base is kernel mach header
+-	ldr		w1, [x0, #0x20]						// load first segment cmd (offset sizeof(kernel_mach_header_t))
++	ldr		w1, [x0, #0x20]						// load first segment cmd (offset sizeof(kernel_mach_header_t))
+-	cmp		w1, #0x19							// must be LC_SEGMENT_64
++	cmp		w1, #0x19							// must be LC_SEGMENT_64
+-	bne		.
++	bne		.
+-	ldr		x1, [x0, #0x38]						// load first segment vmaddr
++	ldr		x1, [x0, #0x38]						// load first segment vmaddr
+-	sub		x1, x0, x1							// compute slide
++	sub		x1, x0, x1							// compute slide
+-	MOV64	x0, VM_KERNEL_LINK_ADDRESS
++	MOV64	x0, VM_KERNEL_LINK_ADDRESS
+-	add		x0, x0, x1							// base is kernel link address + slide
++	add		x0, x0, x1							// base is kernel link address + slide
+-
++
+ Lkernelcache_base_found:
+@@ -678,42 +756,68 @@
+-	lsr		x5,  x24, #(ARM_TT_L2_SHIFT)
++	lsr		x5,  x24, #(ARM_TT_L2_SHIFT)
+-	create_bootstrap_mapping x14, x15, x5, x3, x2, x9, x10, x11, x12, x13
++	create_bootstrap_mapping x14, x15, x5, x3, x2, x9, x10, x11, x12, x13
+-
++
+ #if defined(SWEET)
+-	/*
++	/*
+-	 * Splash framebuffer: one 32MB Normal-NC block in the EXISTING V=P
++	 * Splash framebuffer: one 32MB Normal-NC block in the EXISTING V=P
+-	 * L2 table. Both framebuffer and RAM use L1 index 0; another call to
++	 * L2 table. Both framebuffer and RAM use L1 index 0; another call to
+-	 * create_bootstrap_mapping would replace the RAM L2 table.
++	 * create_bootstrap_mapping would replace the RAM L2 table.
+-	 * SWEET uses 16K pages and all bring-up RAM is below 4GB, so the first
++	 * SWEET uses 16K pages and all bring-up RAM is below 4GB, so the first
+-	 * V=P L2 page is bootstrap_pagetables + 2*PGBYTES.
++	 * V=P L2 page is bootstrap_pagetables + 2*PGBYTES.
+-	 */
++	 */
+-	MOV64	x10, 0x9c000000
++	MOV64	x10, 0x9c000000
+-	MOV64	x11, (ARM_TTE_TYPE_BLOCK | ARM_TTE_VALID | ARM_TTE_BLOCK_SH(SH_OUTER_MEMORY) | ARM_TTE_BLOCK_ATTRINDX(CACHE_ATTRINDX_WRITECOMB) | ARM_TTE_BLOCK_AF | ARM_TTE_BLOCK_PNX | ARM_TTE_BLOCK_NX)
++	MOV64	x11, (ARM_TTE_TYPE_BLOCK | ARM_TTE_VALID | ARM_TTE_BLOCK_SH(SH_OUTER_MEMORY) | ARM_TTE_BLOCK_ATTRINDX(CACHE_ATTRINDX_WRITECOMB) | ARM_TTE_BLOCK_AF | ARM_TTE_BLOCK_PNX | ARM_TTE_BLOCK_NX)
+-	orr		x11, x11, x10
++	orr		x11, x11, x10
+-	and		x12, x10, #(ARM_TT_L2_INDEX_MASK)
++	and		x12, x10, #(ARM_TT_L2_INDEX_MASK)
  	lsr		x12, x12, #(ARM_TT_L2_SHIFT)
  	add		x13, x25, #(2 * PGBYTES)
  	str		x11, [x13, x12, lsl #TTE_SHIFT]
-+#endif
+ #endif
+-
 +
 +
 +#if defined(MARBLE)
@@ -1002,10 +1481,72 @@ diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
 +    add x10, x10, PGBYTES
 +    subs x13, x13, #1
 +    b.ne 1b
++#endif
++
+-	/* Ensure TTEs are visible */
++	/* Ensure TTEs are visible */
+-	dsb		ish
++	dsb		ish
++#if defined(MARBLE)
++	/* D: all bootstrap mappings complete; x9-x13 and NZCV dead here. */
++	MARBLE_BOOT_MARK D, 256, 0xffff8000
++#endif
+-
++
+-
++
+-	b		common_start
++	b		common_start
+-
++
+ /*
+  * Begin common CPU initialization
+  *
+  * Regster state:
+  *	x20 - PA of boot args
+  *	x21 - zero on cold boot, PA of cpu data on warm reset
+  *	x22 - Kernel virtual base
+  *	x23 - Kernel physical base
+  *	x25 - PA of the V=P pagetable root
+  *	 lr - KVA of C init routine
+  *	 sp - SP_EL0 selected
+  *
+  *	SP_EL0 - KVA of CPU's interrupt stack
+  *	SP_EL1 - KVA of CPU's exception stack
+  *	TPIDRRO_EL0 - CPU number
+  */
+@@ -776,87 +880,95 @@
+-	// Setup timer interrupt routing; must be done before MMU is enabled
++	// Setup timer interrupt routing; must be done before MMU is enabled
+-	mrs		x15, MPIDR_EL1						// Load MPIDR to get CPU number
++	mrs		x15, MPIDR_EL1						// Load MPIDR to get CPU number
+-	and		x15, x15, #0xFF						// CPU number is in MPIDR Affinity Level 0
++	and		x15, x15, #0xFF						// CPU number is in MPIDR Affinity Level 0
+-	mov		x0, #0x4000
++	mov		x0, #0x4000
+-	lsl		x0, x0, #16
++	lsl		x0, x0, #16
+-	add		x0, x0, #0x0040						// x0: 0x4000004X Core Timers interrupt control
++	add		x0, x0, #0x0040						// x0: 0x4000004X Core Timers interrupt control
+-	add		x0, x0, x15, lsl #2
++	add		x0, x0, x15, lsl #2
+-	mov		w1, #0xF0 						// x1: 0xF0 	  Route to Core FIQs
++	mov		w1, #0xF0 						// x1: 0xF0 	  Route to Core FIQs
+-	str		w1, [x0]
++	str		w1, [x0]
+-	isb		sy
++	isb		sy
  #endif
  
- 	/* Ensure TTEs are visible */
-@@ -793,7 +857,7 @@
+ #ifndef __ARM_IC_NOALIAS_ICACHE__
+-	/* Invalidate the TLB and icache on systems that do not guarantee that the
++	/* Invalidate the TLB and icache on systems that do not guarantee that the
+-	 * caches are invalidated on reset.
++	 * caches are invalidated on reset.
+-	 */
++	 */
+-	tlbi	vmalle1
++	tlbi	vmalle1
  	ic		iallu
  #endif
  
@@ -1014,15 +1555,315 @@ diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
  	/* Complete local TLB/I-cache invalidation before enabling the MMU. */
  	dsb		sy
  	isb
-@@ -837,7 +901,7 @@
+ #endif
+-
++
+-	/* If x21 is not 0, then this is either the start_cpu path or
++	/* If x21 is not 0, then this is either the start_cpu path or
+-	 * the resume_idle_cpu path.  cpu_ttep should already be
++	 * the resume_idle_cpu path.  cpu_ttep should already be
+-	 * populated, so just switch to the kernel_pmap now.
++	 * populated, so just switch to the kernel_pmap now.
+-	 */
++	 */
+-
++
+-	cbz		x21, 1f
++	cbz		x21, 1f
+-	adrp	x0, EXT(cpu_ttep)@page
++	adrp	x0, EXT(cpu_ttep)@page
+-	add		x0, x0, EXT(cpu_ttep)@pageoff
++	add		x0, x0, EXT(cpu_ttep)@pageoff
+-	ldr		x0, [x0]
++	ldr		x0, [x0]
+-	MSR_TTBR1_EL1_X0
++	MSR_TTBR1_EL1_X0
+ 1:
+-
++
+-	// Set up the exception vectors
++	// Set up the exception vectors
+ #if __ARM_KERNEL_PROTECT__
+-	/* If this is not the first reset of the boot CPU, the alternate mapping
++	/* If this is not the first reset of the boot CPU, the alternate mapping
+-	 * for the exception vectors will be set up, so use it.  Otherwise, we
++	 * for the exception vectors will be set up, so use it.  Otherwise, we
+-	 * should use the mapping located in the kernelcache mapping.
++	 * should use the mapping located in the kernelcache mapping.
+-	 */
++	 */
+-	MOV64	x0, ARM_KERNEL_PROTECT_EXCEPTION_START
++	MOV64	x0, ARM_KERNEL_PROTECT_EXCEPTION_START
+-
++
+-	cbnz		x21, 1f
++	cbnz		x21, 1f
+ #endif /* __ARM_KERNEL_PROTECT__ */
+-	adrp	x0, EXT(ExceptionVectorsBase)@page			// Load exception vectors base address
++	adrp	x0, EXT(ExceptionVectorsBase)@page			// Load exception vectors base address
+-	add		x0, x0, EXT(ExceptionVectorsBase)@pageoff
++	add		x0, x0, EXT(ExceptionVectorsBase)@pageoff
+-	add		x0, x0, x22									// Convert exception vector address to KVA
++	add		x0, x0, x22									// Convert exception vector address to KVA
+-	sub		x0, x0, x23
++	sub		x0, x0, x23
+ 1:
+-	MSR_VBAR_EL1_X0
++	MSR_VBAR_EL1_X0
+-
++
+ #if HAS_APPLE_PAC
+-	PAC_INIT_KEY_STATE tmp=x0, tmp2=x1
++	PAC_INIT_KEY_STATE tmp=x0, tmp2=x1
+ #endif /* HAS_APPLE_PAC */
+-
++
+-	// Enable caches, MMU, ROP and JOP
++	// Enable caches, MMU, ROP and JOP
++#if defined(MARBLE)
++	/* E: translation registers and KVA VBAR ready; x9-x13 and NZCV dead here. */
++	MARBLE_BOOT_MARK E, 320, 0xff8000ff
++#endif
+-	MOV64   x0, SCTLR_EL1_DEFAULT
++	MOV64   x0, SCTLR_EL1_DEFAULT
  	MSR_SCTLR_EL1_X0
  	isb		sy
- 
+-
 -#if !VMAPPLE && !defined(SWEET)
++#if defined(MARBLE)
++	/* F: MMU on; framebuffer accessed through bootstrap V=P; x9-x13 and NZCV dead here. */
++	MARBLE_BOOT_MARK F, 384, 0xff00c0ff
++#endif
++
 +#if !VMAPPLE && !defined(SWEET) && !defined(MARBLE)
  	MOV64   x1, SCTLR_EL1_DEFAULT
  	cmp		x0, x1
  	bne		.
+ #endif /* !VMAPPLE && !SWEET */
+-
++
+ #if (!CONFIG_KERNEL_INTEGRITY || (CONFIG_KERNEL_INTEGRITY && !defined(KERNEL_INTEGRITY_WT)))
+-	/* Watchtower
++	/* Watchtower
+-	 *
++	 *
+-	 * If we have a Watchtower monitor it will setup CPACR_EL1 for us, touching
++	 * If we have a Watchtower monitor it will setup CPACR_EL1 for us, touching
+-	 * it here would trap to EL3.
++	 * it here would trap to EL3.
+-	 */
++	 */
+-
++
+-	// Enable NEON
++	// Enable NEON
+-	mov		x0, #(CPACR_FPEN_ENABLE)
++	mov		x0, #(CPACR_FPEN_ENABLE)
+-	msr		CPACR_EL1, x0
++	msr		CPACR_EL1, x0
+ #endif
+-
++
+-	// Clear thread pointer
++	// Clear thread pointer
+-	msr		TPIDR_EL1, xzr						// Set thread register
++	msr		TPIDR_EL1, xzr						// Set thread register
+-
++
+-
++
+ #if defined(APPLE_ARM64_ARCH_FAMILY)
+@@ -866,97 +978,105 @@
+-	// Initialization common to all non-virtual Apple targets
++	// Initialization common to all non-virtual Apple targets
+ #endif  // APPLE_ARM64_ARCH_FAMILY
+-
++
+-	// Read MIDR before start of per-SoC tunables
++	// Read MIDR before start of per-SoC tunables
+-	mrs x12, MIDR_EL1
++	mrs x12, MIDR_EL1
+-
++
+-	APPLY_TUNABLES x12, x13, x14
++	APPLY_TUNABLES x12, x13, x14
+-
++
+-
++
+ #if HAS_CLUSTER
+-	// Unmask external IRQs if we're restarting from non-retention WFI
++	// Unmask external IRQs if we're restarting from non-retention WFI
+-	mrs		x9, CPU_OVRD
++	mrs		x9, CPU_OVRD
+-	and		x9, x9, #(~(ARM64_REG_CYC_OVRD_irq_mask | ARM64_REG_CYC_OVRD_fiq_mask))
++	and		x9, x9, #(~(ARM64_REG_CYC_OVRD_irq_mask | ARM64_REG_CYC_OVRD_fiq_mask))
+-	msr		CPU_OVRD, x9
++	msr		CPU_OVRD, x9
+ #endif
+-
++
+-	// If x21 != 0, we're doing a warm reset, so we need to trampoline to the kernel pmap.
++	// If x21 != 0, we're doing a warm reset, so we need to trampoline to the kernel pmap.
+-	cbnz	x21, Ltrampoline
++	cbnz	x21, Ltrampoline
+-
++
+-	// Set KVA of boot args as first arg
++	// Set KVA of boot args as first arg
++#if defined(MARBLE)
++	/* G: post-MMU CPU setup done; before boot_args conversion; x9-x13 and NZCV dead here. */
++	MARBLE_BOOT_MARK G, 448, 0xff80ff80
++#endif
+-	add		x0, x20, x22
++	add		x0, x20, x22
+-	sub		x0, x0, x23
++	sub		x0, x0, x23
+-
++
+ #if KASAN
+-	mov	x20, x0
++	mov	x20, x0
+-	mov	x21, lr
++	mov	x21, lr
+-
++
+-	// x0: boot args
++	// x0: boot args
+-	// x1: KVA page table phys base
++	// x1: KVA page table phys base
+-	mrs	x1, TTBR1_EL1
++	mrs	x1, TTBR1_EL1
+-	bl	EXT(kasan_bootstrap)
++	bl	EXT(kasan_bootstrap)
+-
++
+-	mov	x0, x20
++	mov	x0, x20
+-	mov	lr, x21
++	mov	lr, x21
+ #endif
+-
++
+-	// Return to arm_init()
++	// Return to arm_init()
++#if defined(MARBLE)
++	/* H: preserves KVA boot_args x0 and KVA arm_init lr; x9-x13 and NZCV dead here. */
++	MARBLE_BOOT_MARK H, 512, 0xffffff80
++#endif
+-	ret
++	ret
+-
++
+ Ltrampoline:
+-	// Load VA of the trampoline
++	// Load VA of the trampoline
+-	adrp	x0, arm_init_tramp@page
++	adrp	x0, arm_init_tramp@page
+-	add		x0, x0, arm_init_tramp@pageoff
++	add		x0, x0, arm_init_tramp@pageoff
+-	add		x0, x0, x22
++	add		x0, x0, x22
+-	sub		x0, x0, x23
++	sub		x0, x0, x23
+-
++
+-	// Branch to the trampoline
++	// Branch to the trampoline
+-	br		x0
++	br		x0
+-
++
+ /*
+  * V=P to KVA trampoline.
+  *	x0 - KVA of cpu data pointer
+  */
+-	.text
++	.text
+-	.align 2
++	.align 2
+ arm_init_tramp:
+-	/* On a warm boot, the full kernel translation table is initialized in
++	/* On a warm boot, the full kernel translation table is initialized in
+-	 * addition to the bootstrap tables. The layout is as follows:
++	 * addition to the bootstrap tables. The layout is as follows:
+-	 *
++	 *
+-	 *  +--Top of Memory--+
++	 *  +--Top of Memory--+
+-	 *         ...
++	 *         ...
+-	 *  |                 |
++	 *  |                 |
+-	 *  |  Primary Kernel |
++	 *  |  Primary Kernel |
+-	 *  |   Trans. Table  |
++	 *  |   Trans. Table  |
+-	 *  |                 |
++	 *  |                 |
+-	 *  +--Top + 5 pages--+
++	 *  +--Top + 5 pages--+
+-	 *  |                 |
++	 *  |                 |
+-	 *  |  Invalid Table  |
++	 *  |  Invalid Table  |
+-	 *  |                 |
++	 *  |                 |
+-	 *  +--Top + 4 pages--+
++	 *  +--Top + 4 pages--+
+-	 *  |                 |
++	 *  |                 |
+-	 *  |    KVA Table    |
++	 *  |    KVA Table    |
+-	 *  |                 |
++	 *  |                 |
+-	 *  +--Top + 2 pages--+
++	 *  +--Top + 2 pages--+
+-	 *  |                 |
++	 *  |                 |
+-	 *  |    V=P Table    |
++	 *  |    V=P Table    |
+-	 *  |                 |
++	 *  |                 |
+-	 *  +--Top of Kernel--+
++	 *  +--Top of Kernel--+
+-	 *  |                 |
++	 *  |                 |
+-	 *  |  Kernel Mach-O  |
++	 *  |  Kernel Mach-O  |
+-	 *  |                 |
++	 *  |                 |
+-	 *         ...
++	 *         ...
+-	 *  +---Kernel Base---+
++	 *  +---Kernel Base---+
+-	 */
++	 */
+-
++
+-
++
+-	mov		x19, lr
++	mov		x19, lr
+-	// Convert CPU data PA to VA and set as first argument
++	// Convert CPU data PA to VA and set as first argument
+-	mov		x0, x21
++	mov		x0, x21
+-	bl		EXT(phystokv)
++	bl		EXT(phystokv)
+-
++
+-	mov		lr, x19
++	mov		lr, x19
+-
++
+-	/* Return to arm_init() */
++	/* Return to arm_init() */
+-	ret
++	ret
+-
++
+ //#include	"globals_asm.h"
 diff --git a/osfmk/arm64/sweet_early.c b/osfmk/arm64/sweet_early.c
 --- a/osfmk/arm64/sweet_early.c
 +++ b/osfmk/arm64/sweet_early.c

@@ -1,6 +1,37 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
 
+## Active handoff: MARBLE A-H pre-C diagnostics (2026-10-22)
+
+User physically observed CYAN, GREEN and WHITE on real marble. This supersedes
+previous no-white result: shim entry, start_first_cpu/DAIF and Stage0 execute;
+skipping cold-entry OSLAR_EL1 passed the earlier blocker. Keep MARBLE OSLAR
+excluded. No new physical boot was performed in this session.
+
+0082 now adds MARBLE-only inline A-H tiles across x64..575,y2368..2399.
+Macro clobbers x9-x13/NZCV only, no stack/calls, preserves x0/LR and x20-x26.
+All locations audited for liveness. Existing three markers unchanged. Exact
+source excerpts, stage/color table and validation limitations are recorded in
+[docs/MARBLE_BOOTSTRAP_BREADCRUMBS.md](docs/MARBLE_BOOTSTRAP_BREADCRUMBS.md).
+
+Observed local validation: full 81-patch replay passed; strict 0082 check/apply
+passed; git diff --check passed. SWEET include-stripped preprocessing identical.
+Eight real macro expansions compile arm64 Mach-O using actual MOV64; framebuffer
+pixel bounds pass. MARBLE cold OSLAR excluded. GIC preprocess/stub compile passes,
+zero MARBLE priority-window references, SWEET identical. Full start.s assembly
+and full kernel link unavailable (generated headers/build environment absent).
+No other XNU source behavior changed; boot/loader/storage/GIC untouched.
+
+Validation artifacts: /tmp/marble-bootstrap-validation (81 replay + source),
+/tmp/bootstrap-task-start.s (exact task-start source), /tmp/bootstrap-markers.o,
+/tmp/validate-bootstrap-markers.py, /tmp/check-wrapper-gic.py. Ready for next
+Actions DEVELOPMENT/MARBLE build with full assembly/link still to verify.
+No CI run/ID, commit, push, device operation or storage write. User explicitly
+prohibited commit/push, overriding repository default. Next: build separately,
+then temporary physical boot to read A-H and existing arm_init stage1.
+
+Earlier handoffs below are historical.
+
 ## Active handoff: MARBLE first-entry breadcrumbs (2026-10-22)
 
 User-reported physical result: boot-v4 shim locates MRBLXNU1, copies all ten
