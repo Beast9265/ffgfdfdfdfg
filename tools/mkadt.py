@@ -50,6 +50,7 @@ QEMU_VTIMER_INTID = 27
 # virt's first redistributor region; ginkgo's xnu core (MPIDR 0x100) is vCPU 16
 # there (-smp 17), past the 8 frames GICR_SIZE covers.
 QEMU_GICR_SIZE = 0xf60000
+QEMU_VIRTIO_MMIO, QEMU_VIRTIO_MMIO_SIZE = 0x0a000000, 32 * 0x200
 
 BOOT_MANIFEST_HASH = hashlib.sha384(b'sweet boot manifest').digest()
 
@@ -242,6 +243,13 @@ def build(seed=None, qemu=False, highmem=False, board='sweet'):
             ('reg', u64(UFS, UFS_SIZE)),
         ])
 
+    # bsd/dev/sweet_vblk.c (rd=vblk0): QEMU virt's virtio-mmio transports.
+    vblk = node('sweet-vblk', [
+        ph(),
+        ('compatible', cstr('virtio,mmio')),
+        ('reg', u64(QEMU_VIRTIO_MMIO, QEMU_VIRTIO_MMIO_SIZE)),
+    ])
+
     # pmap_compute_max_asids requires the node even when no overrides are set.
     # An absent pmap-max-asids property selects XNU's own MAX_ASIDS default.
     # No effaceable storage: keybagd then reads /private/var/keybags/systembag.kb
@@ -273,7 +281,7 @@ def build(seed=None, qemu=False, highmem=False, board='sweet'):
         ('manufacturer', cstr('Apple Inc.')),
         ('#address-cells', u32(2)),
         ('#size-cells', u32(2)),
-    ], [chosen, defaults, cpus, arm_io, fbcon, buttons] + product + ([] if qemu else [storage]))
+    ], [chosen, defaults, cpus, arm_io, fbcon, buttons] + product + ([vblk] if qemu else [storage]))
 
 
 if __name__ == '__main__':
