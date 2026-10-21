@@ -1,6 +1,6 @@
 # QEMU Emulation & Testing Guide for ios-a71
 
-This document explains how to test the patched Apple XNU kernel for the Redmi Note 10 Pro (`a71`, SM7150) in QEMU virtual machine without touching physical hardware or risking device user data.
+This document explains how to test the patched Apple XNU kernel for the Samsung Galaxy A71 (SM7150) in QEMU virtual machine without touching physical hardware or risking device user data.
 
 ---
 
