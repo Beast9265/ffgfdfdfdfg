@@ -1,14 +1,23 @@
 # ios-a71
 
-**Apple's iOS 16 running on a Redmi Note 10 Pro.**
+**Porting Apple's XNU/iOS userland to a Samsung Galaxy A71 (SM-A715F).**
 
-This project ports Apple's open-source XNU kernel (xnu-8796, the iOS 16 generation) to the Xiaomi Redmi Note 10 Pro (`a71`, Qualcomm SM7150 / Snapdragon 732G). On top of it runs the **unmodified iOS 16.7.16 (20H392) userland of the iPhone X**: launchd, the system daemons, backboardd, SpringBoard and the stock apps.
+This is a fork of [dipa-studio/ios-sweet](https://github.com/dipa-studio/ios-sweet), which ports Apple's open-source XNU kernel (xnu-8796, the iOS 16 generation) and the unmodified **iOS 16.7.16 (20H392) iPhone X userland** to the Xiaomi Redmi Note 10 Pro (codename `sweet`, Qualcomm SM7150 / Snapdragon 732G). That upstream project boots all the way to the iOS home screen on its target device - see its README for that status.
 
-As of **2026-10-18** the phone boots to the **iOS home screen**. You can unlock it, open Settings, pull down Control Center and the notification center, and use the touchscreen and the hardware buttons. Rendering runs entirely on the CPU; there is no GPU driver.
+This fork retargets the same kernel at the **Samsung Galaxy A71** (`SM-A715F`, Snapdragon 730, same `sdmmagpie`/SM7150 chip family). Comparing both devices' real device trees found exact address matches on UFS, GIC, the splash framebuffer, and even touch/button GPIO pin numbers - strong evidence this is a board variant of the same reference silicon rather than a cross-SoC port.
 
-> Experimental bring-up, not a usable phone OS. Many things are missing or stubbed (see below), and Apple's security model is mostly switched off. It installs into the `userdata` partition and so **erases Android's user data**.
+> Experimental, unfinished, **not yet booted on real A71 hardware**. See "A71 status" below for exactly what is and isn't done.
 
-## What works
+## A71 status (this fork)
+
+- **Kernel**: builds clean via CI (`.github/workflows/xnu.yml`, `MACHINE_CONFIG=A71`), passed a generic QEMU smoke-test boot (no panic). No A71-specific kernel changes were needed at the CPU/GIC/UFS/PMIC level - those addresses already matched upstream's exactly.
+- **Touch**: a new driver (`xnu/patches/0082-a71-st-fts-touch.patch`) for A71's actual touch IC (STMicroelectronics FTS5CU56A, not the Goodix/Focaltech chips upstream supports) - protocol decoded from Samsung's own GPL-published kernel source for this exact chip. **Untested on hardware.**
+- **Display**: genuinely unsolved. A71's panel is DSI *command* mode; upstream's entire display trick (CPU writes pixels into the ABL splash buffer, hardware free-runs, zero driver code) only works on *video* mode panels like the Redmi's. A read-only diagnostic (`xnu/patches/0083-a71-display-autorefresh-probe.patch`) is in place to tell us, on first real boot, whether hardware autorefresh can substitute - no real display driver exists yet.
+- **Boot image**: built and structurally verified (`shim/out/shim-boot.img` - gitignored, build it yourself per the steps below).
+- **Bootloader**: unlocked (`OEM LOCK: OFF` confirmed via Download Mode).
+- **Flashing**: blocked, not on the phone side but on tooling - Samsung has no `fastboot boot` equivalent, only Odin's proprietary protocol, and neither native macOS nor a QEMU-passthrough Linux VM could get heimdall (open-source Odin-protocol client) past its USB handshake on this host. A real Linux machine or Windows+Odin would likely work; this specific dev machine could not.
+
+## What works (upstream, Redmi Note 10 Pro)
 
 | Area | State |
 | --- | --- |
@@ -36,6 +45,8 @@ As of **2026-10-18** the phone boots to the **iOS home screen**. You can unlock 
 
 ## How it boots
 
+Upstream, on the Redmi (stock Xiaomi bootloader, has `fastboot boot`):
+
 ```
 ABL (stock Xiaomi bootloader, unlocked)
   -> fastboot boot shim-boot.img              (temporary; nothing is flashed to boot)
@@ -45,11 +56,13 @@ ABL (stock Xiaomi bootloader, unlocked)
               -> dyld + shared cache -> launchd -> daemons -> backboardd + SpringBoard
 ```
 
-There is no serial port (the debug UART is wired as SPI on this board). The kernel draws its console into the framebuffer that ABL leaves at `0x9c000000`, and keeps a persistent 4 MiB log ring at the end of `userdata`. You read that log from OrangeFox recovery with `tools/a71-log-pull.sh`, so you don't have to film the screen.
+On the A71, there is no `fastboot boot` - Samsung only has Odin's protocol over USB, which flashes a partition for real rather than booting a disposable image. The notes (`A71-NOTES.md`, one directory up) track which partition-flash strategy (`recovery` vs `boot`) is actually safest; nothing has been flashed yet.
 
-## How to do it yourself
+There is no serial port (the debug UART is wired as SPI on this board - true for both devices, same SoC). The kernel draws its console into the framebuffer that ABL leaves at `0x9c000000`, and keeps a persistent 4 MiB log ring at the end of `userdata`. You read that log from OrangeFox recovery with `tools/a71-log-pull.sh`, so you don't have to film the screen.
 
-You need a Redmi Note 10 Pro (`a71`, global or Indian variant, SM7150) with an **unlocked bootloader**, a Linux PC, and a GitHub account for the kernel build. This is the exact path used for the screenshots above; other variants or firmware may need changes. **Everything on `userdata` is lost.** Bootloaders, recovery, modem and persist partitions are never touched.
+## How to do it yourself (upstream steps - A71 flashing differs, see above)
+
+You need a Redmi Note 10 Pro (`sweet`, global or Indian variant, SM7150) with an **unlocked bootloader**, a Linux PC, and a GitHub account for the kernel build. This is the exact path upstream used for their screenshots; other variants or firmware may need changes. **Everything on `userdata` is lost.** Bootloaders, recovery, modem and persist partitions are never touched.
 
 ### 0. Back up the phone
 
@@ -120,11 +133,15 @@ What the less obvious boot-args do:
 
 ### 4. Flash the root and boot
 
+Upstream (Redmi, has `fastboot boot`):
+
 ```sh
 fastboot -S 512M flash userdata ios16-root.simg   # ~7 minutes; do not unplug
 # Xiaomi's fastboot often hangs after a large flash: re-enter fastboot with Power + Volume down
 fastboot boot shim/out/shim-boot.img
 ```
+
+On A71 this step is different and still unresolved - no `fastboot boot`, only Odin's protocol, which this fork has not yet gotten a working client for (heimdall's USB handshake failed both natively on macOS and through a QEMU-passthrough Linux VM on this dev machine; untried: a real Linux box, or Windows with actual Odin). See `A71-NOTES.md` for the partition-choice tradeoff once a working flashing path exists.
 
 The first boot takes about 4–5 minutes on the Apple logo, then the lock screen appears. Swipe up to unlock. To get back to fastboot, hold Power + Volume down.
 
@@ -186,8 +203,10 @@ Not in git: partition backups, live device trees, recovery images, Apple firmwar
 | 0066–0067 | Fault-region crash info; console mute |
 | 0068 | IOSurface lookup semantics for already-mapped surfaces |
 | 0069 | Batched persistent-log flushes |
+| 0082 | **A71-specific.** ST FTS5CU56A touch driver (replaces/complements Goodix for this board's actual touch IC) |
+| 0083 | **A71-specific.** Read-only MDSS autorefresh probe, to inform the real display-driver work still ahead |
 
-## Key hardware facts
+## Key hardware facts (upstream, Redmi Note 10 Pro)
 
 - RAM: payloads use the upper bank, `0x100000000` + `0xfcc00000` (about 3.95 GiB), above Qualcomm's protected carve-outs.
 - GICv3 with security extensions: the timer goes through Group 1 IRQ (virtual timer INTID 19), not FIQ as on Apple silicon.
@@ -198,6 +217,17 @@ Not in git: partition backups, live device trees, recovery images, Apple firmwar
 
 More in [`NOTES.md`](NOTES.md).
 
+## Key hardware facts (A71, this fork)
+
+- Same `sdmmagpie` SoC family as the Redmi: UFS host controller, GICv3, and the splash framebuffer are at **identical physical addresses** to the ones above - confirmed by diffing a real A71 boot.img's device tree against this repo's hardcoded constants.
+- Touch: ST FTS5CU56A at I²C `0x49` on the same QUP SE7 bus (`0xa84000`) the Redmi's Goodix touch uses. Reset/IRQ GPIO pin numbers (8/9) also match exactly.
+- Panel: Samsung AMOLED (DDIC `ANA6705` or `S6E3FA9` depending on production batch - 4 variants seen across this unit's `dtbo.img`, not yet narrowed down), 1080×2400, **DSI command mode** - unlike the Redmi's video mode, this does not free-run without software or hardware-autorefresh help. See `xnu/patches/0083-a71-display-autorefresh-probe.patch`.
+- MDSS/SDE register offsets (`mdss_mdp@ae00000`, `qcom,sde-intf-off`, `qcom,sde-pp-off`) read directly from this unit's own device tree; the autorefresh register offsets within those blocks are from Samsung's GPL-published kernel source for this board, not a public datasheet.
+
+More in [`A71-NOTES.md`](../A71-NOTES.md) (one directory up, in the parent project folder).
+
 ## Credits
 
 Built on Apple's open-source releases (xnu, IOHIDFamily, libpthread, hfs), [BearSSL](https://bearssl.org), [blacktop/darwin-xnu-build](https://github.com/blacktop/darwin-xnu-build), [ipsw](https://github.com/blacktop/ipsw), Qualcomm/Xiaomi's published Linux kernel sources for the hardware details, and [OrangeFox Recovery](https://orangefox.download). iOS itself is Apple's and is not distributed here.
+
+This fork additionally draws on Samsung's GPL-published kernel source for the SM-A715F (for the ST FTS touch protocol and MDSS/SDE register offsets), and on [Henrik Grimler's maintained Heimdall fork](https://git.sr.ht/~grimler/Heimdall) for Odin-protocol tooling.
