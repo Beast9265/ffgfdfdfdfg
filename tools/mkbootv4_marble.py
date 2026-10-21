@@ -102,14 +102,27 @@ def independent_verify(data, header, kernel, ramdisk):
         require(not any(data[start:stop]), 'nonzero format padding')
 
 
-def pack(stock, kernel, output, control=False):
+def wrap_xnu(payload):
+    require(payload.startswith(b'SWEETXNU'), 'XNU payload must start with SWEETXNU')
+    wrapped = payload + b'MRBLXNU1' + struct.pack('<Q', len(payload))
+    print('raw payload size:', len(payload), 'SHA256:', sha(payload))
+    print('wrapped generic-ramdisk size:', len(wrapped), 'SHA256:', sha(wrapped))
+    return wrapped
+
+
+def pack(stock, kernel, output, control=False, replacement_ramdisk=None):
     src = stock.read_bytes()
     p = parse(src)
     require(p['signature_size'] == 0, 'signed source rejected: cannot reuse a boot signature')
     require(0 < len(kernel) <= MAX_COMPONENT, 'new kernel must be nonempty and fit uint32')
     ramdisk = src[p['ramdisk_offset']:p['ramdisk_offset'] + p['ramdisk_size']]
+    if replacement_ramdisk is not None:
+        require(not control, 'control cannot replace ramdisk')
+        require(0 < len(replacement_ramdisk) <= MAX_COMPONENT,
+                'replacement ramdisk must be nonempty and fit uint32')
+        ramdisk = replacement_ramdisk
     header = bytearray(src[:HEADER])
-    struct.pack_into('<I', header, 8, len(kernel))
+    struct.pack_into('<2I', header, 8, len(kernel), len(ramdisk))
     # All other valid header bytes, including packed OS/patch and reserved, retained.
     data = bytearray(header)
     data.extend(bytes(align(len(data)) - len(data)))
@@ -143,6 +156,9 @@ def main():
     repack.add_argument('stock', type=Path)
     repack.add_argument('kernel', type=Path)
     repack.add_argument('output', type=Path)
+    replacement = repack.add_mutually_exclusive_group()
+    replacement.add_argument('--ramdisk', type=Path, help='arbitrary replacement generic ramdisk')
+    replacement.add_argument('--xnu-payload', type=Path, help='raw SWEETXNU payload; append MARBLE locator footer')
     args = cli.parse_args()
     if args.command == 'inspect':
         report(args.stock, args.stock.read_bytes())
@@ -154,7 +170,9 @@ def main():
     else:
         kernel = args.kernel.read_bytes()
         print('input kernel size:', len(kernel), 'SHA256:', sha(kernel))
-        pack(args.stock, kernel, args.output)
+        pack(args.stock, kernel, args.output, replacement_ramdisk=
+             wrap_xnu(args.xnu_payload.read_bytes()) if args.xnu_payload else
+             args.ramdisk.read_bytes() if args.ramdisk else None)
 
 
 if __name__ == '__main__':

@@ -1,5 +1,65 @@
 # MARBLE Stage-0 Diagnostic Shim
 
+## Active handoff: First one-core XNU execution on MARBLE (2026-10-21)
+
+The latest user report physically confirms the complete stage-0 milestone:
+boot-v4/temporary boot and ABL DTB handoff, retained framebuffer, PSCI/SMCCC
+1.1, working PSCI reset, Group-1 GICv3/ICC interface, virtual timer INTID27
+(30 IRQs, zero unexpected), SGI1 (10/10), 16K MMU, both high-memory endpoints
+0x840000000..0x940000000 and the intentional unmapped hole. Boot MPIDR
+0x81000000 has zero affinity fields. GICR priority access at 0x17190400
+physically aborts and MUST remain excluded. Map visible framebuffer bytes
+0xb8000000 + 0x009e3400, not the 0x02b00000 splash reservation.
+
+New physical UFS result supersedes the older unconfirmed entries below:
+NOP and READ_FLAG fDeviceInit=0 succeed. LUN0 TUR initially gives 02/04/02;
+normal LUN00 generic START `1b 01 00 00 01 00` fails 05/24/00 and must not
+be retried. Device WLUN D0 ACTIVE `1b 00 00 00 10 00` succeeds (OCS/status0),
+then LUN0 becomes ready. Capacity/read succeed with 4096-byte logical blocks;
+protective MBR AA55/type EE, GPT header/entries and userdata are discovered.
+No filesystem or storage-sector writes occurred.
+
+Prepared uncommitted patch 0082 and host tooling for the next milestone;
+full design, conditional-sharing inventory, commands, checks and limitations:
+[docs/MARBLE_XNU.md](docs/MARBLE_XNU.md). Separate MACHINE_CONFIG=MARBLE is
+plain arm64/v8.2+crypto, 16K, one CPU/cluster; minimal Marble platform/CPU
+from the old single-CPU driver; Group-1 timer27/SGI1, GICR stride0x40000,
+no priority window accesses. Only link/early-console/IRQ providers shared;
+no MARBLE UFS/HFS/touch/display/GPU/SMP. HFS staging is needed only so old
+patches apply, not selected in MARBLE MASTER. Workflow unchanged.
+
+BOARD=marble remains byte-identical: Image188416, SHA256
+0e105d57f0781223b7c326b6aab702d9029d00788d27bb7784a543d2604aa1a6.
+SWEET raw build passes (Image180224). New BOARD=marble-xnu passes
+(Image77824, SHA256201a41661691fc55af7d923f03d28a22ef76e33ffc72533f863dfd2b03802113),
+contains fdt/loader and no UFS; optional payload copied for explicit v4 pack.
+Early MARBLE framebuffer mappings use 633 16K pages (0x9e4000 including
+0xc00 unavoidable final-page rounding). Bootstrap preserves shared L1[0]
+RAM L2, adding only a framebuffer L3; final alias uses a separate L3.
+
+Validation: five Python tests pass; ADT roundtrip verifies all requested
+values. 81 historical patches applied with pinned HFS present, and 0082
+applies cleanly to that baseline. Exact new assembly fragment assembles;
+actual pe_fiq.c cross-compiles for both boards with API-declaration stubs.
+Preprocessed MARBLE has no priority accesses, SWEET GIC output is identical.
+These are isolated checks, NOT a complete XNU compile/link.
+`git diff --check` and 0082 `git apply --check --whitespace=error` pass.
+Existing SWEET kernel only used for host payload format validation;
+/tmp/marble-xnu-FORMAT-ONLY.img (16687104 bytes) uses stock v4 metadata,
+new shim and SWEET payload, hash/reparse verified; NOT bootable MARBLE proof
+and must not be used for physical XNU testing. Local D22AP /product artifact
+is absent; root iPhone X identity remains. No MARBLE kernel exists yet.
+
+No CI run/ID, commit, push, fastboot or phone access. Explicit task prohibits
+automatic commit despite AGENTS default. Pre-existing untracked file named
+`him: complete marble stage-0 hardware bring-up"` preserved. Next: human
+reviews source diff, separately authorizes commit/push, then dispatches
+existing xnu.yml DEVELOPMENT/MARBLE on branch marble. Full kernel link and
+all physical XNU execution remain unverified. Do not write userdata.
+
+All prior active/next-test statements below are historical and superseded.
+
+
 ### Device-WLUN ACTIVE diagnostic (2026-10-21, current)
 
 Physically confirmed by the user: NOP succeeds with OCS=0; READ_FLAG

@@ -1,6 +1,6 @@
 #pragma once
 
-/* SWEET remains the default. MARBLE is diagnostic-only, never an XNU target. */
+/* SWEET remains the default. MARBLE constants are shared by diagnostic and explicit XNU modes. */
 #ifdef SHIM_MARBLE
 #define FB_BASE         0xb8000000UL
 #define FB_RESERVED     0x02b00000UL

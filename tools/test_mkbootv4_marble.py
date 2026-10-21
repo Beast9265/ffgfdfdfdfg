@@ -22,6 +22,44 @@ def fixture():
 
 
 class BootTests(unittest.TestCase):
+    def test_xnu_wrapper(self):
+        payload = b'SWEETXNU' + bytes(17001)
+        with contextlib.redirect_stdout(io.StringIO()):
+            wrapped = boot.wrap_xnu(payload)
+        self.assertEqual(wrapped, payload + b'MRBLXNU1' + struct.pack('<Q', len(payload)))
+        with self.assertRaises(ValueError):
+            boot.wrap_xnu(b'bad')
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stock = root / 'stock'
+            stock.write_bytes(fixture())
+            with contextlib.redirect_stdout(io.StringIO()):
+                boot.pack(stock, b'kernel', root / 'wrapped', replacement_ramdisk=wrapped)
+            image = (root / 'wrapped').read_bytes()
+            info = boot.parse(image)
+            self.assertEqual(image[info['ramdisk_offset']:info['ramdisk_offset'] + info['ramdisk_size']], wrapped)
+
+    def test_explicit_replacement_ramdisk(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stock = root / 'stock'
+            stock.write_bytes(fixture() + b'AVBfPRIVATE-TRAILER')
+            payload = b'SWEETXNU' + bytes(17001)
+            kernel = b'Image' * 900
+            with contextlib.redirect_stdout(io.StringIO()):
+                boot.pack(stock, kernel, root / 'xnu', replacement_ramdisk=payload)
+            data = (root / 'xnu').read_bytes()
+            info = boot.parse(data)
+            self.assertEqual(info['ramdisk_size'], len(payload))
+            self.assertEqual(data[16:1584], fixture()[16:1584])
+            self.assertEqual(info['signature_size'], 0)
+            self.assertEqual(len(data), info['boot_image_end'])
+            boot.independent_verify(data, data[:1584], kernel, payload)
+            with self.assertRaises(ValueError):
+                boot.pack(stock, kernel, root / 'bad', replacement_ramdisk=b'')
+            with self.assertRaises(ValueError):
+                boot.pack(stock, kernel, root / 'bad', control=True, replacement_ramdisk=payload)
+
     def test_reject_malformed(self):
         for offset, value in ((0, 0), (8, 0), (8, 0xffffffff),
                               (12, 0xffffffff), (20, 1580), (40, 3),

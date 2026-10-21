@@ -1,5 +1,125 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## Active handoff: MARBLE boot-v4 payload locator review (2026-10-21)
+
+Fixed the critical generic-ramdisk location assumption without redesigning 0082.
+`--xnu-payload` validates raw SWEETXNU magic and appends exactly 16 bytes:
+`MRBLXNU1` (8 bytes), then raw payload length as LE64. `--ramdisk` remains
+available and is mutually exclusive. Raw and wrapped sizes/hashes are reported;
+post-write reparse and independent extraction verification remain enabled.
+No vendor_boot modifications; tools/mkpayload.py is unchanged.
+
+SHIM_MARBLE_XNU uses the shared C helper shim/payload_range.h. It reads only
+fixed tail locations, strips optional bootconfig only when final 12 bytes are
+exactly #BOOTCONFIG\n, checks span >=20 and LE32 size <= span-20, then uses
+end-20-size (size includes padding). Footer at ramdisk_end-16 determines the
+payload start by checked subtraction. No vendor-byte scanning. Header and
+segment table are copied to aligned local storage because vendor concatenation
+need not align the payload. SWEET still locates its raw payload at initrd-start.
+
+Before any destination write, both loaders check version1, nsegs1..64, table,
+ADT and segment source ranges, virtual segment overflow, translated RAM bounds,
+file_size<=vmsize, kernel_end, entry, ADT and rounded boot_args/top placement,
+and initrd/kernel-memory overlap. MARBLE requires exactly 0x840000000+0x100000000.
+Copies/zeroing handle partial words exactly, without reading/writing past bounds.
+0082 changes this review are only three redundant guards and the Qualcomm
+ARMv8.2 comment. Reviewed one-CPU/MMU/ADT/GIC and staged providers preserved.
+
+Local validation (observations, not physical XNU results):
+- BOARD=marble passes, Image188416, SHA256
+  0e105d57f0781223b7c326b6aab702d9029d00788d27bb7784a543d2604aa1a6:
+  byte-identical to the recorded successful physical stage-0 build.
+- SHIM_RAW_ONLY=1 BOARD=sweet passes, Image184320, SHA256
+  f1edc94005b895adcb148d49021898cfe4ae34fa7e57c4d178845425f67f5b48.
+  Size/hash changed with shared loader bounds hardening; raw discovery preserved.
+- BOARD=marble-xnu passes, Image81920, SHA256
+  586713d3b4c5862f73443cb1e5f555e465a9ffa5f3e2662672d41fff1715ee05.
+- All six tools unittest cases pass. All three shim Python scripts pass
+  (actual loader bounds, NOP/query, DEVACT); C locator and UFS decoder pass
+  ASan/UBSan. Locator covers concatenated vendor layouts with/without bootconfig,
+  malformed magic/size, zero/oversized size, truncation, underflow and decoys;
+  actual loader harness also accepts deliberately unaligned concatenation.
+- mkadt.py /tmp/marble.adt --marble --dump passes (3760 bytes). Missing local
+  D22AP /product warning remains; exact MARBLE values covered by roundtrip test.
+- 0082 git apply --check --whitespace=error passes against /tmp/marble-baseline
+  (final 0081). Fresh isolated application and pe_fiq.c cross-compile/preprocess
+  pass both boards with API declaration stubs. MARBLE has zero priority-window
+  accesses/no header definition; SWEET preprocessed GIC equals saved baseline.
+- git diff --check passes. CLI mutual exclusion, ordinary ramdisk/control and
+  wrapped generic-ramdisk pack/reparse/extraction all pass.
+
+Final format-only image: /tmp/marble-wrapper-final-FORMAT-ONLY.img, 16691200
+bytes, no signature/trailer, new shim with old SWEET format-test payload.
+This is NOT a bootable MARBLE-kernel proof and must not be physically tested.
+Independent hashes:
+raw payload16604624: 5620aab559016fb6b3b1411c589c3f54aa93440ad57bedd474ae747c049116ff
+wrapped16604640: 7eb72419d58c7b2a88153db2596b4bb2e1b92443a1d690a7ca5584483beccc23
+extracted16604640: 7eb72419d58c7b2a88153db2596b4bb2e1b92443a1d690a7ca5584483beccc23
+
+No CI run/ID, device operation, staging, commit or push. Explicit no-commit
+request overrides the repository default. Full XNU compile/link and physical
+XNU execution remain unverified. Next action requires separate user direction;
+do not run CI automatically. Earlier active handoffs below are historical.
+
+## Active handoff: First one-core XNU execution on MARBLE (2026-10-21)
+
+The latest user report physically confirms the complete stage-0 milestone:
+boot-v4/temporary boot and ABL DTB handoff, retained framebuffer, PSCI/SMCCC
+1.1, working PSCI reset, Group-1 GICv3/ICC interface, virtual timer INTID27
+(30 IRQs, zero unexpected), SGI1 (10/10), 16K MMU, both high-memory endpoints
+0x840000000..0x940000000 and the intentional unmapped hole. Boot MPIDR
+0x81000000 has zero affinity fields. GICR priority access at 0x17190400
+physically aborts and MUST remain excluded. Map visible framebuffer bytes
+0xb8000000 + 0x009e3400, not the 0x02b00000 splash reservation.
+
+New physical UFS result supersedes the older unconfirmed entries below:
+NOP and READ_FLAG fDeviceInit=0 succeed. LUN0 TUR initially gives 02/04/02;
+normal LUN00 generic START `1b 01 00 00 01 00` fails 05/24/00 and must not
+be retried. Device WLUN D0 ACTIVE `1b 00 00 00 10 00` succeeds (OCS/status0),
+then LUN0 becomes ready. Capacity/read succeed with 4096-byte logical blocks;
+protective MBR AA55/type EE, GPT header/entries and userdata are discovered.
+No filesystem or storage-sector writes occurred.
+
+Prepared uncommitted patch 0082 and host tooling for the next milestone;
+full design, conditional-sharing inventory, commands, checks and limitations:
+[docs/MARBLE_XNU.md](docs/MARBLE_XNU.md). Separate MACHINE_CONFIG=MARBLE is
+plain arm64/v8.2+crypto, 16K, one CPU/cluster; minimal Marble platform/CPU
+from the old single-CPU driver; Group-1 timer27/SGI1, GICR stride0x40000,
+no priority window accesses. Only link/early-console/IRQ providers shared;
+no MARBLE UFS/HFS/touch/display/GPU/SMP. HFS staging is needed only so old
+patches apply, not selected in MARBLE MASTER. Workflow unchanged.
+
+BOARD=marble remains byte-identical: Image188416, SHA256
+0e105d57f0781223b7c326b6aab702d9029d00788d27bb7784a543d2604aa1a6.
+SWEET raw build passes (Image180224). New BOARD=marble-xnu passes
+(Image77824, SHA256201a41661691fc55af7d923f03d28a22ef76e33ffc72533f863dfd2b03802113),
+contains fdt/loader and no UFS; optional payload copied for explicit v4 pack.
+Early MARBLE framebuffer mappings use 633 16K pages (0x9e4000 including
+0xc00 unavoidable final-page rounding). Bootstrap preserves shared L1[0]
+RAM L2, adding only a framebuffer L3; final alias uses a separate L3.
+
+Validation: five Python tests pass; ADT roundtrip verifies all requested
+values. 81 historical patches applied with pinned HFS present, and 0082
+applies cleanly to that baseline. Exact new assembly fragment assembles;
+actual pe_fiq.c cross-compiles for both boards with API-declaration stubs.
+Preprocessed MARBLE has no priority accesses, SWEET GIC output is identical.
+These are isolated checks, NOT a complete XNU compile/link.
+`git diff --check` and 0082 `git apply --check --whitespace=error` pass.
+Existing SWEET kernel only used for host payload format validation;
+/tmp/marble-xnu-FORMAT-ONLY.img (16687104 bytes) uses stock v4 metadata,
+new shim and SWEET payload, hash/reparse verified; NOT bootable MARBLE proof
+and must not be used for physical XNU testing. Local D22AP /product artifact
+is absent; root iPhone X identity remains. No MARBLE kernel exists yet.
+
+No CI run/ID, commit, push, fastboot or phone access. Explicit task prohibits
+automatic commit despite AGENTS default. Pre-existing untracked file named
+`him: complete marble stage-0 hardware bring-up"` preserved. Next: human
+reviews source diff, separately authorizes commit/push, then dispatches
+existing xnu.yml DEVELOPMENT/MARBLE on branch marble. Full kernel link and
+all physical XNU execution remain unverified. Do not write userdata.
+
+All prior active/next-test statements below are historical and superseded.
+
 ## Active handoff: MARBLE stage 0 (2026-10-21)
 
 

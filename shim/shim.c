@@ -293,7 +293,7 @@ static void irq_window(const char *label, uintptr_t r, int src)
 	con_hex2(" pre", "tctl=", ist, "last=", irq_last);
 }
 
-static void test_gic(void)
+static void __attribute__((unused)) test_gic(void)
 {
 	stage = "gic sre";
 	uint64_t sre = rsr("icc_sre_el1");
@@ -408,7 +408,13 @@ static uint32_t to_us(uint64_t ticks)
 
 void shim_main(uint64_t dtb)
 {
-#ifdef SHIM_MARBLE
+#ifdef SHIM_MARBLE_XNU
+    stage = "marble XNU loader";
+    con_clear(RED);
+    con_str("SHIM", "MARBLE one-CPU XNU loader");
+    con_str("LOADER", loader_boot(dtb));
+    for (;;) __asm__ volatile("wfe");
+#elif defined(SHIM_MARBLE)
 	struct mmu_info mi = {0};
 	stage = "marble stage 0";
 	con_clear(RED);

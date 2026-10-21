@@ -11,6 +11,13 @@ sweet)
 	out=out
 	sources=(start.S shim.c console.c mmu.c fdt.c loader.c ufs.c)
 	;;
+marble-xnu)
+	[ "$#" -le 1 ] || { echo "marble-xnu accepts one optional payload" >&2; exit 1; }
+	[ "$#" = 0 ] || [ -s "$1" ] || { echo "missing/empty XNU payload" >&2; exit 1; }
+	out=out/marble-xnu
+	CFLAGS+=" -DSHIM_MARBLE -DSHIM_MARBLE_XNU -ffunction-sections -fdata-sections"
+	sources=(start.S shim.c console.c mmu.c fdt.c loader.c)
+	;;
 marble)
 	[ "$#" = 0 ] || { echo "MARBLE stage 0 rejects payload arguments" >&2; exit 1; }
 	out=out/marble
@@ -32,13 +39,19 @@ done
 # header's image_size (start.o, linked at 0) may be an absolute address.
 abs=$(aarch64-linux-gnu-readelf -r "${cobjects[@]}" | grep -c ABS64 || true)
 [ "$abs" = 0 ] || { echo "error: $abs absolute relocations in C objects" >&2; exit 1; }
-$CC $CFLAGS -static -T shim.ld -Wl,--build-id=none -Wl,--no-warn-rwx-segments -Wl,-N \
+ldflags=()
+[ "$board" != marble-xnu ] || ldflags+=(-Wl,--gc-sections)
+$CC $CFLAGS "${ldflags[@]}" -static -T shim.ld -Wl,--build-id=none -Wl,--no-warn-rwx-segments -Wl,-N \
 	"${objects[@]}" -o "$out/shim.elf"
 $OBJCOPY -O binary "$out/shim.elf" "$out/Image"
 # ABL copies the file; pad to image_size so .bss/stacks exist as zeroed bytes.
 size=$(aarch64-linux-gnu-nm "$out/shim.elf" | awk '$3=="_end"{print strtonum("0x"$1)}')
 truncate -s "$size" "$out/Image"
-if [ "$board" = marble ] || [ "${SHIM_RAW_ONLY:-0}" = 1 ]; then
+if [ "$board" = marble-xnu ] && [ -n "${1:-}" ]; then
+	cp "$1" "$out/ramdisk.bin"
+	echo "Payload copied to $out/ramdisk.bin; use explicit v4 repack --xnu-payload."
+fi
+if [ "$board" = marble ] || [ "$board" = marble-xnu ] || [ "${SHIM_RAW_ONLY:-0}" = 1 ]; then
 	echo "$board raw Image only; boot packaging requires board-specific verification."
 	ls -l "$out/Image" "$out/shim.elf"
 	exit 0
