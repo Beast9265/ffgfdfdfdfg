@@ -1,5 +1,46 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## Active handoff: MARBLE stage 0 (2026-10-21)
+
+- User requested a separate SM7475 MARBLE diagnostic shim; SWEET XNU baseline
+  already built successfully. Do not change the workflow. **Do not commit or
+  push until user reviews. Do not run fastboot or flash.**
+- Added board selection (`BOARD=marble shim/build.sh`), raw outputs only in
+  `shim/out/marble/`. MARBLE rejects payloads and excludes loader/secondary CPU
+  code. PSCI/GIC/virtual timer page, existing read-only UFS probe with MMU off,
+  then 16K MMU translation diagnostics; PSCI reset only, no SWEET PSHOLD.
+- Board constants use authoritative user-provided values; no MARBLE hardware
+  observation exists. High Device mapping covers 0x840000000..0x940000000;
+  no actual RAM access to that future XNU window. SWEET defaults preserved.
+- Local MARBLE and SWEET raw builds passed without warnings; zero C ABS64,
+  linked MARBLE ELF no relocations, only expected start.o header ABS64.
+  Image 180224 bytes, ARM64 header size checked, SHA256
+  `b344ada1efa0502547a151fd171843b8150d4e58688a04e81f2cf69688cbefa1`.
+  All L2/L3 entries checked in extracted host table-construction harness for
+  low/high/cross-block images on both configurations. UFS command code unchanged
+  except moving its identical base address into board.h; no SCSI WRITE added.
+- No new CI run, device boot, commit or push. Packaging remains blocked pending
+  private stock v4 boot/vendor_boot header, DTB, load-placement and DMA checks.
+  No MARBLE boot.img produced; never use SWEET v2 packaging for MARBLE.
+- Review corrections (2026-10-21): framebuffer mapping uses `FB_VISIBLE_SIZE`
+  (`4320 * 2400 = 10,368,000`), statically bounded by FB_RESERVED. Host checks
+  confirm only MARBLE 0xb8000000 is Normal-NC; 0xba000000 stays Device.
+  MARBLE now() reads CNTVCT; SWEET keeps CNTPCT; UFS counter code unchanged.
+  User-provided Android log reports 19.20 MHz (virt/virt), live DT PPI 11 /
+  INTID 27. MARBLE reset calls only PSCI_SYSTEM_RESET and WFE forever if it
+  returns: no IMEM restart-reason or PSHOLD write. SWEET reset is unchanged.
+- Re-ran `BOARD=marble shim/build.sh` and
+  `SHIM_RAW_ONLY=1 BOARD=sweet shim/build.sh`: both exit 0, no warnings,
+  raw Images each 180224 bytes. Both boards: zero C ABS64, only the expected
+  start.o header ABS64, linked ELF no relocations. Regenerated host harness
+  from current mmu.c: every L2/L3 entry passes for low/high/cross-block image
+  placements, out-of-range rejected, exactly one Normal-NC block per board.
+  Harness is local `/tmp/marble-mmu-check.c`; these are offline observations,
+  not hardware boot results. No CI run, device command, packaging, commit or push.
+- Next: user reviews diff, then privately inspect packaging inputs described in
+  `MARBLE_STAGE0.md`. Original images/device identifiers must stay out of git.
+
+
 ## Agent handoff / active work (2026-10-15, latest)
 
 ### >>> UPDATE 2026-10-18 (read first, then the 10-17 handoff below) <<<

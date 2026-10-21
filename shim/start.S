@@ -39,6 +39,7 @@ _start:
 3:	wfe
 	b	3b
 
+#ifndef SHIM_MARBLE
 /* PSCI CPU_ON target. x0 = context id = cpu index (1..7). */
 	.globl secondary_entry
 secondary_entry:
@@ -54,6 +55,8 @@ secondary_entry:
 	bl	secondary_main
 4:	wfe
 	b	4b
+
+#endif
 
 /*
  * Exception vectors. Each slot stashes x29/x30, loads its slot number

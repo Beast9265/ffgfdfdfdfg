@@ -83,14 +83,22 @@ int mmu_enable(struct mmu_info *info)
 	info->img_lo = img_lo;
 	info->img_hi = img_hi;
 	info->ttbr = pool;
-	if (((img_hi - 1) >> BLK_SHIFT) - (img_lo >> BLK_SHIFT) > 1)
+	if (img_hi > IDENTITY_LIMIT || ((img_hi - 1) >> BLK_SHIFT) - (img_lo >> BLK_SHIFT) > 1)
 		return -1;	/* only room for two L3 tables */
 
-	/* L2: Device everywhere RAM or MMIO can be (first 8GB), rest unmapped */
+	/* Keep SWEET low mappings; MARBLE additionally maps its high RAM window.
+	 * Device attributes here do not access RAM or make carve-outs cacheable. */
 	zero_table(l2);
-	for (uint64_t i = 0; i < (8UL << 30) >> BLK_SHIFT; i++)
+	for (uint64_t i = 0; i < IDENTITY_LOW_SIZE >> BLK_SHIFT; i++)
 		l2[i] = (i << BLK_SHIFT) | DEV_FLAGS | D_BLOCK;
-	l2[FB_PHYS >> BLK_SHIFT] = (FB_PHYS & ~(BLK_SIZE - 1)) | NC_FLAGS | D_BLOCK;
+#ifdef SHIM_MARBLE
+	_Static_assert(HIGH_MAP_BASE + HIGH_MAP_SIZE <= IDENTITY_LIMIT, "high map exceeds L2");
+	for (uint64_t pa = HIGH_MAP_BASE; pa < HIGH_MAP_BASE + HIGH_MAP_SIZE; pa += BLK_SIZE)
+		l2[pa >> BLK_SHIFT] = pa | DEV_FLAGS | D_BLOCK;
+#endif
+	for (uint64_t blk = FB_PHYS >> BLK_SHIFT;
+	     blk <= (FB_PHYS + FB_VISIBLE_SIZE - 1) >> BLK_SHIFT; blk++)
+		l2[blk] = (blk << BLK_SHIFT) | NC_FLAGS | D_BLOCK;
 
 	/* L3 for each block that holds part of the image */
 	for (uint64_t blk = img_lo >> BLK_SHIFT; blk <= (img_hi - 1) >> BLK_SHIFT; blk++) {

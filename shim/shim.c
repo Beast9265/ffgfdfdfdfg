@@ -12,14 +12,9 @@
 #include "loader.h"
 #include "ufs.h"
 
-#define IMEM_RESTART_REASON	0x146aa65cUL	/* qcom,msm-imem restart_reason@65c */
+#include "board.h"
 #define RESTART_BOOTLOADER	0x77665500U
-#define PSHOLD			0x0c264000UL
 
-#define GICD_BASE		0x17a00000UL
-#define GICR_BASE		0x17a60000UL
-#define GICR_SIZE		0x100000UL
-#define GICR_PE_SIZE		0x20000UL
 #define GICR_TYPER		0x08
 #define GICR_WAKER		0x14
 #define GICR_SGI		0x10000
@@ -30,7 +25,6 @@
 #define GICR_ISPENDR0		(GICR_SGI + 0x200)
 #define GICR_ISACTIVER0		(GICR_SGI + 0x300)
 #define GICR_ICFGR1		(GICR_SGI + 0xc04)
-#define VTIMER_INTID		19	/* DT: <GIC_PPI 3 ...>, not the usual 27 */
 #define PTIMER_INTID		18	/* DT: <GIC_PPI 2 ...> */
 #define SGI_INTID		1
 
@@ -59,8 +53,10 @@ static inline void wr8(uintptr_t a, uint8_t v) { *(volatile uint8_t *)a = v; }
 extern char secondary_entry[];
 
 static const char *stage;	/* set at runtime: no absolute pointers in data */
+#ifndef SHIM_MARBLE
 static volatile uint64_t sec_mpidr[NR_CPUS];
 static volatile uint64_t sec_probe[4];	/* CPU1 redistributor write test */
+#endif
 static volatile uint32_t irq_count, irq_other, irq_last;
 static volatile int irq_src;
 
@@ -91,7 +87,11 @@ static uint64_t smc(uint64_t fn, uint64_t a1, uint64_t a2, uint64_t a3)
 static uint64_t now(void)
 {
 	isb();
+	#ifdef SHIM_MARBLE
+	return rsr("cntvct_el0");
+#else
 	return rsr("cntpct_el0");
+#endif
 }
 
 static void delay_ms(unsigned ms)
@@ -106,10 +106,15 @@ static void __attribute__((noreturn)) reset(unsigned after_s)
 	con_skip();
 	con_str("RESET", after_s > 20 ? "in 40s" : "in 20s");
 	delay_ms(after_s * 1000);
+
+#ifndef SHIM_MARBLE
 	wr32(IMEM_RESTART_REASON, RESTART_BOOTLOADER);
 	__asm__ volatile("dsb sy" ::: "memory");
+#endif
 	smc(PSCI_SYSTEM_RESET, 0, 0, 0);
+#ifndef SHIM_MARBLE
 	wr32(PSHOLD, 0);
+#endif
 	for (;;)
 		__asm__ volatile("wfe");
 }
@@ -130,8 +135,10 @@ static void irq_handler(void)
 		irq_other++;
 	if (id == VTIMER_INTID)
 		wsr("cntv_tval_el0", rsr("cntfrq_el0") / 100);	/* 10 ms */
+#ifndef SHIM_MARBLE
 	else if (id == PTIMER_INTID)
 		wsr("cntp_tval_el0", rsr("cntfrq_el0") / 100);
+#endif
 	wsr("icc_eoir1_el1", iar);
 	isb();
 }
@@ -165,6 +172,7 @@ void exc_handler(uint64_t slot, uint64_t *regs)
 
 static uintptr_t find_gicr(void);
 
+#ifndef SHIM_MARBLE
 void secondary_main(uint64_t idx)
 {
 	sec_mpidr[idx] = rsr("mpidr_el1") | (1ULL << 63);
@@ -203,6 +211,8 @@ static void __attribute__((unused)) test_smp(void)
 	}
 }
 
+#endif
+
 /* ---- GIC + timer ---- */
 
 static uintptr_t find_gicr(void)
@@ -238,10 +248,13 @@ static void irq_window(const char *label, uintptr_t r, int src)
 	if (src == VTIMER_INTID) {
 		wsr("cntv_tval_el0", f / 100);
 		wsr("cntv_ctl_el0", 1);
-	} else if (src == PTIMER_INTID) {
+	}
+#ifndef SHIM_MARBLE
+	else if (src == PTIMER_INTID) {
 		wsr("cntp_tval_el0", f / 100);
 		wsr("cntp_ctl_el0", 1);
 	}
+#endif
 	isb();
 	/* sample state with IRQs still masked, after the first period */
 	uint64_t t = now() + f / 50;
@@ -269,7 +282,9 @@ static void irq_window(const char *label, uintptr_t r, int src)
 		}
 	__asm__ volatile("msr daifset, #2" ::: "memory");
 	wsr("cntv_ctl_el0", 0);
+#ifndef SHIM_MARBLE
 	wsr("cntp_ctl_el0", 0);
+#endif
 	isb();
 
 	con_hex2(label, "irqs=", irq_count, "other=", irq_other);
@@ -319,7 +334,11 @@ static void test_gic(void)
 	uint32_t pri_before = rd32(r + GICR_IPRIORITYR + 16);	/* INTIDs 16..19 */
 	for (int id = 0; id < 32; id++)
 		wr8(r + GICR_IPRIORITYR + id, 0xa0);
-	wr32(r + GICR_ISENABLER0, (1U << VTIMER_INTID) | (1U << PTIMER_INTID) | (1U << SGI_INTID));
+	wr32(r + GICR_ISENABLER0, (1U << VTIMER_INTID) | (1U << SGI_INTID)
+#ifndef SHIM_MARBLE
+	      | (1U << PTIMER_INTID)
+#endif
+	);
 	con_hex2("ENABLE", "was=", en_before, "now=", rd32(r + GICR_ISENABLER0));
 	(void)grp;
 	(void)pri_before;
@@ -347,6 +366,7 @@ static void __attribute__((unused)) psci_line(const char *label, uint64_t fn)
 	con_hex2(label, "feat=", smc(PSCI_FEATURES, fn, 0, 0), 0, 0);
 }
 
+#ifndef SHIM_MARBLE
 static uint64_t scratch[8192];	/* 64KB, lives in our (later cacheable) image */
 
 static uint64_t ticks_fill(uint32_t c)
@@ -370,8 +390,54 @@ static uint32_t to_us(uint64_t ticks)
 	return ticks * 10 / 192;	/* 19.2 MHz */
 }
 
+#endif
+
 void shim_main(uint64_t dtb)
 {
+#ifdef SHIM_MARBLE
+	struct mmu_info mi = {0};
+	stage = "marble stage 0";
+	con_clear(RED);
+	con_str("SHIM", "MARBLE STAGE-0 (no XNU)");
+	con_hex("DTB", dtb);
+	con_hex("MPIDR", rsr("mpidr_el1"));
+	con_hex("CNTFRQ", rsr("cntfrq_el0"));
+	if (rsr("cntfrq_el0") != TIMER_HZ) {
+		con_str("STOP", "unexpected timer frequency");
+		for (;;) __asm__ volatile("wfe");
+	}
+	stage = "psci";
+	con_hex2("PSCI", "ver=", smc(PSCI_VERSION, 0, 0, 0),
+	    "smccc=", smc(SMCCC_VERSION, 0, 0, 0));
+	psci_line("RESET", PSCI_SYSTEM_RESET);
+	stage = "gic";
+	test_gic();
+	con_str("PHOTO", "UFS page in 20s");
+	delay_ms(20000);
+	con_clear(RED);
+	stage = "ufs (MMU off)";
+	test_ufs();
+	con_str("PHOTO", "MMU page in 40s");
+	delay_ms(40000);
+	con_clear(RED);
+	con_str("SHIM", "MARBLE 16K MMU diagnostic");
+	stage = "mmu enable";
+	int rc = mmu_enable(&mi);
+	con_hex("MMU rc", (uint64_t)(int64_t)rc);
+	con_hex("IMG lo", mi.img_lo);
+	con_hex("IMG hi", mi.img_hi);
+	if (!rc) {
+		con_hex("PAR img", mmu_probe((uintptr_t)shim_main));
+		con_hex("PAR fb", mmu_probe(FB_PHYS));
+		con_hex("PAR gic", mmu_probe(GICD_BASE));
+		/* AT only: no loads/stores into the future XNU window. */
+		con_hex("PAR high", mmu_probe(HIGH_MAP_BASE));
+		con_hex("PAR end", mmu_probe(HIGH_MAP_BASE + HIGH_MAP_SIZE - 0x4000));
+		con_hex("PAR hole", mmu_probe(0x300000000UL));
+	}
+	stage = "done";
+	reset(40);
+#else
 	struct mmu_info mi;
 
 	/* An xnu payload in the ramdisk means: boot it (MMU stays off). */
@@ -432,4 +498,5 @@ void shim_main(uint64_t dtb)
 
 	stage = "done";
 	reset(40);
+#endif
 }
