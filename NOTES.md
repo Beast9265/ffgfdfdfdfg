@@ -1,5 +1,34 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## Active handoff: MARBLE sampler link fix (2026-10-22)
+
+User reports DEVELOPMENT/MARBLE run 39603903020 reached final kernel link,
+with only undefined _sweet_sample_task from _sweet_sample_proc. This run
+was not independently fetched or rerun. Updated only 0082 source hunks:
+bsd/dev/sweet_sample.c now includes pexpert/arm64/board_config.h and wraps
+all existing includes/implementation in ARM64_BOARD_CONFIG_SWEET. No
+exception.c change, MARBLE sampler enablement, or GIC changes.
+
+Local observations: copied /tmp/marble-baseline to
+/tmp/marble-sampler-validation, reversed all 81 patches then reapplied
+0001–0081 successfully. Final 0082 git apply --check --whitespace=error
+and actual application pass. /tmp/check-marble-sampler.py uses real board
+headers and empty unavailable API-header stubs: MARBLE preprocesses empty,
+compiles to arm64 Mach-O /tmp/marble-sampler-empty.o, and llvm-nm shows no
+sampler symbols/undefined references. SWEET preprocessing is byte-identical
+to 0081 under the same API stubs; full SWEET compilation was not performed.
+Other late standard additions sweet_keys.c, sweet_touch.c, sweet_rpmh.c,
+sweet_spmi.c and sweet_usb.c already guard their complete implementations;
+all preprocess empty for MARBLE. No additional unguarded SWEET-only
+implementation references found in those files. GIC constants verified:
+timer27, SGI1, GICR_PE_SIZE0x40000, no preprocessed MARBLE GICR_IPRIORITYR
+references. Existing GIC patch hunks are untouched. git diff --check passes.
+
+No new CI run, full kernel link, device operation, fastboot, commit or push.
+Explicit user no-commit instruction overrides repository default. Next:
+review this narrow patch; full CI link remains unverified after the fix.
+Earlier handoffs below are historical.
+
 ## Active handoff: MARBLE boot-v4 payload locator review (2026-10-21)
 
 Fixed the critical generic-ramdisk location assumption without redesigning 0082.

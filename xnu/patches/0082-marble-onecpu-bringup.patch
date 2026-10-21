@@ -10,6 +10,24 @@ diff --git a/bsd/conf/Makefile.template b/bsd/conf/Makefile.template
  SWEET_PTHREAD_ROOT = $(SRCROOT)/bsd/pthread/sweet_libpthread
  SWEET_PTHREAD_INC = -I$(SWEET_PTHREAD_ROOT) -I$(SWEET_PTHREAD_ROOT)/private -I$(SWEET_PTHREAD_ROOT)/include
  sweet_pthread_init.o_INCFLAGS = $(SWEET_PTHREAD_INC)
+diff --git a/bsd/dev/sweet_sample.c b/bsd/dev/sweet_sample.c
+--- a/bsd/dev/sweet_sample.c
++++ b/bsd/dev/sweet_sample.c
+@@ -12,6 +12,10 @@
+  *
+  * First sample 90 s after start, then every 120 s, 40 samples at most.
+  */
++#include <pexpert/arm64/board_config.h>
++
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++
+ #include <sys/param.h>
+ #include <sys/systm.h>
+ #include <sys/proc.h>
+@@ -88 +92,3 @@
+ }
++
++#endif /* ARM64_BOARD_CONFIG_SWEET */
 diff --git a/bsd/kern/kern_trustcache.c b/bsd/kern/kern_trustcache.c
 --- a/bsd/kern/kern_trustcache.c
 +++ b/bsd/kern/kern_trustcache.c
