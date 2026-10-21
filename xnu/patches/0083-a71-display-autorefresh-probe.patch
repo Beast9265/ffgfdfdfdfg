@@ -1,0 +1,114 @@
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -106,6 +106,7 @@
+ bsd/dev/a71_ufs.c			standard
+ bsd/dev/a71_sample.c			standard
+ bsd/dev/a71_keys.c			standard
+ bsd/dev/a71_touch.c			standard
++bsd/dev/a71_display_probe.c		standard
+ bsd/dev/mem.c				standard
+ bsd/dev/munge.c 			optional config_requires_u32_munging
+ bsd/dev/unix_startup.c			standard
+--- a/bsd/dev/a71_touch.c
++++ b/bsd/dev/a71_touch.c
+@@ -20,6 +20,7 @@
+ extern kern_return_t thread_terminate(thread_t);
+ extern int a71_rpmh_vreg_enable(const char *res, unsigned mv);
+ extern void a71_hid_touch(int finger, int down, int x, int y);
++extern void a71_display_probe_init(void);
+ void a71_touch_init(void);
+
+ #define TOUCH_SE_PA      0x00a84000u
+@@ -762,6 +763,11 @@
+ 		return;
+ 	}
+ 	st.started = true;
++	/* Unrelated to touch, but this is the one already-reconstructed init
++	 * path that runs once post-scheduler: piggyback the read-only MDSS
++	 * autorefresh probe here instead of threading a new call site through
++	 * a71_ufs.c's longer, more-patched boot sequence. */
++	a71_display_probe_init();
+ 	(void)PE_parse_boot_argn("a71touch", &enabled, sizeof(enabled));
+ 	(void)PE_parse_boot_argn("a71touchirq", &st.irq_hint, sizeof(st.irq_hint));
+ 	if (!enabled) {
+--- /dev/null
++++ b/bsd/dev/a71_display_probe.c
+@@ -0,0 +1,78 @@
++/*
++ * Read-only MDSS/SDE display-controller probe. A71's panel is DSI
++ * *command* mode (confirmed from the board's device-tree overlay:
++ * qcom,mdss-dsi-panel-type = "dsi_cmd_mode"), unlike the Redmi Note
++ * 10 Pro target this kernel started from, whose panel is *video* mode.
++ * On video mode the display
++ * hardware free-runs from a fixed memory address with zero software
++ * kicks - that is the entire trick behind a71fbcon/console.c writing
++ * straight into the ABL continuous-splash buffer and the picture just
++ * staying up. Command-mode panels do not free-run that way by default:
++ * they need either (a) a DSI "kick" (write_mem_continue) per frame, or
++ * (b) hardware autorefresh enabled, which keeps re-pushing a fixed
++ * source address on its own - exactly (b) is what we want to know is
++ * already true (ABL may enable it for its own continuous splash) before
++ * writing any real display driver code.
++ *
++ * This probe only *reads* two candidate autorefresh config registers
++ * and the result is only informative - no register is written here.
++ * Addresses are computed from A71's own live device tree (SM-A715F,
++ * build A715FXXSBDXB1): mdss_mdp@ae00000 reg property gives the MDP
++ * base and size; qcom,sde-intf-off / qcom,sde-pp-off give the per-block
++ * offsets (dp,dsi,dsi,dp -> first "dsi" entry, intf index 1, is this
++ * panel's DSI0 path per qcom,dsi-ctrl-num = 0 in the panel node).
++ * Register offsets within each block (INTF_TEAR_AUTOREFRESH_CONFIG
++ * 0x2b4, PP_AUTOREFRESH_CONFIG 0x30) are from Samsung's own GPL kernel
++ * source for this board (drivers/gpu/drm/msm/sde/sde_hw_intf.c,
++ * sde_hw_pingpong.c), not a public datasheet.
++ *
++ * Bit layout (same source): bit 31 = enable, low bits = frame_count
++ * (0 = disabled). A nonzero read here, with bit 31 set, means ABL
++ * already left autorefresh running for its own splash - if so, a71's
++ * existing a71fbcon memory-write path may work on A71 completely
++ * unmodified. A zero read means it is not currently enabled (ABL may
++ * still be doing per-frame DSI kicks some other way); a real display
++ * driver would then need to either enable this register itself (one
++ * write, untested) or implement a full command-mode kickoff path.
++ * Either way, nothing here commits to that until we have this reading.
++ */
++#if defined(ARM64_BOARD_CONFIG_A71)
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <machine/machine_routines.h>
++#include <pexpert/pexpert.h>
++
++extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
++void a71_display_probe_init(void);
++
++#define MDP_PHYS        0x0ae00000u
++/* DSI0 INTF: qcom,sde-intf-off index 1 (first "dsi" in "dp","dsi","dsi","dp") */
++#define INTF1_OFF       0x6b800u
++#define INTF_TEAR_AUTOREFRESH_CONFIG 0x2b4u
++/* PP0: qcom,sde-pp-off index 0, paired with DSI0 in the common topology */
++#define PP0_OFF         0x71000u
++#define PP_AUTOREFRESH_CONFIG        0x030u
++/* Large enough to cover both offsets above from one mapping. */
++#define MDP_PROBE_SIZE  0x72000u
++
++void
++a71_display_probe_init(void)
++{
++	int enabled = 1;
++	(void)PE_parse_boot_argn("a71dispprobe", &enabled, sizeof(enabled));
++	if (!enabled) {
++		printf("A71 DISP: probe disabled (a71dispprobe=0)\n");
++		return;
++	}
++	vm_offset_t mdp = ml_io_map(MDP_PHYS, MDP_PROBE_SIZE);
++	if (!mdp) {
++		printf("A71 DISP: MDP MMIO mapping failed\n");
++		return;
++	}
++	uint32_t intf_autorefresh = *(volatile uint32_t *)(mdp + INTF1_OFF + INTF_TEAR_AUTOREFRESH_CONFIG);
++	uint32_t pp_autorefresh = *(volatile uint32_t *)(mdp + PP0_OFF + PP_AUTOREFRESH_CONFIG);
++	printf("A71 DISP: read-only probe (no writes) intf1_autorefresh=%#x pp0_autorefresh=%#x\n",
++	    intf_autorefresh, pp_autorefresh);
++	printf("A71 DISP: bit31=enable, low bits=frame_count; nonzero+bit31 means ABL already free-runs this path\n");
++}
++#endif /* ARM64_BOARD_CONFIG_A71 */
