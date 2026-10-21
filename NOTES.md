@@ -1,5 +1,47 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+
+## Active handoff: MARBLE first-entry breadcrumbs (2026-10-22)
+
+User-reported physical result: boot-v4 shim locates MRBLXNU1, copies all ten
+segments, creates boot_args and jumps to XNU VA 0xfffffe0007473488 / PA
+0x841473488. Red framebuffer lasts ~20 seconds, then black and reset ~10
+seconds later; existing white Stage-0 marker never appears. Symbols identify
+entry as __start/_LowResetVectorEnd, start_first_cpu VA 0xfffffe000747505c.
+These are user observations; no new device test was performed here.
+
+Changed only 0082's start.s source behavior: MARBLE __start draws cyan
+64x32 at x=0,y=2304 before branch; start_first_cpu skips OSLAR_EL1 only
+for MARBLE, then draws green 64x32 at y=2336 immediately after DAIFSet.
+Both use x9-x13 only, preserve x0, physical framebuffer 0xb8000000,
+stride4320, no stack/MMU and finish with dsb sy. Existing white y2368
+marker is preserved. Reset-vector path and all other source files unchanged.
+Identical -/+ context lines in the patch keep outer git diff --check clean.
+
+Validation observations: /tmp/edit-breadcrumb.py reversed the 81 patches
+from the saved 0081 baseline and replayed 0001..0081 in an isolated tree.
+Historical whitespace in 0006 was preserved with --whitespace=nowarn.
+Final 0082 git apply --check --whitespace=error and actual application pass;
+git diff --check passes. Result: /tmp/marble-breadcrumb-validation.
+/tmp/validate-breadcrumb.py preprocesses complete include-stripped start.s
+with real board macros: SWEET output byte-identical to exact task-start
+0082 source; MARBLE removes only the cold-entry OSLAR. Actual __start and
+start_first_cpu through WHITE assemble to plain arm64 Mach-O using real
+XNU MOV64 macro and DAIFSC_ALL=15 (/tmp/breadcrumb-entry.o). Full start.s
+compilation with generated assym.s/exported headers was unavailable.
+Independent exact task-start tree /tmp/marble-breadcrumb-original confirms
+only osfmk/arm64/start.s differs. /tmp/check-wrapper-gic.py passes MARBLE
+and SWEET GIC preprocess/compile with API declaration stubs: MARBLE has
+zero priority-window references; SWEET GIC identical. Timer27, SGI1,
+GICR stride0x40000, plain arm64/16K/MAX_CPUS=1 remain unchanged.
+
+Ready for MARBLE GitHub Actions build as a diagnostic source patch; full
+kernel build/link and new physical marker results remain unverified.
+No CI run/ID, device operation, commit or push. User explicitly prohibited
+commit/push, overriding repository default. Next: separately run the build,
+then temporary boot and report cyan/green/white. No storage changes.
+Earlier handoffs below are historical.
+
 ## Active handoff: MARBLE sampler link fix (2026-10-22)
 
 User reports DEVELOPMENT/MARBLE run 39603903020 reached final kernel link,

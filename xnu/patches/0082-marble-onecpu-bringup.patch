@@ -903,7 +903,65 @@ diff --git a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
 diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
 --- a/osfmk/arm64/start.s
 +++ b/osfmk/arm64/start.s
-@@ -513,9 +513,13 @@
+@@ -222,5 +222,23 @@
+ LEXT(_start)
++#if defined(MARBLE)
++	/* entry: 64x32 physical framebuffer breadcrumb; preserve boot_args in x0. */
++	MOV64	x9, (0xb8000000 + 2304 * 4320)
++	MOV64	x10, 0xff00ffff
++	mov		x11, #32
++Lmarble_entry_row:
++	mov		x12, #64
++	mov		x13, x9
++Lmarble_entry_pixel:
++	str		w10, [x13], #4
++	subs	x12, x12, #1
++	b.ne	Lmarble_entry_pixel
++	add		x9, x9, #1, lsl #12
++	add		x9, x9, #224
++	subs	x11, x11, #1
++	b.ne	Lmarble_entry_row
++	dsb		sy
++#endif
+-	b	EXT(start_first_cpu)
++	b	EXT(start_first_cpu)
+-
++
+-
++
+ /*
+@@ -507,15 +525,39 @@
+ LEXT(start_first_cpu)
+-
++
+-	// Unlock the core for debugging
++	// Unlock the core for debugging
++#if !defined(MARBLE)
+-	msr		OSLAR_EL1, xzr
++	msr		OSLAR_EL1, xzr
++#endif
+-	msr		DAIFSet, #(DAIFSC_ALL)				// Disable all interrupts
++	msr		DAIFSet, #(DAIFSC_ALL)				// Disable all interrupts
++#if defined(MARBLE)
++	/* daif: 64x32 physical framebuffer breadcrumb; preserve boot_args in x0. */
++	MOV64	x9, (0xb8000000 + 2336 * 4320)
++	MOV64	x10, 0xff00ff00
++	mov		x11, #32
++Lmarble_daif_row:
++	mov		x12, #64
++	mov		x13, x9
++Lmarble_daif_pixel:
++	str		w10, [x13], #4
++	subs	x12, x12, #1
++	b.ne	Lmarble_daif_pixel
++	add		x9, x9, #1, lsl #12
++	add		x9, x9, #224
++	subs	x11, x11, #1
++	b.ne	Lmarble_daif_row
++	dsb		sy
++#endif
+-
++
  	mov		x20, x0
  	mov		x21, #0
  
@@ -918,7 +976,7 @@ diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
  	mov		w1, #-1
  	mov		x2, #32
  	mov		x4, #4320
-@@ -693,6 +697,28 @@
+@@ -693,6 +735,28 @@
  	lsr		x12, x12, #(ARM_TT_L2_SHIFT)
  	add		x13, x25, #(2 * PGBYTES)
  	str		x11, [x13, x12, lsl #TTE_SHIFT]
@@ -947,7 +1005,7 @@ diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
  #endif
  
  	/* Ensure TTEs are visible */
-@@ -793,7 +819,7 @@
+@@ -793,7 +857,7 @@
  	ic		iallu
  #endif
  
@@ -956,7 +1014,7 @@ diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
  	/* Complete local TLB/I-cache invalidation before enabling the MMU. */
  	dsb		sy
  	isb
-@@ -837,7 +863,7 @@
+@@ -837,7 +901,7 @@
  	MSR_SCTLR_EL1_X0
  	isb		sy
  
