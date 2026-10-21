@@ -128,6 +128,7 @@ def main():
     ap.add_argument('--test-payload', action='store_true', help='boot a tiny test payload instead of xnu')
     ap.add_argument('--live', type=int, metavar='PORT',
                     help='serve the screen at http://localhost:PORT/, refreshed every second (no exception log)')
+    ap.add_argument('--disk', help='raw image attached as virtio-blk (boot xnu with rd=vblk0)')
     a = ap.parse_args()
 
     out = os.path.abspath(a.outdir)
@@ -144,6 +145,9 @@ def main():
            '-no-reboot', '-kernel', a.image]
     if a.initrd:
         cmd += ['-initrd', a.initrd]
+    if a.disk:
+        cmd += ['-global', 'virtio-mmio.force-legacy=false',
+                '-drive', f'file={a.disk},if=none,format=raw,id=d0', '-device', 'virtio-blk-device,drive=d0']
     p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL)
     try:
         if a.live:

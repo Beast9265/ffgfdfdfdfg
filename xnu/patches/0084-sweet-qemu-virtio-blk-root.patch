@@ -1,6 +1,7 @@
 --- a/bsd/conf/files
 +++ b/bsd/conf/files
-@@ -112,5 +112,6 @@
+@@ -111,6 +111,7 @@
+ bsd/dev/sweet_rpmh.c			standard
  bsd/dev/sweet_spmi.c			standard
  bsd/dev/sweet_usb.c			standard
 +bsd/dev/sweet_vblk.c			standard
@@ -9,8 +10,7 @@
  bsd/dev/unix_startup.c			standard
 --- a/iokit/bsddev/IOKitBSDInit.cpp
 +++ b/iokit/bsddev/IOKitBSDInit.cpp
-@@ -781,6 +781,21 @@
- 		IOLog("BSD root: %s, major %d, minor %d\n", rootName, major(*root), minor(*root));
+@@ -782,6 +782,21 @@
  		*oflags = 0;
  		goto iofrootx;
  	}
@@ -31,6 +31,7 @@
 +	}
  #endif
  
+ //
 --- /dev/null
 +++ b/bsd/dev/sweet_vblk.c
 @@ -0,0 +1,483 @@
