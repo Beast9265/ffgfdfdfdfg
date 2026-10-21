@@ -327,13 +327,25 @@ static void test_gic(void)
 	}
 	con_hex2("GICR", "base=", r, "waker=", rd32(r + GICR_WAKER));
 
+#ifdef SHIM_MARBLE
+	stage = "gic group";
+#else
 	stage = "gic config";
+#endif
 	uint32_t grp = rd32(r + GICR_IGROUPR0);
 	wr32(r + GICR_IGROUPR0, 0xffffffff);	/* NS view: secure bits are WI */
+#ifdef SHIM_MARBLE
+	stage = "gic enable";
+#endif
 	uint32_t en_before = rd32(r + GICR_ISENABLER0);
+#ifdef SHIM_MARBLE
+	con_str("PRIO", "skip protected GICR priority window");
+#else
 	uint32_t pri_before = rd32(r + GICR_IPRIORITYR + 16);	/* INTIDs 16..19 */
 	for (int id = 0; id < 32; id++)
 		wr8(r + GICR_IPRIORITYR + id, 0xa0);
+	(void)pri_before;
+#endif
 	wr32(r + GICR_ISENABLER0, (1U << VTIMER_INTID) | (1U << SGI_INTID)
 #ifndef SHIM_MARBLE
 	      | (1U << PTIMER_INTID)
@@ -341,8 +353,10 @@ static void test_gic(void)
 	);
 	con_hex2("ENABLE", "was=", en_before, "now=", rd32(r + GICR_ISENABLER0));
 	(void)grp;
-	(void)pri_before;
 
+#ifdef SHIM_MARBLE
+	stage = "gic cpuif";
+#endif
 	uint64_t ctlr = rsr("icc_ctlr_el1");
 	wsr("icc_ctlr_el1", ctlr & ~2ULL);	/* EOImode 0: EOIR also deactivates */
 	wsr("icc_pmr_el1", 0xf0);
