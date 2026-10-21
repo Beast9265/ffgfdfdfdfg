@@ -55,11 +55,52 @@ neither IMEM_RESTART_REASON nor PSHOLD. The IMEM address is verified, but the
 bootloader-request value is unverified on MARBLE. If reset returns, the shim
 executes WFE forever. XNU and secondary CPU code are excluded.
 
-## Packaging blockers and remaining unknowns
+## Deterministic boot-v4 packaging
 
-No MARBLE boot image has been packaged or physically tested. Inspect private
-original boot_a/vendor_boot_a headers and vendor DTB before choosing a v4
-packaging command. Verify kernel compression/acceptance of a raw ARM64 Image,
+MARBLE requires Android boot header v4 with fixed 4096-byte pages, a generic
+ramdisk and DTB/vendor ramdisks supplied separately by installed vendor_boot.
+SWEET's existing v2 mkbootimg command is unsuitable and remains unchanged.
+The separate standard-library tool is `tools/mkbootv4_marble.py`.
+
+```sh
+python3 tools/mkbootv4_marble.py inspect marble-boot-backup-clean/boot_a.img
+python3 tools/mkbootv4_marble.py control marble-boot-backup-clean/boot_a.img shim/out/marble/control-stock-v4.img
+python3 tools/mkbootv4_marble.py inspect shim/out/marble/control-stock-v4.img
+python3 tools/mkbootv4_marble.py repack marble-boot-backup-clean/boot_a.img shim/out/marble/Image shim/out/marble/shim-marble-stage0.img
+python3 tools/mkbootv4_marble.py inspect shim/out/marble/shim-marble-stage0.img
+python3 -m unittest discover -s tools -p test_mkbootv4_marble.py -v
+```
+
+Outputs must not already exist (exclusive creation protects existing files).
+Treat generated images as private artifacts: they contain the stock ramdisk.
+The parser checks exact magic/version/header size and uint64-bounded offsets,
+nonzero uint32 kernel length, component bounds, nonoverlap and required padding.
+It reads the 1584-byte little-endian header at offset zero; it never searches
+for component magic. All valid header bytes except kernel size are retained,
+including packed OS version/patch, reserved words and the full cmdline field.
+Repacking accepts only signature_size=0; it never invents or reuses a signature.
+Inspection also supports bounded nonzero signature components.
+Each component is padded to 4096 bytes with zeroes. Bytes after the calculated
+structure (partition padding/AVB footer) are excluded. Post-write verification
+uses a separate byte-slice/page-count decoder and checks exact header, component
+lengths/hashes, zero format padding and exact output length.
+
+Offline validation (2026-10-21): raw MARBLE build passed; control kernel and
+ramdisk hashes matched stock and the entire 48,185,344-byte boot-v4 region was
+byte-identical. The 201,326,592-byte stock partition's 153,141,248 trailing bytes
+were excluded. MARBLE output is 3,731,456 bytes, kernel 180224 bytes at 4096,
+ramdisk 3544657 bytes at 184320; both extracted component hashes matched their
+inputs. Header: v4, size 1584, OS 17.0.0, patch 2026-10, empty cmdline,
+signature size zero. Synthetic rejection/corruption and determinism tests pass.
+
+`shim/out/marble/shim-marble-stage0.img` is intended only for a later reviewed
+temporary `fastboot boot`, **not flashing**. Installed vendor_boot remains
+untouched; no replacement is generated. No partition is modified. No device
+commands or GitHub Actions were run. Physical boot has **NOT** been tested.
+
+## Remaining hardware unknowns
+
+Offline packaging does not establish kernel compression/acceptance of a raw ARM64 Image,
 header metadata/command line, ramdisk requirements and vendor ramdisk handling,
 ABL Image placement and entry EL/cache state, DTB handoff, and non-overlapping
 reserved-memory ranges. Confirm shim DMA buffers are accessible to the retained

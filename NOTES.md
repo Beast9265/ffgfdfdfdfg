@@ -41,6 +41,29 @@
   `MARBLE_STAGE0.md`. Original images/device identifiers must stay out of git.
 
 
+### Packaging milestone (2026-10-21; supersedes packaging blocker above)
+
+- Added separate standard-library `tools/mkbootv4_marble.py` inspect/control/
+  repack CLI and synthetic tests; stage-0 hardware, XNU and SWEET unchanged.
+- `BOARD=marble shim/build.sh` exit 0 without warnings; raw Image 180224 bytes,
+  SHA256 b344ada1efa0502547a151fd171843b8150d4e58688a04e81f2cf69688cbefa1.
+- Private clean boot parsed v4/1584, OS 17.0.0/2026-10, empty cmdline,
+  signature zero. Control `shim/out/marble/control-stock-v4.img` 48185344
+  bytes equals the whole meaningful source region; component hashes match.
+  Source partition trailing 153141248 bytes excluded, including footer area.
+- `shim/out/marble/shim-marble-stage0.img` 3731456 bytes, kernel at 4096,
+  ramdisk at 184320 (3544657 bytes); post-write separate decoder confirms
+  kernel hash equals raw Image and ramdisk equals stock. No trailing bytes;
+  format padding zero. Re-inspection passed for both outputs.
+- Synthetic unittest suite: 2 tests passed (malformed/truncated rejection,
+  overflow, corruption, deterministic packing, metadata/trailer checks).
+- No CI run IDs, device actions, physical boot, commit or push in this task.
+  All source changes left uncommitted for review as explicitly requested.
+  Private stock/generated artifacts remain excluded from git. Vendor_boot,
+  dtbo and all phone partitions untouched. Next: human packaging review;
+  raw Image acceptance, ABL placement/DTB handoff and hardware remain untested.
+
+
 ## Agent handoff / active work (2026-10-15, latest)
 
 ### >>> UPDATE 2026-10-18 (read first, then the 10-17 handoff below) <<<
