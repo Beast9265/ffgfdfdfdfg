@@ -161,3 +161,26 @@ six-line guard changes generated XNU source; mockfs, rd=md0, init/root bytes,
 bootstrap, timer27/SGI1/GIC protections remain unchanged. The helper rebuilds
 the known static test init after CI before packaging. Exact linked kernel and
 payload checks are repeated after CI; no physical phone command is automated.
+
+## Verified correction build
+
+Exact build fde3aa2f4036218de4f2c0fac2dfa9158eef8f80 / Actions39730114255
+SUCCESS; headSha independently verified. Fresh artifact xnu/out-marble-ci-39730114255.
+Helper rebuilt static init after CI; root hash unchanged. Linked publishHiddenMedia
+CBZ at fffffe000795159c branches to log/return at fffffe0007951808.
+Four executable sections: zero physical timer instructions, one CNTV_CTL MSR.
+Final exact payload audit PASS: root bytes, rd=md0, RAMDisk[8420ac000,8420b4000),
+ADT8420b4000, boot_args8420b8000, top8420bc000,160-page arena ends84233c000.
+Timer27/SGI1/GIC protections unchanged (no changes outside the requested guard).
+Boot-v4 repack/inspect PASS,16654336 bytes, no trailing bytes. Final hashes:
+Kernel 7914ad6a24488fa8ef6eac3b710cce443cdda86ef1d929bd7a3d220aba0828e9
+Init/root f39a3fad30988599af8ed3c2d4d882d21f59f6478113bff8edef458d1476b40b
+Payload 7627016addc520457b15b3d44e6fe056194ce36bf17c57f18588c09908283202
+Boot 788b0210792991528c6a83401cd8417948d85a55af5e5db2f422c912c74f45b0
+Final image shim/out/marble-xnu/latest-marble-xnu.img; hashes independently reread.
+Logs /tmp/iomedia-{pipeline.log,linked-cntp.txt,linked-publish.txt,final-map.txt}.
+No physical commands run; mockfs/PID1 pending user observation. Documentation-only
+follow-up commit does not change kernel provenance. Next manual command:
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
+Expected next new breadcrumb: MARBLE ROOT: no IOMedia class, skip hidden-media publish
+then setRootMedia complete, mockfs mount begin, and either PID1 or a precise blocker.
