@@ -1,5 +1,64 @@
 # MARBLE first real iOS root
 
+## Active handoff: MARBLE guarded writable root (2026-10-22)
+
+User's physical result on previous e541dfdc / Actions39761856910:
+- Apple launchd PASS; ondemand mode PASS; fsck boot task PASS.
+- CS_SIGNED / CS_PLATFORM_BINARY / platform binary policy PASS.
+- mount-phase-1 entered PASS; root remount FAIL EROFS.
+- boot-manifest-hash PASS (mount constructs /private/preboot/5CBE3601... path).
+- bindfs compiled PASS (MASTER.arm64.marble); firmware lookup ENOENT2.
+Do not patch bindfs: isolate successful writable root first. No
+launchd_unsecure_cache, RAMDisk, new write implementation or HFS dirty-volume
+bypass. The dirty NON-JOURNALED bypass in0031 remains SWEET-only.
+
+0082 now reuses0030's WRITE10, payload direction, partial4096-byte RMW,
+block/character write and cache-sync mechanics for MARBLE.0030/0031 unchanged;
+0082 extends only0031's vfs_subr rootrw guard to SWEET || MARBLE.
+MARBLE su.writable is static-zero initialized; only exact ufsrw=1 enables it,
+after GPT header/entry CRC verification, valid userdata bounds and BSD device
+setup. Failed discovery returns before enable. Writable ufsroot override to
+anything except userdata is rejected; default read-only overrides preserved.
+No writes during discovery. Every ufs_write_blocks checks writable/nblocks,
+count1..256 (1MiB bounce), lba>=first, offset<nblocks, count<=remaining and
+last LBA<=UINT32_MAX. GPT bounds already constrain selected partition to
+usable device LBAs and32-bit range. ufs_scsi independently repeats these
+bounds and requires LUN0,10-byte0x2a CDB, write direction and exact count*4096
+length.0x2a is the only allowed data-output opcode. Cache sync allows only
+exact10-byte0x35 CDB, zero payload, writable LUN0 with known partition;
+read-only MARBLE sync continues returning EROFS. BSD devices expose only the
+partition-relative range, so GPT is inaccessible for writes. Persistent logger
+and extra SWEET input/USB drivers remain excluded. MARBLE ADT/MMIO/device-WLUN
+ACTIVE/readiness/capacity/GPT/cache-maintenance code retained.
+
+Local validation PASS: full reverse/replay0001..0081, strict0082;
+real CI-header arm64 object builds sweet_ufs.c and vfs_subr.c;
+SWEET/BCM2837/Apple T8103 before/after preprocessed tokens identical (line
+numbers normalized). Default MARBLE root is MNT_RDONLY; rootrw guard now
+includes MARBLE/SWEET only. Generic Apple code unchanged. ASan/UBSan actual
+source host test tools/test-marble-ufs-writes.py checks CDB, UPIU/DD, cache
+sync, partial RMW, aligned writes, default RO and partition/32-bit limits.
+Existing initializing-sense regression and six unit tests PASS.
+Validation scripts/logs/objects: /tmp/writes-compile.py, /tmp/writes-objects,
+/tmp/writes-final-*.i. Full kernel link/CI/package pending below.
+
+JOURNALED ROOT: expected old raw/sparse images are absent (only checksum
+file remains). User restored all three20H392 DMGs at the documented paths;
+SHA256 independently matches80f426d5...c92483 /9cd738f3...86849 /
+391f2df3...715c4608. DEFAULT journaled --board marble rebuild is blocked by host sudo password
+(no terminal/askpass), including outside sandbox; user asked to enable sudo
+or build locally. Log /tmp/marble-journal-build.log. Journal bit/fsck/content/sparse validation
+and new hashes pending. Never reuse the old checksums as new verification.
+The journaled root MUST be reflashed before testing the writable kernel;
+NEVER boot current non-journaled physical root writable. No phone interaction.
+
+Exact new diagnostic cmdline:
+debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1 ufsrw=1 rootrw=1
+Final intended path: shim/out/marble-xnu/latest-marble-xnu.img.
+Unrelated tools/iosroot-sparse.sh mode change and untracked
+ docs/MARBLE_BOOTSTRAP_BREADCRUMBS.md preserved, not staged.
+
+
 ## Active handoff: MARBLE real Apple userspace / AMFI registration (2026-10-22)
 
 User physical evidence on the existing NON-JOURNALED iOS16.7.16/20H392

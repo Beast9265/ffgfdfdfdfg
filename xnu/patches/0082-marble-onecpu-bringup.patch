@@ -11282,26 +11282,7 @@ diff --git a/bsd/sweet_hfs/sweet_hfs_iokit.c b/bsd/sweet_hfs/sweet_hfs_iokit.c
 diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 --- a/bsd/dev/sweet_ufs.c
 +++ b/bsd/dev/sweet_ufs.c
-@@ -1,24 +1,25 @@
- /*
-  * SWEET internal UFS root device.
-  *
-  * The Qualcomm UFS host (UFSHCI 2.1) is left enabled with the link up by the
-  * bootloader, which loaded our boot image from it. This driver reuses that
-  * state: it points the transfer request list at its own memory (verifying the
-  * host took it before ringing any doorbell) and issues polled SCSI commands,
-  * one at a time, to LUN 0. It finds one GPT partition by name (boot-arg
-  * ufsroot=, default "userdata") and exposes it as the BSD disk ufsroot0
-  * (rufsroot0), with 512-byte logical sectors over the device's 4 KiB blocks.
-  * Root on it with rd=ufsroot0.
-  *
-  * All DMA goes through one physically contiguous allocation (descriptors and
-  * a 1 MiB bounce buffer); the host is not cache coherent, so caches are
-  * cleaned/invalidated around each command.
-  *
-- * Writes are refused unless boot-arg ufsrw=1 is set. Every write is checked
-+ * MARBLE is unconditionally read-only (TUR/capacity/read plus gated volatile device activation).
-+ * On SWEET, writes are refused unless boot-arg ufsrw=1 is set. Every write is checked
+@@ -18,7 +18,7 @@
   * against the partition bounds again right before it is issued, so nothing
   * outside the named partition can be written.
   */
@@ -11310,7 +11291,7 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
  #include <sys/param.h>
  #include <sys/systm.h>
  #include <sys/buf.h>
-@@ -48,11 +49,24 @@
+@@ -48,11 +48,24 @@
  extern kern_return_t kernel_thread_start(thread_continue_t, void *, thread_t *);
  extern void thread_deallocate(thread_t);
  extern int hz;
@@ -11323,7 +11304,7 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
  extern void sweet_usb_probe(void);
 
 +/* Keep the historical filename: patches 0030..0077 still apply before 0082.
-+ * MARBLE compiles only the read transport; SWEET retains its original policy. */
++ * MARBLE shares the guarded write transport; SWEET retains its original policy. */
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
 +#define UFS_LOG "MARBLE UFS: "
 +#define UFS_DT_PATH "/marble-ufs"
@@ -11335,7 +11316,7 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 +
  #define REG_CAP         0x00
  #define REG_IS          0x20
-@@ -97,21 +111,36 @@
+@@ -97,21 +110,36 @@
  #define DMA_UCD         0x1000                  /* 128 byte aligned */
  #define DMA_BOUNCE      0x4000
  #define DMA_SIZE        (DMA_BOUNCE + BOUNCE_SIZE)
@@ -11385,19 +11366,31 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
  } su;
 
  static LCK_GRP_DECLARE(sweet_ufs_grp, "sweet_ufs");
-@@ -148,131 +177,288 @@
+@@ -148,125 +176,293 @@
  static int
  ufs_scsi(const uint8_t *cdb, unsigned cdb_len, uint32_t len, bool write)
  {
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
-+	/* Defense at the only submission entry: no data-out, write, sync or
-+	 * cache-sync commands can reach a doorbell, even with hostile boot args.
-+	 * The sole non-read SCSI operation is gated device-WLUN ACTIVE. */
++	/* Keep the submission allowlist, including bounds on every data-out. */
 +	static const uint8_t active[6] = { 0x1b, 0, 0, 0, 0x10, 0 };
 +	bool devact = su.activate_allowed && su.lun == 0xd0 && len == 0 &&
 +	    cdb_len == sizeof(active) && memcmp(cdb, active, sizeof(active)) == 0;
-+	if (write || !cdb_len || cdb_len > 16 ||
-+	    (!devact && (su.lun != 0 || (cdb[0] != 0x00 && cdb[0] != 0x25 && cdb[0] != 0x28)))) {
++	bool dataout = false, sync = false;
++	if (su.writable && su.nblocks && su.lun == 0 && cdb_len == 10) {
++		uint64_t lba = ((uint32_t)cdb[2] << 24) | ((uint32_t)cdb[3] << 16) |
++		    ((uint32_t)cdb[4] << 8) | cdb[5];
++		uint32_t count = ((uint32_t)cdb[7] << 8) | cdb[8];
++		dataout = write && cdb[0] == 0x2a && count > 0 &&
++		    count <= BOUNCE_SIZE / UFS_BLOCK && len == count * UFS_BLOCK &&
++		    lba >= su.first_block && lba - su.first_block < su.nblocks &&
++		    count <= su.nblocks - (lba - su.first_block) &&
++		    lba + count - 1 <= UINT32_MAX;
++		static const uint8_t sync_cdb[10] = { 0x35 };
++		sync = !write && len == 0 && memcmp(cdb, sync_cdb, sizeof(sync_cdb)) == 0;
++	}
++	if (!cdb_len || cdb_len > 16 || (write && !dataout) ||
++	    (!devact && !dataout && !sync &&
++	    (su.lun != 0 || (cdb[0] != 0x00 && cdb[0] != 0x25 && cdb[0] != 0x28)))) {
 +		return EROFS;
 +	}
 +	uint64_t list = su.dma_pa + DMA_UTRL;
@@ -11775,14 +11768,7 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 -	return ufs_scsi(cdb, sizeof(cdb), count * UFS_BLOCK, false);
 +	return ufs_scsi(cdb, sizeof(cdb), count * UFS_BLOCK, false);
  }
-
-+#ifdef ARM64_BOARD_CONFIG_SWEET
- /*
-  * WRITE(10) of count device blocks from the bounce buffer to lba. The range
-  * must lie inside the partition: this is the only place data goes out.
-  */
- static int
-@@ -280,14 +466,14 @@
+@@ -280,14 +476,14 @@
  {
 -	if (!su.writable || !su.nblocks || count == 0 || count > BOUNCE_SIZE / UFS_BLOCK ||
 +	if (!su.writable || !su.nblocks || count == 0 || count > BOUNCE_SIZE / UFS_BLOCK ||
@@ -11809,15 +11795,13 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 -	return ufs_scsi(cdb, sizeof(cdb), count * UFS_BLOCK, true);
 +	return ufs_scsi(cdb, sizeof(cdb), count * UFS_BLOCK, true);
  }
-@@ -297,92 +483,150 @@
+@@ -297,92 +493,148 @@
  {
 -	static const uint8_t cdb[10] = { 0x35 };       /* SYNCHRONIZE CACHE(10), whole LUN */
 +	static const uint8_t cdb[10] = { 0x35 };       /* SYNCHRONIZE CACHE(10), whole LUN */
 -	return ufs_scsi(cdb, sizeof(cdb), 0, false);
 +	return ufs_scsi(cdb, sizeof(cdb), 0, false);
  }
-+
-+#endif
 +
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
 +/* GPT uses IEEE CRC32, including the header with its CRC field zeroed. */
@@ -12040,24 +12024,7 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 -	return 0;
 +	return 0;
  }
-@@ -392,8 +636,12 @@
- {
--	if (!su.ready) {
-+	if (!su.ready) {
--		return ENXIO;
-+		return ENXIO;
--	}
-+	}
-+#ifdef ARM64_BOARD_CONFIG_MARBLE
-+	return (flags & FWRITE) ? EROFS : 0;
-+#else
--	return ((flags & FWRITE) && !su.writable) ? EROFS : 0;
-+	return ((flags & FWRITE) && !su.writable) ? EROFS : 0;
-+#endif
- }
-
- static int
-@@ -407,59 +655,73 @@
+@@ -407,59 +659,67 @@
  {
 -	int error = 0;
 +	int error = 0;
@@ -12075,12 +12042,8 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 
 -	buf_setresid(bp, count);
 +	buf_setresid(bp, count);
-+#ifdef ARM64_BOARD_CONFIG_MARBLE
-+	if (!rd) {
-+#else
 -	if (!rd && !su.writable) {
 +	if (!rd && !su.writable) {
-+#endif
 -		error = EROFS;
 +		error = EROFS;
 -		goto done;
@@ -12145,7 +12108,6 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 +			}
 -		} else {
 +		}
-+#ifdef ARM64_BOARD_CONFIG_SWEET
 +		else {
 -			/* Partial device blocks at either end: read, merge, write back. */
 +			/* Partial device blocks at either end: read, merge, write back. */
@@ -12165,7 +12127,6 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 +			}
 -		}
 +		}
-+#endif
 -		if (error) {
 +		if (error) {
 -			break;
@@ -12184,7 +12145,7 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 +	buf_unmap(bp);
 
  done:
-@@ -475,50 +737,54 @@
+@@ -475,50 +735,53 @@
  {
 -	uint32_t *f = (uint32_t *)data;
 +	uint32_t *f = (uint32_t *)data;
@@ -12240,8 +12201,8 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 -	case DKIOCSYNCHRONIZECACHE: {
 +	case DKIOCSYNCHRONIZECACHE: {
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
-+		return EROFS;
-+#else
++		if (!su.writable) return EROFS;
++#endif
 -		if (!su.writable) {
 +		if (!su.writable) {
 -			return 0;
@@ -12256,7 +12217,6 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 +		lck_mtx_unlock(&sweet_ufs_lock);
 -		return error;
 +		return error;
-+#endif
 -	}
 +	}
 -	case DKIOCGETMAXBLOCKCOUNTREAD:
@@ -12286,28 +12246,7 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 -	}
 +	}
  }
-@@ -550,10 +816,16 @@
- static int
- sweet_ufs_write(dev_t dev, struct uio *uio, __unused int ioflag)
- {
-+#ifdef ARM64_BOARD_CONFIG_MARBLE
-+	(void)dev;
-+	(void)uio;
-+	return EROFS;
-+#else
--	if (!su.writable) {
-+	if (!su.writable) {
--		return EROFS;
-+		return EROFS;
--	}
-+	}
--	return physio(sweet_ufs_strategy, NULL, dev, B_WRITE, minphys, uio, (int)su.secsize);
-+	return physio(sweet_ufs_strategy, NULL, dev, B_WRITE, minphys, uio, (int)su.secsize);
-+#endif
- }
-
- static const struct bdevsw sweet_ufs_bdevsw = {
-@@ -588,92 +860,135 @@
+@@ -588,81 +851,133 @@
  {
 -	DTEntry node;
 +	DTEntry node;
@@ -12334,6 +12273,12 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 +	}
 -	PE_parse_boot_argn("ufsroot", want, sizeof(want));
 +	PE_parse_boot_argn("ufsroot", want, sizeof(want));
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++	/* MARBLE writes always target userdata, regardless of ufsroot override. */
++	uint32_t rw = 0;
++	PE_parse_boot_argn("ufsrw", &rw, sizeof(rw));
++	if (rw == 1 && strcmp(want, "userdata") != 0) return EINVAL;
++#endif
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
 +	printf(UFS_LOG "controller found: ADT " UFS_DT_PATH " PA 0x%lx size 0x%lx\n", reg[0], reg[1]);
 +	if (!reg[0] || reg[1] < 0x64 || reg[1] > 0x10000) {
@@ -12467,7 +12412,10 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 +	devfs_make_node(makedev(su.cmajor, 0), DEVFS_CHAR, UID_ROOT, GID_OPERATOR, 0640, "rufsroot0");
 -	/* Only now, with the partition bounds known, can writes be allowed. */
 +	/* Only now, with the partition bounds known, can writes be allowed. */
-+#ifdef ARM64_BOARD_CONFIG_SWEET
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++	su.writable = (rw == 1);
++	if (su.writable) printf(UFS_LOG "userdata writable enabled\n");
++#else
 -	su.writable = (rw != 0);
 +	su.writable = (rw != 0);
 +#endif
@@ -12503,17 +12451,6 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
  /*
   * Persistent console log ("sweetlog"). Filming the phone screen is the only
   * other way to see the console, so every character that reaches the
-  * console (kernel printf and /dev/console writes of daemons, both through
-  * _cnputs) is also kept in a 4 MiB ring, and once the partition is known
-  * and writable a thread copies new ring blocks to the LAST 4 MiB + 4 KiB of
-  * the partition every ufslogsecs seconds (default 10), far behind the HFS
-  * image at its start. Device block 0 of that area is a header:
-  *   "SWEETLOG" | u32 version 1 | u32 ring size | u64 total bytes written
-  *   | u64 flush sequence
-  * ring offset of byte n = n % ring size. Read it from a recovery with
-  * tools/sweet-log-pull.sh. Disabled with boot-arg sweetlog=0.
-  */
- #define SWEET_LOG_SIZE          (4u << 20)
 @@ -791,21 +1106,23 @@
  {
 -	uint32_t on = 1;
@@ -12678,3 +12615,116 @@ diff --git a/bsd/kern/sweet_amfi.c b/bsd/kern/sweet_amfi.c
 +	    error ? "NOT registered" : "registered", error);
  }
  #endif /* ARM64_BOARD_CONFIG_SWEET */
+
+diff --git a/bsd/vfs/vfs_subr.c b/bsd/vfs/vfs_subr.c
+--- a/bsd/vfs/vfs_subr.c
++++ b/bsd/vfs/vfs_subr.c
+@@ -1214,58 +1214,58 @@
+ #endif
+-	struct vfstable *vfsp;
++	struct vfstable *vfsp;
+-	vfs_context_t ctx = vfs_context_kernel();
++	vfs_context_t ctx = vfs_context_kernel();
+-	struct vfs_attr vfsattr;
++	struct vfs_attr vfsattr;
+-	int     error;
++	int     error;
+-	mount_t mp;
++	mount_t mp;
+-	vnode_t bdevvp_rootvp;
++	vnode_t bdevvp_rootvp;
+
+-	/*
++	/*
+-	 * Reset any prior "unmounting everything" state.  This handles the
++	 * Reset any prior "unmounting everything" state.  This handles the
+-	 * situation where mount root and then unmountall and re-mountroot
++	 * situation where mount root and then unmountall and re-mountroot
+-	 * a new image (see bsd/kern/imageboot.c).
++	 * a new image (see bsd/kern/imageboot.c).
+-	 */
++	 */
+-	vfs_unmountall_started = vfs_unmountall_finished = 0;
++	vfs_unmountall_started = vfs_unmountall_finished = 0;
+-	OSMemoryBarrier();
++	OSMemoryBarrier();
+
+-	KDBG_RELEASE(DBG_MOUNTROOT | DBG_FUNC_START);
++	KDBG_RELEASE(DBG_MOUNTROOT | DBG_FUNC_START);
+-	if (mountroot != NULL) {
++	if (mountroot != NULL) {
+-		/*
++		/*
+-		 * used for netboot which follows a different set of rules
++		 * used for netboot which follows a different set of rules
+-		 */
++		 */
+-		error = (*mountroot)();
++		error = (*mountroot)();
+
+-		KDBG_RELEASE(DBG_MOUNTROOT | DBG_FUNC_END, error, 0);
++		KDBG_RELEASE(DBG_MOUNTROOT | DBG_FUNC_END, error, 0);
+-		return error;
++		return error;
+-	}
++	}
+-	if ((error = bdevvp(rootdev, &rootvp))) {
++	if ((error = bdevvp(rootdev, &rootvp))) {
+-		printf("vfs_mountroot: can't setup bdevvp\n");
++		printf("vfs_mountroot: can't setup bdevvp\n");
+
+-		KDBG_RELEASE(DBG_MOUNTROOT | DBG_FUNC_END, error, 1);
++		KDBG_RELEASE(DBG_MOUNTROOT | DBG_FUNC_END, error, 1);
+-		return error;
++		return error;
+-	}
++	}
+-	/*
++	/*
+-	 * 4951998 - code we call in vfc_mountroot may replace rootvp
++	 * 4951998 - code we call in vfc_mountroot may replace rootvp
+-	 * so keep a local copy for some house keeping.
++	 * so keep a local copy for some house keeping.
+-	 */
++	 */
+-	bdevvp_rootvp = rootvp;
++	bdevvp_rootvp = rootvp;
+
+-	for (vfsp = vfsconf; vfsp; vfsp = vfsp->vfc_next) {
++	for (vfsp = vfsconf; vfsp; vfsp = vfsp->vfc_next) {
+-		if (vfsp->vfc_mountroot == NULL
++		if (vfsp->vfc_mountroot == NULL
+-		    && !ISSET(vfsp->vfc_vfsflags, VFC_VFSCANMOUNTROOT)) {
++		    && !ISSET(vfsp->vfc_vfsflags, VFC_VFSCANMOUNTROOT)) {
+-			continue;
++			continue;
+-		}
++		}
+
+-		mp = vfs_rootmountalloc_internal(vfsp, "root_device");
++		mp = vfs_rootmountalloc_internal(vfsp, "root_device");
+-		mp->mnt_devvp = rootvp;
++		mp->mnt_devvp = rootvp;
+-#if defined(ARM64_BOARD_CONFIG_SWEET)
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_MARBLE)
+-		/*
++		/*
+-		 * SWEET has no data volume: /private/var lives on the root, so
++		 * SWEET has no data volume: /private/var lives on the root, so
+-		 * boot-arg rootrw=1 mounts it read-write from the start.
++		 * boot-arg rootrw=1 mounts it read-write from the start.
+-		 */
++		 */
+-		{
++		{
+-			uint32_t rootrw = 0;
++			uint32_t rootrw = 0;
+-			if (PE_parse_boot_argn("rootrw", &rootrw, sizeof(rootrw)) && rootrw) {
++			if (PE_parse_boot_argn("rootrw", &rootrw, sizeof(rootrw)) && rootrw) {
+-				mp->mnt_flag &= ~MNT_RDONLY;
++				mp->mnt_flag &= ~MNT_RDONLY;
+-			}
++			}
+-		}
++		}
+ #endif
