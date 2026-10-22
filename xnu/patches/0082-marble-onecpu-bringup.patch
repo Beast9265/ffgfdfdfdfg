@@ -11385,7 +11385,7 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
  } su;
 
  static LCK_GRP_DECLARE(sweet_ufs_grp, "sweet_ufs");
-@@ -148,131 +177,276 @@
+@@ -148,131 +177,288 @@
  static int
  ufs_scsi(const uint8_t *cdb, unsigned cdb_len, uint32_t len, bool write)
  {
@@ -11473,6 +11473,13 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 -	}
 +	}
 
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++	if (devact) {
++		printf(UFS_LOG "ACTIVE request TT 0x%02x flags 0x%02x LUN 0x%02x expected length %u PRDT entries %u CDB %02x%02x%02x%02x%02x%02x\n",
++		    ucd->cmd[0], ucd->cmd[1], ucd->cmd[2], len, utrd->prdt & 0xffff,
++		    ucd->cmd[16], ucd->cmd[17], ucd->cmd[18], ucd->cmd[19], ucd->cmd[20], ucd->cmd[21]);
++	}
++#endif
 -	if (su.cache) {
 +	if (su.cache) {
 -		dma_clean(DMA_UTRL, sizeof(*utrd));
@@ -11606,6 +11613,8 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
 +	su.initializing = false;
++	if (devact) printf(UFS_LOG "ACTIVE completion OCS 0x%x transaction 0x%x response 0x%x status 0x%x\n",
++	    utrd->dw2 & 0xff, ucd->resp[0], ucd->resp[6], ucd->resp[7]);
 +	if (ucd->resp[3] != ucd->cmd[3]) return EIO;
 +	/* Same bounded fixed/descriptor sense decoding as shim/ufs_response.h. */
 +	unsigned sense_len = (unsigned)ucd->resp[32] << 8 | ucd->resp[33];
@@ -11619,8 +11628,11 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 +			key = sense[1] & 0xf; asc = sense[2]; ascq = sense[3];
 +		}
 +	}
++	/* Physical MARBLE TUR: response=1/status=2/sense=02/04/02.
++	 * Match stage-0: tolerate response only for this exact initializing
++	 * condition. Generic success (including ACTIVE/reads) stays strict. */
 +	su.initializing = !(utrd->dw2 & 0xff) && ucd->resp[0] == 0x21 &&
-+	    !ucd->resp[6] && ucd->resp[7] == 2 && key == 2 && asc == 4 && ascq == 2;
++	    ucd->resp[7] == 2 && key == 2 && asc == 4 && ascq == 2;
 +	if (ucd->resp[7] && !su.quiet) printf(UFS_LOG "sense %02x/%02x/%02x\n", key, asc, ascq);
 +#endif
 -	uint32_t ocs = utrd->dw2 & 0xff;
@@ -11770,7 +11782,7 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
   * must lie inside the partition: this is the only place data goes out.
   */
  static int
-@@ -280,14 +454,14 @@
+@@ -280,14 +466,14 @@
  {
 -	if (!su.writable || !su.nblocks || count == 0 || count > BOUNCE_SIZE / UFS_BLOCK ||
 +	if (!su.writable || !su.nblocks || count == 0 || count > BOUNCE_SIZE / UFS_BLOCK ||
@@ -11797,7 +11809,7 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 -	return ufs_scsi(cdb, sizeof(cdb), count * UFS_BLOCK, true);
 +	return ufs_scsi(cdb, sizeof(cdb), count * UFS_BLOCK, true);
  }
-@@ -297,92 +471,150 @@
+@@ -297,92 +483,150 @@
  {
 -	static const uint8_t cdb[10] = { 0x35 };       /* SYNCHRONIZE CACHE(10), whole LUN */
 +	static const uint8_t cdb[10] = { 0x35 };       /* SYNCHRONIZE CACHE(10), whole LUN */
@@ -12028,7 +12040,7 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 -	return 0;
 +	return 0;
  }
-@@ -392,8 +624,12 @@
+@@ -392,8 +636,12 @@
  {
 -	if (!su.ready) {
 +	if (!su.ready) {
@@ -12045,7 +12057,7 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
  }
 
  static int
-@@ -407,59 +643,73 @@
+@@ -407,59 +655,73 @@
  {
 -	int error = 0;
 +	int error = 0;
@@ -12172,7 +12184,7 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 +	buf_unmap(bp);
 
  done:
-@@ -475,50 +725,54 @@
+@@ -475,50 +737,54 @@
  {
 -	uint32_t *f = (uint32_t *)data;
 +	uint32_t *f = (uint32_t *)data;
@@ -12274,7 +12286,7 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 -	}
 +	}
  }
-@@ -550,10 +804,16 @@
+@@ -550,10 +816,16 @@
  static int
  sweet_ufs_write(dev_t dev, struct uio *uio, __unused int ioflag)
  {
@@ -12295,7 +12307,7 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
  }
 
  static const struct bdevsw sweet_ufs_bdevsw = {
-@@ -588,92 +848,135 @@
+@@ -588,92 +860,135 @@
  {
 -	DTEntry node;
 +	DTEntry node;
@@ -12502,7 +12514,7 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
   * tools/sweet-log-pull.sh. Disabled with boot-arg sweetlog=0.
   */
  #define SWEET_LOG_SIZE          (4u << 20)
-@@ -791,21 +1094,23 @@
+@@ -791,21 +1106,23 @@
  {
 -	uint32_t on = 1;
 +	uint32_t on = 1;

@@ -18,6 +18,17 @@ AA55 / protective type EE, GPT header/entries and userdata discovery succeed.
 No storage-sector writes occurred. Generic LUN0 START CDB 1b0100000100 was
 rejected (05/24/00); it must never be retried by this driver.
 
+## First physical XNU result
+
+User-reported first physical XNU UFS boot (2026-10-22): no RAMDisk;
+ADT PA 0x01d84000, register size 0x3000; MMIO 0xfffffe30062c0000;
+contiguous DMA PA 0x843f44000 size 0x104000. CAP 0x1587031f,
+VER 0x300, HCE 0x1, HCS 0x10f. NOP PASS; READ_FLAG fDeviceInit PASS,
+value 0. Initial LUN0 TUR: OCS 0, transaction 0x21, response 0x01,
+status 0x02, valid sense 02/04/02; result EIO (5). Device-WLUN ACTIVE
+was NOT ATTEMPTED: the classifier incorrectly required response=0.
+IOFindBSDRoot reported ufsroot0 unavailable: 5. These are user observations.
+
 ## Hardware audit against SWEET
 
 The actual hardware source is shim/board.h plus shim/ufs.c and
@@ -26,8 +37,7 @@ SWEET controller state. Both boards use UFS_BASE=0x01d84000. The mapped register
 aperture is 0x3000 bytes (same UFSHCI programming model); this is an MMIO mapping
 extent, not a claim that all offsets were physically probed. Used offsets:
 CAP 00, VER 08, IS 20, IE 24, HCS 30, HCE 34, UTRLBA/U 50/54, DBR 58,
-CLR 5c, RSR 60. Numeric MARBLE CAP/VER were not retained; they are printed at
-runtime. SWEET's historical VER=0x210/CAP=0x1587031f are NOT MARBLE measurements.
+CLR 5c, RSR 60. The physical MARBLE measurements are CAP=0x1587031f, VER=0x300.
 
 ABL already enabled the host and established its link/device presence. The
 shim verifies HCE.EN, HCS.DP and HCS.UTRLRDY, idle doorbell, stops the transfer
@@ -38,9 +48,14 @@ It does not reset/reinitialize PHY, clocks, regulators, link or UniPro.
 MARBLE's proven data LUN is 0, blocks 4096 bytes. Only the gated whole-device
 ACTIVE uses UPIU LUN d0. SWEET does not need this MARBLE readiness sequence.
 MARBLE runs NOP, READ_FLAG fDeviceInit (must be zero), TUR; only a complete
-valid response with OCS=0, response=0, CHECK CONDITION and exactly 02/04/02
+valid decoded sense with OCS=0, transaction=0x21, CHECK CONDITION and exactly 02/04/02
 permits one d0 ACTIVE. It then polls TUR for at most five seconds of command
 budget; unexpected conditions stop. There is no generic LUN0 START fallback.
+The physical response=1 is tolerated ONLY for this exact initializing condition,
+matching stage-0's successful readiness path. ufs_scsi still returns EIO for it;
+the readiness gate alone permits ACTIVE. ACTIVE, capacity, READ10, NOP and
+READ_FLAG success validation remains unchanged. ACTIVE request and completion
+fields are logged, with existing sense diagnostics; later reads gain no logs.
 
 Stage-0 executes MMU-off with Device memory and DSB barriers, so it needs no
 cache maintenance. XNU's cacheable DMA memory must be maintained explicitly;
@@ -162,7 +177,7 @@ has no undefined symbols, retains UFS/HFS, excludes write/sync/log functions.
 Four executable sections contain zero CNTP instructions and one CNTV_CTL MSR.
 Final payload segment-by-segment comparison, ADT UFS PA/no-RAMDisk checks,
 160-page sparse-map audit and independent boot-v4 post-write checks all pass.
-XNU UFS physical boot remains pending; stage-0 and HFS RAMDisk successes above
+This original image produced the first physical XNU result above; stage-0 and HFS RAMDisk successes above
 are user observations. No physical phone commands were run.
 
 SHA256:

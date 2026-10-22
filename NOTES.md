@@ -1,8 +1,32 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
 
+## Active handoff: MARBLE UFS readiness classifier correction (2026-10-22)
 
-## Active handoff: MARBLE read-only UFS root (2026-10-22)
+User-reported first physical XNU UFS boot (2026-10-22): no RAMDisk;
+ADT PA 0x01d84000, register size 0x3000; MMIO 0xfffffe30062c0000;
+contiguous DMA PA 0x843f44000 size 0x104000. CAP 0x1587031f,
+VER 0x300, HCE 0x1, HCS 0x10f. NOP PASS; READ_FLAG fDeviceInit PASS,
+value 0. Initial LUN0 TUR: OCS 0, transaction 0x21, response 0x01,
+status 0x02, valid sense 02/04/02; result EIO (5). Device-WLUN ACTIVE
+was NOT ATTEMPTED: the classifier incorrectly required response=0.
+IOFindBSDRoot reported ufsroot0 unavailable: 5. These are user observations.
+
+0082 removes response==0 only from the exact bounded initializing-sense
+classifier, matching stage-0. Generic SCSI/query success stays strict.
+Exact d0/1b0000001000 ACTIVE is unchanged; request TT/flags/LUN/length/PRDT/
+CDB and completion OCS/TT/response/status diagnostics added only for ACTIVE.
+No write routes added. HFS/timer/GIC/CNTP protections unchanged.
+Local PASS: full0001..0081 replay + strict0082, real-header arm64 compile,
+SWEET equivalent preprocessing, exact physical tuple + fixed/descriptor malformed/
+short/negative sense ASan/UBSan regression; actual readiness single-ACTIVE/error/
+timeout tests;262144 submission whitelist cases + mutated ACTIVE rejection;
+read/GPT ASan/UBSan; MARBLE preprocessed write-route exclusions; six existing
+tests. Old0082 hardware/HFS/CNTP/GIC/timer prefix byte-identical. diff check PASS.
+Automated exact CI/package in progress; no RAMDisk, rd=ufsroot0, no rootrw/ufsrw.
+No phone commands. Preserve unrelated untracked breadcrumb document.
+
+## Previous handoff: MARBLE read-only UFS root (2026-10-22)
 
 USER PHYSICAL MILESTONE: HFS RAMDisk fully successful: mockfs declines non-Mach-O,
 hfs mounts MarbleRoot; hfs-627.100.6 registered, launchd exec/codesigning0,
@@ -11,7 +35,7 @@ root/exec/PID1 scheduling PASS. Supersedes older pending HFS statements below.
 User also confirms later stage0: NOP/READ_FLAG0, initial TUR02/04/02, correct
 DEVICE WLUN d0 ACTIVE1b0000001000 succeeds, LUN0 ready, capacity4096, data/MBR/
 GPT/entries/userdata reads PASS, no sector writes. Supersedes older DEVACT
-untested entries. Numeric MARBLE CAP/VER not retained; do not borrow SWEET's.
+untested entries. Numeric MARBLE values are now recorded in the newer handoff above.
 
 Reuse sweet_ufs.c via appended0082 after unchanged0001..0081. MARBLE reads
 /marble-ufs/reg PA01d84000+3000 from ADT (base matches actual shim/board.h).
@@ -57,7 +81,7 @@ Final image shim/out/marble-xnu/latest-marble-xnu.img; hashes independently rere
 Logs /tmp/marble-ufs-{pipeline,ci}.log, /tmp/ufs-{final-audit,linked-cntp,
 static-audit,host-audit,readiness-audit,opcode-audit}.txt. Documentation-only
 follow-up records results without changing kernel provenance. No phone commands.
-Physical XNU UFS test pending. Success boundary: userdata discovery + BSD root
+Physical XNU result superseded by the newer handoff above. Success boundary: userdata discovery + BSD root
 ufsroot0; existing Android/encrypted/non-HFS mount failure is expected.
 Next user manual command:
 fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
