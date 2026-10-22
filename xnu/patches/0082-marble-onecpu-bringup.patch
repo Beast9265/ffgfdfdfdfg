@@ -808,24 +808,29 @@ diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
   * the bootstrap page tables.
   */
 +#if defined(MARBLE)
-+uint8_t marble_fb_tables[ARM_PGBYTES] __attribute__((aligned(ARM_PGBYTES)));
++uint8_t marble_boot_l3[32 * ARM_PGBYTES] __attribute__((aligned(ARM_PGBYTES), section("__DATA,__data"))); uint8_t marble_fb_tables[ARM_PGBYTES] __attribute__((aligned(ARM_PGBYTES), section("__DATA,__data")));
 +#endif
  SECURITY_READ_ONLY_LATE(uint8_t) bootstrap_pagetables[BOOTSTRAP_TABLE_SIZE] __attribute__((aligned(ARM_PGBYTES)));
- 
+-
++
  /*
 @@ -1825,7 +1828,7 @@
  #define ARM64_PHYSMAP_ALIGNMENT_PADDING (PTOV_TABLE_SIZE * ARM_TT_TWIG_SIZE)
  #endif
- 
+-
++
 -#if defined(SWEET)
 +#if (defined(SWEET) || defined(MARBLE))
  /*
   * The reserved low-globals/kernel region is excluded from VM allocation.
   * Use the otherwise empty 32MB block above low globals and below gVirtBase
 @@ -1843,10 +1846,23 @@
- 	tt_entry_t *l2 = (tt_entry_t *)phystokv(l1 & ARM_TTE_TABLE_MASK);
- 	tt_entry_t *slot = &l2[(va & ARM_TT_L2_INDEX_MASK) >> ARM_TT_L2_SHIFT];
- 	assert(*slot == ARM_TTE_EMPTY);
+-	tt_entry_t *l2 = (tt_entry_t *)phystokv(l1 & ARM_TTE_TABLE_MASK);
++	tt_entry_t *l2 = (tt_entry_t *)phystokv(l1 & ARM_TTE_TABLE_MASK);
+-	tt_entry_t *slot = &l2[(va & ARM_TT_L2_INDEX_MASK) >> ARM_TT_L2_SHIFT];
++	tt_entry_t *slot = &l2[(va & ARM_TT_L2_INDEX_MASK) >> ARM_TT_L2_SHIFT];
+-	assert(*slot == ARM_TTE_EMPTY);
++	assert(*slot == ARM_TTE_EMPTY);
 +#if defined(MARBLE)
 +    /* L3 maps only visible pages; final partial 16K page is unavoidable. */
 +    pt_entry_t *l3 = (pt_entry_t *)alloc_ptpage(TRUE);
@@ -838,31 +843,46 @@ diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
 +    }
 +    *slot = kvtophys((vm_offset_t)l3) | ARM_TTE_VALID | ARM_TTE_TYPE_TABLE;
 +#else
- 	*slot = 0x9c000000ULL | ARM_TTE_VALID | ARM_TTE_TYPE_BLOCK |
- 	    ARM_TTE_BLOCK_SH(SH_OUTER_MEMORY) |
- 	    ARM_TTE_BLOCK_ATTRINDX(CACHE_ATTRINDX_WRITECOMB) |
- 	    ARM_TTE_BLOCK_AF | ARM_TTE_BLOCK_PNX | ARM_TTE_BLOCK_NX;
+-	*slot = 0x9c000000ULL | ARM_TTE_VALID | ARM_TTE_TYPE_BLOCK |
++	*slot = 0x9c000000ULL | ARM_TTE_VALID | ARM_TTE_TYPE_BLOCK |
+-	    ARM_TTE_BLOCK_SH(SH_OUTER_MEMORY) |
++	    ARM_TTE_BLOCK_SH(SH_OUTER_MEMORY) |
+-	    ARM_TTE_BLOCK_ATTRINDX(CACHE_ATTRINDX_WRITECOMB) |
++	    ARM_TTE_BLOCK_ATTRINDX(CACHE_ATTRINDX_WRITECOMB) |
+-	    ARM_TTE_BLOCK_AF | ARM_TTE_BLOCK_PNX | ARM_TTE_BLOCK_NX;
++	    ARM_TTE_BLOCK_AF | ARM_TTE_BLOCK_PNX | ARM_TTE_BLOCK_NX;
 +#endif
- 	__asm__ volatile("dsb ishst" ::: "memory");
+-	__asm__ volatile("dsb ishst" ::: "memory");
++	__asm__ volatile("dsb ishst" ::: "memory");
  }
  #endif
 @@ -2179,7 +2195,7 @@
- 
- 	arm_set_user_tbi();
- 
+-
++
+-	arm_set_user_tbi();
++	arm_set_user_tbi();
+-
++
 -#if defined(SWEET)
 +#if (defined(SWEET) || defined(MARBLE))
- 	/* phystokv() must still refer to the bootstrap aperture here. */
- 	sweet_early_map_final();
+-	/* phystokv() must still refer to the bootstrap aperture here. */
++	/* phystokv() must still refer to the bootstrap aperture here. */
+-	sweet_early_map_final();
++	sweet_early_map_final();
  #endif
 @@ -2188,7 +2204,7 @@
- 
- 	ml_enable_monitor();
- 
+-
++
+-	ml_enable_monitor();
++	ml_enable_monitor();
+-
++
 -#if defined(SWEET)
 +#if (defined(SWEET) || defined(MARBLE))
- 	/* The final TTBR1 is live; leave the outgoing VA=PA framebuffer alias. */
- 	sweet_early_relocate(SWEET_EARLY_FB_VA);
+-	/* The final TTBR1 is live; leave the outgoing VA=PA framebuffer alias. */
++	/* The final TTBR1 is live; leave the outgoing VA=PA framebuffer alias. */
+-	sweet_early_relocate(SWEET_EARLY_FB_VA);
++	sweet_early_relocate(SWEET_EARLY_FB_VA);
  #endif
 diff --git a/osfmk/arm64/machine_routines.c b/osfmk/arm64/machine_routines.c
 --- a/osfmk/arm64/machine_routines.c
@@ -903,7 +923,7 @@ diff --git a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
 diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
 --- a/osfmk/arm64/start.s
 +++ b/osfmk/arm64/start.s
-@@ -1,964 +1,1408 @@
+@@ -1,964 +1,1613 @@
  /*
   * Copyright (c) 2007-2022 Apple Inc. All rights reserved.
   *
@@ -993,6 +1013,11 @@ diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
 + MARBLE_BOOT_MARK fail_\name, \xpos, 0xffff2020, \ypos
 +Lmarble_done_\name:
 +.endmacro
++/* XNU MAIR indexes differ from the shim. EL1 RW (AP=00) throughout. */
++#define MARBLE_DEV_BLOCK (ARM_TTE_VALID | ARM_TTE_TYPE_BLOCK | ARM_TTE_BLOCK_ATTRINDX(CACHE_ATTRINDX_DISABLE) | ARM_TTE_BLOCK_AF | ARM_TTE_BLOCK_PNX | ARM_TTE_BLOCK_NX)
++#define MARBLE_DEV_PAGE (ARM_PTE_TYPE_VALID | ARM_PTE_ATTRINDX(CACHE_ATTRINDX_DISABLE) | ARM_PTE_AF | ARM_PTE_PNX | ARM_PTE_NX)
++#define MARBLE_WB_EXEC (ARM_PTE_TYPE_VALID | ARM_PTE_SH(SH_INNER_MEMORY) | ARM_PTE_ATTRINDX(CACHE_ATTRINDX_WRITEBACK) | ARM_PTE_AF | ARM_PTE_NX)
++#define MARBLE_WB_DATA (MARBLE_WB_EXEC | ARM_PTE_PNX)
 +/* Exact L1 pointer check before dereferencing; failure never follows garbage.
 + * root in x9, VA in x10, expected L2 pointer in x11. Output L2 desc x9.
 + */
@@ -2192,6 +2217,155 @@ diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
 +	mov		x2, x3
 -
 +
++#if defined(MARBLE)
++ /* No calls/stack: x0-x18 and NZCV are scratch, x20-x26/LR preserved.
++  * Fixed roots/L2s preserve TTBR relationship and framebuffer diagnostics.
++  * Fail closed on unsupported layout or >16 physical L2 regions (512MiB).
++  * Both aliases use separate L3s: unknown PA is Device in V=P, invalid KVA.
++  */
++ add x1, x25, #(2 * PGBYTES)
++ add x2, x25, #(3 * PGBYTES)
++ orr x9, x1, #ARM_TTE_BOOT_TABLE
++ str x9, [x25]                 // all MARBLE PAs are in L1[0]
++ ubfx x10, x22, #ARM_TT_L1_SHIFT, #11
++ orr x9, x2, #ARM_TTE_BOOT_TABLE
++ add x11, x25, #PGBYTES
++ str x9, [x11, x10, lsl #3]
++ ldr x0, [x20, BA_PHYS_BASE]
++ ldr x15, [x20, BA_MEM_SIZE]
++ add x15, x15, x0
++ MOV64 x9, MARBLE_DEV_BLOCK
++Lmarble_device_blocks:
++ ubfx x10, x0, #ARM_TT_L2_SHIFT, #11
++ orr x11, x0, x9
++ str x11, [x1, x10, lsl #3]
++ MOV64 x10, ARM_TT_L2_SIZE
++ add x0, x0, x10
++ cmp x0, x15
++ b.lo Lmarble_device_blocks
++ sub x17, x22, x23           // physical -> KVA delta
++ tst x17, #(ARM_TT_L2_SIZE - 1)
++ b.ne Lmarble_safe_map_stop
++ ldr x15, [x20, BA_TOP_OF_KERNEL_DATA]
++ tst x15, #(PGBYTES - 1)
++ b.ne Lmarble_safe_map_stop
++ and x14, x23, #ARM_TTE_BLOCK_L2_MASK
++ cmp x15, x23
++ b.ls Lmarble_safe_map_stop
++ sub x9, x15, x14
++ MOV64 x10, (16 * ARM_TT_L2_SIZE)
++ cmp x9, x10
++ b.hi Lmarble_safe_map_stop
++ sub x9, x15, #1
++ add x9, x9, x17
++ ubfx x9, x9, #ARM_TT_L1_SHIFT, #11
++ ubfx x10, x22, #ARM_TT_L1_SHIFT, #11
++ cmp x9, x10
++ b.ne Lmarble_safe_map_stop
++ /* Max LC_SEGMENT_64 end: appended ADT/boot_args (and optional payload
++  * ramdisk) occupy the owned tail from there to topOfKernelData. */
++ mov x18, x23
++ add x6, x23, #32
++ ldr w7, [x23, #16]
++Lmarble_segment_end:
++ cbz w7, Lmarble_segment_end_done
++ ldp w9, w10, [x6]
++ cmp w10, #8
++ b.lo Lmarble_safe_map_stop
++ cmp w9, #0x19
++ b.ne Lmarble_next_end
++ cmp w10, #72
++ b.lo Lmarble_safe_map_stop
++ ldp x11, x12, [x6, #24]
++ cbz x12, Lmarble_next_end
++ sub x11, x11, x17
++ add x12, x11, x12
++ cmp x11, x23
++ b.lo Lmarble_safe_map_stop
++ cmp x12, x15
++ b.hi Lmarble_safe_map_stop
++ cmp x12, x18
++ csel x18, x12, x18, hi
++Lmarble_next_end:
++ add x6, x6, x10
++ sub w7, w7, #1
++ b Lmarble_segment_end
++Lmarble_segment_end_done:
++ adrp x16, EXT(marble_boot_l3)@page
++ add x16, x16, EXT(marble_boot_l3)@pageoff
++ tst x16, #(PGBYTES - 1)
++ b.ne Lmarble_safe_map_stop
++Lmarble_safe_block:
++ mov x3, x16
++ add x4, x3, #PGBYTES
++ add x16, x4, #PGBYTES
++ ubfx x9, x14, #ARM_TT_L2_SHIFT, #11
++ orr x10, x3, #ARM_TTE_BOOT_TABLE
++ str x10, [x1, x9, lsl #3]
++ add x9, x14, x17
++ ubfx x9, x9, #ARM_TT_L2_SHIFT, #11
++ orr x10, x4, #ARM_TTE_BOOT_TABLE
++ str x10, [x2, x9, lsl #3]
++ mov x0, x14
++ MOV64 x5, ARM_TT_L2_SIZE
++ add x5, x14, x5
++Lmarble_safe_page:
++ mov x8, #0                 // bit0=owned, bit2=executable
++ cmp x0, x18
++ b.lo Lmarble_scan_segments
++ cmp x0, x15
++ b.hs Lmarble_scan_segments
++ mov x8, #1
++Lmarble_scan_segments:
++ add x6, x23, #32
++ ldr w7, [x23, #16]
++Lmarble_page_segment:
++ cbz w7, Lmarble_page_emit
++ ldp w9, w10, [x6]
++ cmp w9, #0x19
++ b.ne Lmarble_page_next
++ ldp x11, x12, [x6, #24]
++ cbz x12, Lmarble_page_next
++ sub x11, x11, x17
++ add x12, x12, x11
++ bic x11, x11, #(PGBYTES - 1)
++ cmp x0, x11
++ b.lo Lmarble_page_next
++ cmp x0, x12
++ b.hs Lmarble_page_next
++ orr x8, x8, #1
++ ldr w11, [x6, #60]         // segment initprot, VM_PROT_EXECUTE=4
++ and x11, x11, #4
++ orr x8, x8, x11
++Lmarble_page_next:
++ add x6, x6, x10
++ sub w7, w7, #1
++ b Lmarble_page_segment
++Lmarble_page_emit:
++ MOV64 x9, MARBLE_DEV_PAGE
++ orr x9, x9, x0
++ mov x10, #0
++ cbz x8, Lmarble_page_store
++ MOV64 x9, MARBLE_WB_DATA
++ tbz x8, #2, Lmarble_page_normal
++ MOV64 x9, MARBLE_WB_EXEC
++Lmarble_page_normal:
++ orr x9, x9, x0
++ mov x10, x9
++Lmarble_page_store:
++ str x9, [x3], #8
++ str x10, [x4], #8
++ add x0, x0, #PGBYTES
++ cmp x0, x5
++ b.lo Lmarble_safe_page
++ mov x14, x5
++ cmp x14, x15
++ b.lo Lmarble_safe_block
++ b Lmarble_safe_map_done
++Lmarble_safe_map_stop:
++ b Lmarble_safe_map_stop
++Lmarble_safe_map_done:
++#else
 -	/*
 +	/*
 -	 * Setup the V=P bootstrap mapping
@@ -2214,6 +2388,8 @@ diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
 +	lsr		x5,  x24, #(ARM_TT_L2_SHIFT)
 -	create_bootstrap_mapping x14, x15, x5, x3, x2, x9, x10, x11, x12, x13
 +	create_bootstrap_mapping x14, x15, x5, x3, x2, x9, x10, x11, x12, x13
++
++#endif
 -
 +
  #if defined(SWEET)
@@ -2257,6 +2433,8 @@ diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
 +    and x10, x10, x13
 +    adrp x11, EXT(marble_fb_tables)@page
 +    add x11, x11, EXT(marble_fb_tables)@pageoff
++    tst x11, #(PGBYTES - 1)
++    b.ne Lmarble_safe_map_stop
 +    orr x12, x11, #(ARM_TTE_VALID | ARM_TTE_TYPE_TABLE)
 +    MOV64 x13, ((0xb8000000 & ARM_TT_L2_INDEX_MASK) >> ARM_TT_L2_SHIFT)
 +    str x12, [x10, x13, lsl #TTE_SHIFT]
@@ -2672,15 +2850,30 @@ diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
 + MOV64 x10, ((MAIR_WRITEBACK << MAIR_ATTR_SHIFT(CACHE_ATTRINDX_WRITEBACK)) | (MAIR_INNERWRITEBACK << MAIR_ATTR_SHIFT(CACHE_ATTRINDX_INNERWRITEBACK)) | (MAIR_DISABLE << MAIR_ATTR_SHIFT(CACHE_ATTRINDX_DISABLE)) | (MAIR_WRITETHRU << MAIR_ATTR_SHIFT(CACHE_ATTRINDX_WRITETHRU)) | (MAIR_WRITECOMB << MAIR_ATTR_SHIFT(CACHE_ATTRINDX_WRITECOMB)) | (MAIR_POSTED << MAIR_ATTR_SHIFT(CACHE_ATTRINDX_POSTED)) | (MAIR_POSTED_REORDERED << MAIR_ATTR_SHIFT(CACHE_ATTRINDX_POSTED_REORDERED)) | (MAIR_POSTED_COMBINED_REORDERED << MAIR_ATTR_SHIFT(CACHE_ATTRINDX_POSTED_COMBINED_REORDERED)))
 + cmp x9, x10
 + MARBLE_CHECK mair, 896
-+ /* Expected L2 allocations: V=P x25+2 pages, KVA x25+3 pages.
-+  * 4GiB RAM spans one L1 entry (64GiB), so each consumes one L2. */
++ /* Fixed L2s: V=P x25+2 pages, KVA x25+3 pages.
++  * L3 pairs in marble_boot_l3 are indexed by the physical L2 region. */
 + mov x9, x25
 + adr x10, _marble_post_mmu_isb
 + add x11, x25, #(2 * PGBYTES)
 + MARBLE_L2 vp
-+ MOV64 x11, ARM_TTE_BLOCK_L2_MASK
-+ and x10, x10, x11
-+ MOV64 x11, ARM_TTE_BOOT_BLOCK
++ mov x11, x10
++ MOV64 x12, ARM_TTE_BLOCK_L2_MASK
++ and x11, x11, x12
++ and x12, x23, x12
++ sub x11, x11, x12
++ lsr x11, x11, #ARM_TT_L2_SHIFT
++ lsl x11, x11, #(ARM_PTE_SHIFT + 1)
++ adrp x12, EXT(marble_boot_l3)@page
++ add x12, x12, EXT(marble_boot_l3)@pageoff
++ add x11, x11, x12
++ orr x12, x11, #ARM_TTE_BOOT_TABLE
++ cmp x9, x12
++ b.ne Lmarble_walk_fail_vp
++ mov x9, x11
++ ubfx x12, x10, #ARM_PTE_SHIFT, #11
++ ldr x9, [x9, x12, lsl #3]
++ bic x10, x10, #(PGBYTES - 1)
++ MOV64 x11, MARBLE_WB_EXEC
 + orr x10, x10, x11
 + cmp x9, x10
 +Lmarble_walk_fail_vp:
@@ -2691,10 +2884,29 @@ diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
 + sub x10, x10, x23
 + add x11, x25, #(3 * PGBYTES)
 + MARBLE_L2 kva
-+ adr x10, _marble_post_mmu_isb
-+ MOV64 x11, ARM_TTE_BLOCK_L2_MASK
-+ and x10, x10, x11
-+ MOV64 x11, ARM_TTE_BOOT_BLOCK
++ mov x11, x10
++ sub x11, x11, x22
++ add x11, x11, x23
++ MOV64 x12, ARM_TTE_BLOCK_L2_MASK
++ and x11, x11, x12
++ and x12, x23, x12
++ sub x11, x11, x12
++ lsr x11, x11, #ARM_TT_L2_SHIFT
++ lsl x11, x11, #(ARM_PTE_SHIFT + 1)
++ adrp x12, EXT(marble_boot_l3)@page
++ add x12, x12, EXT(marble_boot_l3)@pageoff
++ add x11, x11, x12
++ add x11, x11, #PGBYTES
++ orr x12, x11, #ARM_TTE_BOOT_TABLE
++ cmp x9, x12
++ b.ne Lmarble_walk_fail_kva
++ mov x9, x11
++ ubfx x12, x10, #ARM_PTE_SHIFT, #11
++ ldr x9, [x9, x12, lsl #3]
++ sub x10, x10, x22
++ add x10, x10, x23
++ bic x10, x10, #(PGBYTES - 1)
++ MOV64 x11, MARBLE_WB_EXEC
 + orr x10, x10, x11
 + cmp x9, x10
 +Lmarble_walk_fail_kva:
@@ -2718,11 +2930,24 @@ diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
 + add x10, x10, EXT(LowExceptionVectorBase)@pageoff
 + add x11, x25, #(2 * PGBYTES)
 + MARBLE_L2 vectors
-+ adrp x10, EXT(LowExceptionVectorBase)@page
-+ add x10, x10, EXT(LowExceptionVectorBase)@pageoff
-+ MOV64 x11, ARM_TTE_BLOCK_L2_MASK
-+ and x10, x10, x11
-+ MOV64 x11, ARM_TTE_BOOT_BLOCK
++ mov x11, x10
++ MOV64 x12, ARM_TTE_BLOCK_L2_MASK
++ and x11, x11, x12
++ and x12, x23, x12
++ sub x11, x11, x12
++ lsr x11, x11, #ARM_TT_L2_SHIFT
++ lsl x11, x11, #(ARM_PTE_SHIFT + 1)
++ adrp x12, EXT(marble_boot_l3)@page
++ add x12, x12, EXT(marble_boot_l3)@pageoff
++ add x11, x11, x12
++ orr x12, x11, #ARM_TTE_BOOT_TABLE
++ cmp x9, x12
++ b.ne Lmarble_walk_fail_vectors
++ mov x9, x11
++ ubfx x12, x10, #ARM_PTE_SHIFT, #11
++ ldr x9, [x9, x12, lsl #3]
++ bic x10, x10, #(PGBYTES - 1)
++ MOV64 x11, MARBLE_WB_EXEC
 + orr x10, x10, x11
 + cmp x9, x10
 +Lmarble_walk_fail_vectors:

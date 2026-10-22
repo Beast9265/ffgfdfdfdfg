@@ -2,6 +2,55 @@
 
 
 
+## Active handoff: MARBLE sparse bootstrap mapping experiment (2026-10-22)
+
+User physical staged result: original SCTLR=0x30d00988, white bits
+3,7,8,11,20,22,23,28,29. E/E2 YES; M_OK and all later tiles/red NO.
+No new hardware test here. All preserved staged SCTLR formulas unchanged.
+
+0082 now maps whole high aperture Device/XN, with paired 16KiB L3s promoting
+only nonempty Mach-O segments and owned tail through topOfKernelData to WB.
+Unknown KVA pages invalid, both normal aliases identical; executable initprot
+pages PXN0/UXN1, data/table pages XN. Pool supports 16 physical L2 blocks
+(512MiB), fails closed on overflow/layout/alignment problems. TCR/TTBR/MAIR,
+cache operations, loader/ADT/GIC/UFS/SMP/framebuffer descriptors unchanged.
+Full report: docs/MARBLE_SAFE_BOOTSTRAP_MAP.md. Linked audit tool:
+python3 tools/marble-bootstrap-audit.py KERNEL --adt-size ACTUAL_ADT_BYTES.
+
+Additional observed defect: staged kernel framebuffer table PA0x841b67000 is
+only4KiB aligned; linker forces __bss alignment0x1000. Pool and framebuffer
+table now use existing __DATA,__data section (link alignment0x4000). Real C
+object confirms alignment14 and aligned symbols; runtime guards added.
+This is a second mapping correction: future M_OK cannot uniquely isolate
+carve-out speculation. Old M_OK absence could also reflect framebuffer fault.
+Old broad map is127 WB blocks (not128), PA0x840000000..0x93e000000, because
+helper floors adjusted remaining memSize after header offset0x1004000.
+
+Observed PASS: full reverse/replay0001..0081 + strict0082 check/apply;
+real-header start.s preprocess/plain-arm64 Mach-O assemble; actual
+arm_vm_init.c C cross-compile; extracted emitted constructor executed in
+QEMU one/two-block cases (4096/8192 L3 descriptors), gaps/code/data/tail and
+zero-size lower segment; both changed files SWEET preprocessing byte-identical;
+other patch sections and snapshot/cache/register/staged SCTLR code unchanged;
+zero MARBLE GICR_IPRIORITYR; cold OSLAR exclusion; diff check. Old-image
+reference policy audit checks symbols/stacks; default rejects missing pool.
+
+Read-only inspection of106 FDTs in vendor_boot/dtbo backups found no explicit
+reserved reg overlapping high aperture. Dynamic alloc-ranges can include it
+(va_md/demura/ramoops); actual allocated PAs/XPU policy unknown. Dumps stay /tmp.
+
+Safe for diagnostic GitHub Actions BUILD. No full new link: exact new linked
+WB endpoints/table/stack PAs pending; do NOT reuse reference addresses as new.
+Next: separately build, run linked audit with exact ADT size before packing,
+then temporary boot to observe E/E2/M_OK and later tiles. No CI run/ID,
+commit/push/device/storage operation; explicit no-commit instruction retained.
+Artifacts /tmp/safe-{before.patch,before-start.s,edit.py,regenerate.py,check.py,
+qemu.py,qemu-multi.py,image-audit.txt,arm_vm_init.o,vm-object.txt,reserved.py,
+reserved.txt}; /tmp/mmu-start.{s,macros,o}; /tmp/marble-mmu-tree;
+/tmp/safe-vm-command.json. Existing untracked breadcrumb/MMU docs retained.
+
+Earlier handoffs below are historical.
+
 ## Active handoff: MARBLE staged SCTLR experiment (2026-10-22)
 
 User physically confirms cache experiment: all pre-MMU checks green, CACHE/E/E2
