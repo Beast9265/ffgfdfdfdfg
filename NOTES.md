@@ -15,7 +15,8 @@ two regular files, same mount -> VNOP_EXCHANGE. No cross-volume/other flags.
 Existing bounded GUI IOKit/null/exit diagnostics unchanged. Historical0051/0053
 heap-string helper safely shared ONLY for MARBLE current exiting backboardd or
 SpringBoard on SIGABRT/SIGTRAP, marbleguidiag=1; four scans/boot,4096 region
-queries/scan,96MiB attempted copies/scan (failed copies count),700 strings/scan,
+queries/scan,96MiB attempted-copy threshold (failed copies count; final chunk
+can add up to65535 bytes),700 strings/scan,
 64KiB buffer,159-character strings. Zero-size/overflow stops traversal. No
 sampler/stack helper port. Single CPU config retained. SWEET behavior unchanged.
 
@@ -55,11 +56,45 @@ Sparse shim/out/marble-xnu/ios16-root-marble-20H392-containers.simg SHA256
  01f6cac2653379c35fb4b1043c7031fd1cf4e044e2a8d7e1862556ef356f54f0
 Logs /tmp/containers-{root.log,root-recheck.log,sparse-audit.txt}; mounts closed.
 
-CI/full link/package NEXT, exact existing real-iOS args including marbleguidiag=1
-retained. Unrelated iosroot-sparse.sh mode/breadcrumb doc preserved,not staged.
-Expected physical success: IOK backboardd matching IOMobileFramebuffer,
-open AppleCLCD/IOCoreSurfaceRoot and MARBLE FB: backboardd. Physical outcome
-PENDING user manual flash/boot; do not claim display ABI failure before lookup.
+Automated CI/package COMPLETE: kernel source commit
+818444bdb02c9c417cc1aaf7a9b1ec92e7da338c, exact Actions39790623310 SUCCESS;
+headSha independently matches,13.5/DEVELOPMENT/MARBLE/keep_going=true.
+Fresh xnu/out-marble-ci-39790623310 artifact SHA256SUMS PASS. Exact CI log
+confirms0082 application and all3 changed C compiles; full link PASS with zero
+undefined symbols. Linked vn_rename atfffffe000753d4b4 has flags2/errno45
+checks atfffffe000753d820/d828, destination null check d840, VREG1 checks
+d84c/d858, mount pointers+d8 equality d864..d870; equality branches dcc4 and
+VNOP_EXCHANGE call atfffffe000753dccc. Proves fallback active for MARBLE with
+all original safety gates. Linked GUI heap scanner atfffffe00073274d0 retains
+allowlist,boot-arg gate,four-scan/4096-region/700-line/copy-budget bounds;
+SWEET stack and sampler helpers absent. Existing bounded IOKit/null/exit hooks
+and personas linked. Source graphics/hardware sections unchanged.
+
+Exact payload segments independently match this CI kernel after fixups; no
+RAMDisk/extra root segment. Existing args retained verbatim:
+debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1 ufsrw=1 rootrw=1 launchd_unsecure_cache=1 marbleguidiag=1
+BOARD=marble-xnu shim SHA256 unchanged586713d3...1715ee05,clean stock boot_a
+repack/inspect and independent header/bounds/padding/payload-locator proof PASS.
+Sparse bootstrap160-page arena/aliases/stacks/tables PASS; four executable
+sections zero physical CNTP instructions,one CNTV_CTL MSR. UFS/HFS/AMFI/AKS/WDT,
+IOSurface/AppleCLCD clients and personalities,ADT gic+disp0 only,physical
+1080x2400 stride4320/canvas1125x2436/scale3,console/short-exec logs retained.
+Kernel SHA256 8c138cacc95e273b74d82c992da4ac6dcff4355dd18de46f6fd86fdf9e5c6cf7
+Payload SHA256 cc92cfffb98306a8781ab658346a35fa1f27eb2666b820069f8b4400a7ec2030
+Boot SHA256 bf1a3d28596705d173fa8da5592db47ccc150d078e6ad38b34b6f6131b182947
+Final shim/out/marble-xnu/latest-marble-xnu.img.
+Logs /tmp/marble-containers-{pipeline.log,ci.log,run.json,final-audit.txt,cntp.txt};
+linked proof /tmp/containers-linked-swap-scan.txt. Root raw/sparse hashes above.
+All local image mounts closed. No fastboot/adb/physical device operations.
+
+NEXT USER MANUAL TEST (userdata replacement,no GPT changes):
+fastboot -S 512M flash userdata ~/ios-marble/shim/out/marble-xnu/ios16-root-marble-20H392-containers.simg
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
+Expected success indicator: IOK backboardd matching IOMobileFramebuffer,
+open AppleCLCD/IOCoreSurfaceRoot,then MARBLE FB: backboardd activity. If still
+pre-display,record STR exception text and CRASH reason. GUI/physical display
+discovery remains UNPROVEN until user reports the next boot.
+
 
 ## Active handoff: MARBLE clean GUI startup / bounded diagnostics (2026-10-22)
 
