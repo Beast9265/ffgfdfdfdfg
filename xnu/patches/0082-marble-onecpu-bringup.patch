@@ -563,14 +563,14 @@ diff --git a/iokit/KernelConfigTables.cpp b/iokit/KernelConfigTables.cpp
      "   {"
      "     'IOClass'         = AppleKeyStore;"
      "     'IOProviderClass' = IOResources;"
-@@ -57,6 +65,8 @@
-     "     'IOProviderClass' = IOResources;"
-     "     'IOMatchCategory' = IOWatchdog;"
+@@ -67,6 +75,8 @@
+     "     'IOProviderClass' = IOPlatformDevice;"
+     "     'IONameMatch'     = 'sweet,display';"
      "   },"
 +#endif
 +#if defined(ARM64_BOARD_CONFIG_SWEET)
      "   {"
-     "     'IOClass'         = IOCoreSurfaceRoot;"
+     "     'IOClass'         = SweetHIDButtons;"
      "     'IOProviderClass' = IOResources;"
 diff --git a/iokit/conf/files.arm64 b/iokit/conf/files.arm64
 --- a/iokit/conf/files.arm64
@@ -11152,131 +11152,27 @@ diff --git a/bsd/miscfs/mockfs/mockfs_vfsops.c b/bsd/miscfs/mockfs/mockfs_vfsops
 diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
 --- a/bsd/kern/kern_exec.c
 +++ b/bsd/kern/kern_exec.c
-@@ -7527,64 +7527,69 @@
- done:
--	if (0 == error) {
-+	if (0 == error) {
--		/*
-+		/*
--		 * Update the new process's signature-dependent process state.
-+		 * Update the new process's signature-dependent process state.
--		 * state.
-+		 * state.
--		 */
-+		 */
-
--		error = proc_process_signature(p, &signature_failure_reason);
-+		error = proc_process_signature(p, &signature_failure_reason);
--	}
-+	}
-
--	if (0 == error) {
-+	if (0 == error) {
--		/*
-+		/*
--		 * Update the new main thread's signature-dependent thread
-+		 * Update the new main thread's signature-dependent thread
--		 * state. This was also called when the thread was created,
-+		 * state. This was also called when the thread was created,
--		 * but for the main thread the signature was not yet attached
-+		 * but for the main thread the signature was not yet attached
--		 * at that time.
-+		 * at that time.
--		 */
-+		 */
--		kr = thread_process_signature(imgp->ip_new_thread, proc_get_task_raw(p));
-+		kr = thread_process_signature(imgp->ip_new_thread, proc_get_task_raw(p));
-
--		if (kr != KERN_SUCCESS) {
-+		if (kr != KERN_SUCCESS) {
--			error = EINVAL;
-+			error = EINVAL;
--			signature_failure_reason = os_reason_create(OS_REASON_EXEC, EXEC_EXIT_REASON_MACHINE_THREAD);
-+			signature_failure_reason = os_reason_create(OS_REASON_EXEC, EXEC_EXIT_REASON_MACHINE_THREAD);
--		}
-+		}
--	}
-+	}
-
--	if (0 == error) {
-+	if (0 == error) {
--		/* The process's code signature related properties are
-+		/* The process's code signature related properties are
--		 * fully set up, so this is an opportune moment to log
-+		 * fully set up, so this is an opportune moment to log
--		 * platform binary execution, if desired. */
-+		 * platform binary execution, if desired. */
--		if (platform_exec_logging != 0 && csproc_get_platform_binary(p)) {
-+		if (platform_exec_logging != 0 && csproc_get_platform_binary(p)) {
--			uint8_t cdhash[CS_CDHASH_LEN];
-+			uint8_t cdhash[CS_CDHASH_LEN];
--			char cdhash_string[CS_CDHASH_STRING_SIZE];
-+			char cdhash_string[CS_CDHASH_STRING_SIZE];
--			proc_getcdhash(p, cdhash);
-+			proc_getcdhash(p, cdhash);
--			cdhash_to_string(cdhash_string, cdhash);
-+			cdhash_to_string(cdhash_string, cdhash);
-
--			os_log(peLog, "CS Platform Exec Logging: Executing platform signed binary "
-+			os_log(peLog, "CS Platform Exec Logging: Executing platform signed binary "
--			    "'%s' with cdhash %s\n", p->p_name, cdhash_string);
-+			    "'%s' with cdhash %s\n", p->p_name, cdhash_string);
--		}
-+		}
--	} else {
-+	} else {
--		if (!unexpected_failure) {
-+		if (!unexpected_failure) {
--			proc_csflags_set(p, CS_KILLED);
-+			proc_csflags_set(p, CS_KILLED);
--		}
-+		}
--		/* make very sure execution fails */
-+		/* make very sure execution fails */
--		if (vfexec || spawn) {
-+		if (vfexec || spawn) {
--			assert(signature_failure_reason != OS_REASON_NULL);
-+			assert(signature_failure_reason != OS_REASON_NULL);
--			psignal_vfork_with_reason(p, proc_task(p), imgp->ip_new_thread,
-+			psignal_vfork_with_reason(p, proc_task(p), imgp->ip_new_thread,
--			    SIGKILL, signature_failure_reason);
-+			    SIGKILL, signature_failure_reason);
--			signature_failure_reason = OS_REASON_NULL;
-+			signature_failure_reason = OS_REASON_NULL;
--			error = 0;
-+			error = 0;
--		} else {
-+		} else {
--			assert(signature_failure_reason != OS_REASON_NULL);
-+			assert(signature_failure_reason != OS_REASON_NULL);
--			psignal_with_reason(p, SIGKILL, signature_failure_reason);
-+			psignal_with_reason(p, SIGKILL, signature_failure_reason);
--			signature_failure_reason = OS_REASON_NULL;
-+			signature_failure_reason = OS_REASON_NULL;
--		}
-+		}
--	}
-+	}
-
--	if (port != IPC_PORT_NULL) {
-+	if (port != IPC_PORT_NULL) {
--		ipc_port_release_send(port);
-+		ipc_port_release_send(port);
--	}
-+	}
-
+@@ -7411,7 +7411,7 @@
+ 				error = EACCES;
+ 				goto done;
+ 			}
+-#if defined(ARM64_BOARD_CONFIG_SWEET)
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_MARBLE)
+ 			/* SWEET runs every iOS binary this way: one short line per exec. */
+ 			printf("exec %s\n", p->p_name);
+ #else
+@@ -7584,6 +7584,11 @@
+ 		ipc_port_release_send(port);
+ 	}
+ 
 +#if defined(ARM64_BOARD_CONFIG_MARBLE)
 +	if (p->p_pid == 1) {
 +		printf("MARBLE ROOT: PID 1 codesigning result %d\n", error);
 +	}
 +#endif
--	/* If we hit this, we likely would have leaked an exit reason */
-+	/* If we hit this, we likely would have leaked an exit reason */
--	assert(signature_failure_reason == OS_REASON_NULL);
-+	assert(signature_failure_reason == OS_REASON_NULL);
--	return error;
-+	return error;
- }
+ 	/* If we hit this, we likely would have leaked an exit reason */
+ 	assert(signature_failure_reason == OS_REASON_NULL);
+ 	return error;
 diff --git a/bsd/sweet_hfs/sweet_hfs_iokit.c b/bsd/sweet_hfs/sweet_hfs_iokit.c
 --- a/bsd/sweet_hfs/sweet_hfs_iokit.c
 +++ b/bsd/sweet_hfs/sweet_hfs_iokit.c
@@ -13229,3 +13125,193 @@ diff --git a/bsd/sweet_hfs/core/hfs_catalog.c b/bsd/sweet_hfs/core/hfs_catalog.c
  /*
   * SWEET: hard links made by Linux tools lack kHFSHasLinkChainBit and every
   * lookup of them repairs (in memory) and reports it again; the console
+diff --git a/iokit/Kernel/arm/SweetSurface.cpp b/iokit/Kernel/arm/SweetSurface.cpp
+--- a/iokit/Kernel/arm/SweetSurface.cpp
++++ b/iokit/Kernel/arm/SweetSurface.cpp
+@@ -27,7 +27,12 @@
+  */
+ #include "SweetSurface.h"
+ 
+-#if defined(SWEET)
++#if defined(SWEET) || defined(MARBLE)
++#if defined(MARBLE)
++#define SWEET_SURF_PREFIX "MARBLE SURF: "
++#else
++#define SWEET_SURF_PREFIX "SWEET SURF: "
++#endif
+ #include <IOKit/IOService.h>
+ #include <IOKit/IOUserClient.h>
+ #include <IOKit/IOKitKeys.h>
+@@ -395,7 +400,7 @@
+ 	sweet_surface_init_lock();
+ 	setProperty(kIOUserClientClassKey, "IOSurfaceRootUserClient");
+ 	registerService();
+-	IOLog("SWEET SURF: IOCoreSurfaceRoot registered\n");
++	IOLog(SWEET_SURF_PREFIX "IOCoreSurfaceRoot registered\n");
+ 	return true;
+ }
+ 
+@@ -440,7 +445,7 @@
+ 	sweet_surf_logged |= 1ULL << bit;
+ 	char name[32];
+ 	proc_selfname(name, sizeof(name));
+-	IOLog("SWEET SURF: %s %s %u\n", name, what, n);
++	IOLog(SWEET_SURF_PREFIX "%s %s %u\n", name, what, n);
+ }
+ 
+ bool
+@@ -673,7 +678,7 @@
+ 	OSDictionary *props = OSDynamicCast(OSDictionary, obj);
+ 	if (props == NULL) {
+ 		OSSafeReleaseNULL(obj);
+-		IOLog("SWEET SURF: create: bad property dictionary (%u bytes)\n", len);
++		IOLog(SWEET_SURF_PREFIX "create: bad property dictionary (%u bytes)\n", len);
+ 		return kIOReturnBadArgument;
+ 	}
+ 
+@@ -707,7 +712,7 @@
+ 		char name[32];
+ 		proc_selfname(name, sizeof(name));
+ 		sweet_surface_creates_logged++;
+-		IOLog("SWEET SURF: %s create id %u %ux%u fmt 0x%x bpe %u bpr %u planes %u size %u keys %u -> 0x%x\n",
++		IOLog(SWEET_SURF_PREFIX "%s create id %u %ux%u fmt 0x%x bpe %u bpr %u planes %u size %u keys %u -> 0x%x\n",
+ 		    name, s->id, s->width, s->height, s->pixelFormat, s->bytesPerElement,
+ 		    s->bytesPerRow, s->planeCount, s->allocSize, props->getCount(), ret);
+ 	}
+@@ -881,4 +886,4 @@
+ 	*targetP = this;
+ 	return &sweet_surface_traps[index];
+ }
+-#endif /* SWEET */
++#endif /* SWEET || MARBLE */
+diff --git a/iokit/Kernel/arm/SweetSurface.h b/iokit/Kernel/arm/SweetSurface.h
+--- a/iokit/Kernel/arm/SweetSurface.h
++++ b/iokit/Kernel/arm/SweetSurface.h
+@@ -10,7 +10,7 @@
+ 
+ #include <pexpert/arm64/board_config.h>
+ 
+-#if defined(SWEET)
++#if defined(SWEET) || defined(MARBLE)
+ #include <IOKit/IOMemoryDescriptor.h>
+ #include <IOKit/IOBufferMemoryDescriptor.h>
+ #include <libkern/c++/OSObject.h>
+@@ -61,5 +61,5 @@
+ /* Send right for the surface in task (IOSurfaceLookupFromMachPort). */
+ mach_port_name_t sweet_surface_port_in_task(SweetSurface *surface, task_t task);
+ 
+-#endif /* SWEET */
++#endif /* SWEET || MARBLE */
+ #endif /* _SWEET_SURFACE_H */
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -38,7 +38,12 @@
+ 
+ extern "C" int sweet_console_muted;     /* osfmk/console/serial_console.c */
+ 
+-#if defined(SWEET)
++#if defined(SWEET) || defined(MARBLE)
++#if defined(MARBLE)
++#define SWEET_FB_PREFIX "MARBLE FB: "
++#else
++#define SWEET_FB_PREFIX "SWEET FB: "
++#endif
+ #include <IOKit/IOService.h>
+ #include <IOKit/IOUserClient.h>
+ #include <IOKit/IOKitKeys.h>
+@@ -163,7 +168,7 @@
+ 	fHeight = (uint32_t)video.v_height;
+ 	fRowBytes = (uint32_t)video.v_rowBytes;
+ 	if (fPhys == 0 || fWidth == 0 || fHeight == 0 || fRowBytes < fWidth * 4) {
+-		IOLog("SWEET FB: no boot framebuffer\n");
++		IOLog(SWEET_FB_PREFIX "no boot framebuffer\n");
+ 		return false;
+ 	}
+ 	int native = 0;
+@@ -182,14 +187,14 @@
+ 	fPixels = fSurface != NULL ? fSurface->kernelAddress() : 0;
+ 	fWorkLoop = IOWorkLoop::workLoop();
+ 	if (fLock == NULL || fClients == NULL || fPixels == 0 || fWorkLoop == NULL) {
+-		IOLog("SWEET FB: setup failed\n");
++		IOLog(SWEET_FB_PREFIX "setup failed\n");
+ 		OSSafeReleaseNULL(fSurface);    /* stays published: also held by the table */
+ 		OSSafeReleaseNULL(fWorkLoop);
+ 		return false;
+ 	}
+ 	fVsync = IOTimerEventSource::timerEventSource(this, &AppleCLCD::vsyncFired);
+ 	if (fVsync == NULL || fWorkLoop->addEventSource(fVsync) != kIOReturnSuccess) {
+-		IOLog("SWEET FB: no vsync timer\n");
++		IOLog(SWEET_FB_PREFIX "no vsync timer\n");
+ 		return false;
+ 	}
+ 	uint32_t hz = 10;
+@@ -201,7 +206,7 @@
+ 	setProperty("external", false);
+ 	setProperty("DisplayPipePlaneBaseAlignment", 64ULL, 32);
+ 	registerService();
+-	IOLog("SWEET FB: AppleCLCD %ux%u stride %u at 0x%llx, default surface %u, presented as %ux%u\n",
++	IOLog(SWEET_FB_PREFIX "AppleCLCD %ux%u stride %u at 0x%llx, default surface %u, presented as %ux%u\n",
+ 	    fWidth, fHeight, fRowBytes, fPhys, fSurface->id, fLogicalW, fLogicalH);
+ 	return true;
+ }
+@@ -304,7 +309,7 @@
+ 	fDirty = true;
+ 	IOLockUnlock(fLock);
+ 	if ((++sweet_fb_swap_count % 1000) == 0) {
+-		IOLog("SWEET FB: %llu swaps\n", sweet_fb_swap_count);
++		IOLog(SWEET_FB_PREFIX "%llu swaps\n", sweet_fb_swap_count);
+ 	}
+ }
+ 
+@@ -320,7 +325,10 @@
+ 		if (PE_parse_boot_argn("sweetfb_noconsole", &quiet, sizeof(quiet)) && quiet != 0) {
+ 			/* Not PE_initialize_console(kPEDisableScreen): its console switch
+ 			 * writes the read-only-late cons_ops_index and panics. */
++			/* Keep MARBLE text diagnostics enabled for the first graphics test. */
++#if defined(SWEET)
+ 			sweet_console_muted = 1;
++#endif
+ 		}
+ 	}
+ 
+@@ -338,7 +346,7 @@
+ 		SweetSurface *s = sweet_surface_copy(id);
+ 		if (sweet_fb_swaps_logged < 16) {
+ 			sweet_fb_swaps_logged++;
+-			IOLog("SWEET FB: swap %u layer %u surface %u %ux%u fmt 0x%x bpr %u a %d,%d %ux%u b %d,%d %dx%d\n",
++			IOLog(SWEET_FB_PREFIX "swap %u layer %u surface %u %ux%u fmt 0x%x bpr %u a %d,%d %ux%u b %d,%d %dx%d\n",
+ 			    get32(rec, 0x50), layer, id, s ? s->width : 0, s ? s->height : 0,
+ 			    s ? s->pixelFormat : 0, s ? s->bytesPerRow : 0, sx, sy, get32(a, 8),
+ 			    get32(a, 12), dx, dy, w, h);
+@@ -528,7 +536,7 @@
+ 			IOLockUnlock(fFB->fLock);
+ 			char name[32];
+ 			proc_selfname(name, sizeof(name));
+-			IOLog("SWEET FB: %s notifications type %u %s\n", name, type,
++			IOLog(SWEET_FB_PREFIX "%s notifications type %u %s\n", name, type,
+ 			    args->scalarInput[0] ? "on" : "off");
+ 		}
+ 		break;
+@@ -542,7 +550,7 @@
+ 				fFB->fDirty = true;     /* on: redraw the latest frame */
+ 			}
+ 			IOLockUnlock(fFB->fLock);
+-			IOLog("SWEET FB: display %s\n", off ? "off" : "on");
++			IOLog(SWEET_FB_PREFIX "display %s\n", off ? "off" : "on");
+ 		}
+ 		break;
+ 	case kSweetFBSwapWait:
+@@ -562,10 +570,10 @@
+ 		}
+ 		char name[32];
+ 		proc_selfname(name, sizeof(name));
+-		IOLog("SWEET FB: %s sel %u in %u/%u out %u/%u -> 0x%x\n", name, selector,
++		IOLog(SWEET_FB_PREFIX "%s sel %u in %u/%u out %u/%u -> 0x%x\n", name, selector,
+ 		    args->scalarInputCount, args->structureInputSize,
+ 		    args->scalarOutputCount, args->structureOutputSize, ret);
+ 	}
+ 	return ret;
+ }
+-#endif /* SWEET */
++#endif /* SWEET || MARBLE */

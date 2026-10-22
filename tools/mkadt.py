@@ -189,7 +189,9 @@ def build(seed=None, qemu=False, highmem=False, marble=False):
         ])])
 
     if marble:
-        arm_io.children = [gic]
+        # Retain only the GIC and shared AppleCLCD display nub on MARBLE.
+        # No SWEET watchdog, input, or other hardware children.
+        arm_io.children = [gic, arm_io.children[2]]
 
     fbcon = node('sweet-fbcon', [
         ph(),

@@ -1,5 +1,49 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## Active handoff: MARBLE IOSurface / framebuffer (2026-10-22)
+
+User physical milestone: SpringBoard exec PASS; SpringBoard stable FAIL / respawn
+loop for 10+ minutes; display service MISSING. backboardd, securityd, chronod,
+fairplayd.H2 and xpcproxy execute. AppleKeyStore/keybag/watchdogd, writable UFS,
+journaled HFS, dyld/launchd and broad LaunchDaemons PASS (user observation).
+
+0082 alone shares FINAL SweetSurface.cpp/.h and SweetFramebuffer.cpp with MARBLE,
+plus only IOCoreSurfaceRoot/AppleCLCD personalities. files.arm64 already builds
+both optional iokitcpp units. No new Marble graphics implementation or unrelated
+driver enabled. Shared sweet,display compatible retained: MARBLE /arm-io has
+ONLY gic and disp0; no SWEET wdt/input nodes restored. Identity unchanged.
+
+Audited final0001..0081:0046 ABI includes create/lookup/lock/map, default surface,
+SwapBegin/End, layer IDs, vsync, CPU copies, bounds, async-reference bzero,
+reference/mapping cleanup.0056 throttles presents (default10Hz);0061 iPhone X
+1125x2436 canvas/center crop;0067 opt-in console mute;0068 cached same-client
+lookup lifetime fix;0079 power/fade behavior preserved.0054/0058/0062 touch
+adjacent configuration; final personalities/files list retained. No rollback to
+original0046. MARBLE SURF/FB diagnostic prefixes added; SWEET strings unchanged.
+AppleCLCD uses PE_current_console, not a SWEET PA constant. Existing MARBLE ADT:
+PA0xb8000000,1080x2400,stride4320,visible0x009e3400; canvas1125x2436 @3x.
+MARBLE console stays enabled even if sweetfb_noconsole supplied (first test);
+SWEET opt-in mute unchanged; no SWEET persistent logger imported.
+0042 short exec log guard extended only to MARBLE; authorization/code-signing
+control flow byte-identical. All existing root/AMFI/AKS/WDT/CPU/timer code retained.
+
+Local validation PASS: reverse/replay0001..0081, strict0082 whitespace apply;
+actual CI-header arm64 compiles SweetSurface.cpp, SweetFramebuffer.cpp,
+KernelConfigTables.cpp and kern_exec.c. Normalized preprocessed SWEET/BCM2837/
+T8103 tokens unchanged for all four files. Fixed-seed SWEET ADT byte-identical;
+MARBLE exact framebuffer/canvas/minimal children and personalities checks PASS.
+Scripts/logs /tmp/graphics-{edit.py,compile.py,compile.log,proof.py}.
+Patch context whitespace checked using core.whitespace=-blank-at-eol,-space-before-tab;
+strict git apply --whitespace=error independently checks added source.
+
+Exact boot args retained (NO RAMDisk):
+debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1 ufsrw=1 rootrw=1 launchd_unsecure_cache=1
+No userdata/root rebuild or phone operation. Unrelated iosroot-sparse.sh mode
+and bootstrap breadcrumbs preserved. Full CI link/package/linked proofs pending.
+Next physical test: observe MARBLE SURF registration, MARBLE FB AppleCLCD geometry,
+backboardd/SpringBoard selectors; stable SpringBoard/UI remains unproven.
+
+
 ## Active handoff: MARBLE GUI diagnostic root (2026-10-22, COMPLETE)
 
 Helper/test/artifact handoff commit397686b (root-only; no new CI).
