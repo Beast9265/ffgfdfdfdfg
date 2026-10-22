@@ -903,7 +903,7 @@ diff --git a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
 diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
 --- a/osfmk/arm64/start.s
 +++ b/osfmk/arm64/start.s
-@@ -1,964 +1,1286 @@
+@@ -1,964 +1,1408 @@
  /*
   * Copyright (c) 2007-2022 Apple Inc. All rights reserved.
   *
@@ -964,6 +964,25 @@ diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
 +	subs x11, x11, #1
 +	b.ne Lmarble_boot_\stage\()_row
 +	dsb sy
++.endmacro
++.macro MARBLE_SCTLR_BIT bit
++ MOV64 x9, (0xb8000000 + 2208 * 4320 + \bit * 16 * 4)
++ MOV64 x10, 0xff102040
++ tbz x14, #\bit, Lmarble_sctlr_bit_\bit
++ MOV64 x10, 0xffffffff
++Lmarble_sctlr_bit_\bit\():
++ mov x11, #16
++Lmarble_sctlr_row_\bit\():
++ mov x12, #8
++ mov x13, x9
++Lmarble_sctlr_pixel_\bit\():
++ str w10, [x13], #4
++ subs x12, x12, #1
++ b.ne Lmarble_sctlr_pixel_\bit
++ add x9, x9, #1, lsl #12
++ add x9, x9, #224
++ subs x11, x11, #1
++ b.ne Lmarble_sctlr_row_\bit
 +.endmacro
 +/* Test result is NZCV.EQ. Every use has x9-x13/NZCV dead. */
 +.macro MARBLE_CHECK name, xpos, ypos=2368
@@ -2498,6 +2517,80 @@ diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
 -
 +
 +#if defined(MARBLE)
++ /* Cold SCTLR snapshot: x14 is dead on entry, untouched until tunables.
++  * No calls from here through the staged transition; keep original in x14.
++  * 64 cells at y2208: bit0 leftmost; white=1, dark blue=0. */
++ cbnz x21, Lmarble_sctlr_capture_done
++ mrs x14, SCTLR_EL1
++ MARBLE_SCTLR_BIT 0
++ MARBLE_SCTLR_BIT 1
++ MARBLE_SCTLR_BIT 2
++ MARBLE_SCTLR_BIT 3
++ MARBLE_SCTLR_BIT 4
++ MARBLE_SCTLR_BIT 5
++ MARBLE_SCTLR_BIT 6
++ MARBLE_SCTLR_BIT 7
++ MARBLE_SCTLR_BIT 8
++ MARBLE_SCTLR_BIT 9
++ MARBLE_SCTLR_BIT 10
++ MARBLE_SCTLR_BIT 11
++ MARBLE_SCTLR_BIT 12
++ MARBLE_SCTLR_BIT 13
++ MARBLE_SCTLR_BIT 14
++ MARBLE_SCTLR_BIT 15
++ MARBLE_SCTLR_BIT 16
++ MARBLE_SCTLR_BIT 17
++ MARBLE_SCTLR_BIT 18
++ MARBLE_SCTLR_BIT 19
++ MARBLE_SCTLR_BIT 20
++ MARBLE_SCTLR_BIT 21
++ MARBLE_SCTLR_BIT 22
++ MARBLE_SCTLR_BIT 23
++ MARBLE_SCTLR_BIT 24
++ MARBLE_SCTLR_BIT 25
++ MARBLE_SCTLR_BIT 26
++ MARBLE_SCTLR_BIT 27
++ MARBLE_SCTLR_BIT 28
++ MARBLE_SCTLR_BIT 29
++ MARBLE_SCTLR_BIT 30
++ MARBLE_SCTLR_BIT 31
++ MARBLE_SCTLR_BIT 32
++ MARBLE_SCTLR_BIT 33
++ MARBLE_SCTLR_BIT 34
++ MARBLE_SCTLR_BIT 35
++ MARBLE_SCTLR_BIT 36
++ MARBLE_SCTLR_BIT 37
++ MARBLE_SCTLR_BIT 38
++ MARBLE_SCTLR_BIT 39
++ MARBLE_SCTLR_BIT 40
++ MARBLE_SCTLR_BIT 41
++ MARBLE_SCTLR_BIT 42
++ MARBLE_SCTLR_BIT 43
++ MARBLE_SCTLR_BIT 44
++ MARBLE_SCTLR_BIT 45
++ MARBLE_SCTLR_BIT 46
++ MARBLE_SCTLR_BIT 47
++ MARBLE_SCTLR_BIT 48
++ MARBLE_SCTLR_BIT 49
++ MARBLE_SCTLR_BIT 50
++ MARBLE_SCTLR_BIT 51
++ MARBLE_SCTLR_BIT 52
++ MARBLE_SCTLR_BIT 53
++ MARBLE_SCTLR_BIT 54
++ MARBLE_SCTLR_BIT 55
++ MARBLE_SCTLR_BIT 56
++ MARBLE_SCTLR_BIT 57
++ MARBLE_SCTLR_BIT 58
++ MARBLE_SCTLR_BIT 59
++ MARBLE_SCTLR_BIT 60
++ MARBLE_SCTLR_BIT 61
++ MARBLE_SCTLR_BIT 62
++ MARBLE_SCTLR_BIT 63
++ dsb sy
++Lmarble_sctlr_capture_done:
++#endif
++
++#if defined(MARBLE)
 + /* Cold boot only: loader RAM writes and bootstrap tables are authoritative.
 +  * x23 is the adjusted Mach-O header PA; topOfKernelData is exclusive and
 +  * includes the ADT and boot_args page. Both lie in loader-validated RAM.
@@ -2635,26 +2728,55 @@ diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
 +Lmarble_walk_fail_vectors:
 + MARBLE_CHECK vectors, 256, 2272
 + /* Retain fetchable V=P vectors across transition. Restore KVA VBAR after F.
-+  * x0 may be overwritten here: next instruction reloads SCTLR default. */
++  * x0 is dead here: the next path constructs its SCTLR value. */
 + adrp x0, EXT(LowExceptionVectorBase)@page
 + add x0, x0, EXT(LowExceptionVectorBase)@pageoff
 + msr VBAR_EL1, x0
 + isb
 +Lmarble_checks_done:
 +#endif
++#if defined(MARBLE)
++ cbnz x21, Lmarble_sctlr_normal
++ /* M only: preserve firmware bits except A/WXN/C/I; no stack or calls. */
++ mov x0, x14
++ bic x0, x0, #(1 << 1)
++ bic x0, x0, #(1 << 19)
++ bic x0, x0, #(1 << 2)
++ bic x0, x0, #(1 << 12)
++ orr x0, x0, #1
++ msr SCTLR_EL1, x0
++ /* E2: M-only MSR executed, synchronization not yet crossed. */
++ MARBLE_BOOT_MARK E2, 192, 0xffff40a0, 2272
++ isb sy
++ MARBLE_BOOT_MARK M_OK, 448, 0xff00ff00, 2272
++ mrs x0, SCTLR_EL1
++ orr x0, x0, #(1 << 12)
++ msr SCTLR_EL1, x0
++ isb sy
++ MARBLE_BOOT_MARK I_OK, 512, 0xffffff00, 2272
++ mrs x0, SCTLR_EL1
++ orr x0, x0, #(1 << 2)
++ msr SCTLR_EL1, x0
++ isb sy
++ MARBLE_BOOT_MARK C_OK, 576, 0xffff8000, 2272
++ MOV64 x0, SCTLR_EL1_DEFAULT
++ MSR_SCTLR_EL1_X0
++ isb sy
++ MARBLE_BOOT_MARK XNU_SCTLR_OK, 640, 0xffffffff, 2272
++ b Lmarble_sctlr_done
++Lmarble_sctlr_normal:
++#endif
 -	MOV64   x0, SCTLR_EL1_DEFAULT
 +	MOV64   x0, SCTLR_EL1_DEFAULT
 -	MSR_SCTLR_EL1_X0
 +	MSR_SCTLR_EL1_X0
-+#if defined(MARBLE)
-+ /* Context-changing MSR: pre-ISB execution is not a guaranteed MMU-off
-+  * interval. This separates a direct trap only, not precise activation. */
-+ MARBLE_BOOT_MARK E2, 192, 0xffff40a0, 2272
-+#endif
 -	isb		sy
-+	isb		sy
 -
 -#if !VMAPPLE && !defined(SWEET)
++	isb sy
++#if defined(MARBLE)
++Lmarble_sctlr_done:
++#endif
 +#if defined(MARBLE)
 +.globl _marble_post_mmu_isb
 +_marble_post_mmu_isb:

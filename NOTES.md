@@ -2,6 +2,37 @@
 
 
 
+## Active handoff: MARBLE staged SCTLR experiment (2026-10-22)
+
+User physically confirms cache experiment: all pre-MMU checks green, CACHE/E/E2
+visible, F/sync-red absent. IVAC/IALLU completed. New experiment preserves all
+existing diagnostics and all translation/cache-maintenance configuration.
+Cold MARBLE snapshots original SCTLR into proven-dead x14, encodes all 64 bits
+as white=1/dark-blue=0 cells (bit0 leftmost x0, stride16, 8x16 at y2208), then
+writes preserved M-only, adds I, adds C, finally writes XNU 0x3454593d. Each
+ISB has a distinct M_OK/I_OK/C_OK/XNU_SCTLR_OK tile at x448/512/576/640,y2272.
+E2 now means M-only MSR completed before ISB. Low VBAR kept until existing F;
+warm path retains original default write. Exact formulas, liveness proof,
+bit comparison and marker interpretation: docs/MARBLE_SCTLR_STAGES.md.
+Original numerical SCTLR is unknown in available records; do not invent it.
+
+Observed PASS: full 81 reverse/replay, strict 0082 check/apply, complete real-
+header MARBLE start.s preprocess/arm64 Mach-O assemble, emitted stage audit,
+x14/no-call/scratch audit, all tile bounds, SWEET byte-identical preprocessing,
+zero MARBLE GICR_IPRIORITYR references, cold OSLAR excluded, diff check.
+Exact prior start.s recovered by removing only snapshot/stages (and reverting
+scratch comment): all old mappings, TCR/TTBR/MAIR/cache operations unchanged.
+Object stage MSR/ISB offsets: M4680/46d0, I4728/472c, C4784/4788,
+XNU47e8/47ec; F4858 (hex section offsets, NOT linked PAs).
+Safe for diagnostic Actions build; no full new link or physical staged boot.
+No new CI run/ID, commit or push (explicit prohibition), device/storage action.
+Next: separately build, inspect final linked addresses, obtain physical strip
+and E/E2/M_OK/I_OK/C_OK/XNU_SCTLR_OK/F/red observations. Local artifacts:
+/tmp/sctlr-{before.patch,before-start.s,verify.py,audit.py,disassembly.txt},
+/tmp/mmu-start.{s,macros,o}, /tmp/marble-mmu-tree.
+
+Earlier handoffs below are historical.
+
 ## Active handoff: MARBLE cache-coherency experiment (2026-10-22)
 
 User physically reports ALL pre-MMU checks green, E/E2 visible, F/sync-red
