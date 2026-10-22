@@ -1,5 +1,75 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## Active handoff: MARBLE GUI diagnostic root (2026-10-22, COMPLETE)
+
+User reports latest physical watchdog kernel alive for 15+ minutes, repeatedly
+spawning bluetoothd through xpcproxy while other services occasionally progress.
+No XNU/graphics change requested. Existing d73336bb / Actions39768601240 kernel,
+AppleKeyStore, IOWatchdog, writable UFS, launchd_unsecure_cache=1 retained.
+No fastboot/adb or other physical-device command executed.
+
+Actual original journaled20H392 cache inspected read-only via libdmg extraction:
+Label com.apple.bluetoothd, dictionary key
+/System/Library/LaunchDaemons/com.apple.bluetoothd.plist.
+Helper now accepts repeatable --disable, removes entries by Label, prints each
+key/Label and fails missing/conflicting requests before output. Console logging
+and existing global _PanicOnCrash->_PanicOnCrasX behavior retained (7 original
+panic keys). Exact semantic comparison on real plist and synthetic regression
+PASS. BluetoothUIService and bluetoothuserd remain; no dependency pruning.
+
+Original image copied to ios16-root-marble-20H392-gui-debug.img; original mounted
+read-only /tmp/marble-gui-source, debug mounted loop,force /tmp/marble-gui-debug.
+Validated plist copied through HFS mount with sudo cp (no raw-offset writes).
+Only bluetoothd removed; com.apple.backboardd/com.apple.SpringBoard console logs.
+Mounted cache parses; both GUI jobs, runningboardd/watchdogd retained.
+xpcproxy is not a cached job in the original: /usr/libexec/xpcproxy binary remains
+byte-identical. launchd/dyld SHA256 also identical to original mounted files.
+
+Focused validation PASS (user explicitly substituted this for exhaustive audit):
+full source/destination plist semantic equality after ONLY bluetoothd removal,
+two GUI logging edits, and existing7 panic-key renames. Both GUI jobs retain
+StandardOutPath/StandardErrorPath=/dev/console and OS_ACTIVITY_DT_MODE=YES,
+CFLOG_FORCE_STDERR=1; SpringBoard's existing CA_ASSERT_MAIN_THREAD_TRANSACTIONS
+retained. All other plist data semantically unchanged.
+launchd SHA25612370e5ee35bf28ae479b6c4b4455f4f4693ab803e37c5eb3032537c18cac61c
+dyld SHA2565806834564fe6462ae981d0915d612b1eb2f6f168822b5d278bee56254933757
+xpcproxy SHA256a97bc59d024c3b7fcf293aa6ef2fa75b60ef7220b2546ab4382adcbe78ddbfec
+All three byte-identical to source. No xpcproxy Label/job in original cache;
+/usr/libexec/xpcproxy remains. OS/App cryptexes,44 cache files,logd dirs present.
+systembag.kb extracted read-only from both images:227 bytes, cmp PASS; HFS catalog
+root:root0600. Patched plist retains root:80(group)0644, matching source.
+No broad tweaks script used; no other file intentionally changed.
+
+Host full-tree audit limitation: user reports Linux HFS+/Unicode traversal
+FileNotFoundError at localized WorkflowKit.framework/th.lproj/DefaultShortcuts/
+Thai shortcut filename. Per user, do NOT rerun exhaustive audit or alter file.
+No full-tree content/metadata proof claimed; only focused verification performed.
+Both mounts unmounted. fsck_hfs -f -n exit0: iOSRoot appears OK.
+Primary1024 and alternate17179868160:HX0005,attributes0x2100,journal bit13 SET.
+Post-unmount extracted plist byte-matches validated diagnostic plist.
+Original raw verified1858df50781370014d3245473248a279adcbbede5ad41dd132013d4c3967c43e
+before later disappearing externally; original sparse remains. No agent command
+removed original raw. Debug clone preserved. First /tmp expansion ENOSPC;
+incomplete temporary expansion removed; retry on disk with sparse temporarily
+in /tmp. Final simg2img expansion on disk + cmp PASS for all17179869184 bytes (exit0).
+Temporary expanded raw removed; sparse returned to final requested path.
+
+Raw debug SHA25641ebe2c0d48718359ead4fecaae86128bbbc0cb0454d15ad7f0b83fe41e6eaf4
+Sparse debug SHA256cbc95746991ed2883999ec7a86a8a9b5befab4f31059410780d8aec267eb0bf4
+Existing boot SHA256e9fd2e541aabbd0f48d186b3b448587913a8bf1b7881aac2f25b3702e0dec196.
+No new kernel build/CI for this root-only experiment. Regression test PASS;
+git diff --check and staged checks PASS. Final artifacts (ignored, not staged):
+shim/out/marble-xnu/ios16-root-marble-20H392-gui-debug.img
+shim/out/marble-xnu/ios16-root-marble-20H392-gui-debug.simg
+Existing boot:shim/out/marble-xnu/latest-marble-xnu.img.
+Next: user manually flashes debug sparse and boots existing watchdog kernel;
+observe backboardd/SpringBoard/CAWindowServer/FBSDisplayMonitor/IOSurface/
+IOMobileFramebuffer diagnostics. No graphics port or physical success claimed.
+Manual commands ONLY:
+fastboot -S 512M flash userdata ~/ios-marble/shim/out/marble-xnu/ios16-root-marble-20H392-gui-debug.simg
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
+
+
 ## Active handoff: MARBLE watchdog discovery (2026-10-22)
 
 Physical milestone reported by user on previous AKS kernel:
