@@ -1,5 +1,78 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+
+## Active handoff: MARBLE clean GUI startup / bounded diagnostics (2026-10-22)
+
+LATEST PHYSICAL USER OBSERVATION supersedes earlier display-MISSING wording:
+graphics-enabled e32e5d7235950c356c7742ef3ae3794b41dac844 / Actions39777337402
+booted on POCO F5; broad real userspace, repeated SpringBoard exec and chronod
+for minutes. Stable SpringBoard and visible GUI FAIL. Current GUI-debug root
+may prevent backboardd startup because its launchd stdout/stderr point to
+/dev/console. SWEET history CONFIRMED posix_spawn backboardd EACCES0xd with
+these properties, fixed by removing them. MARBLE display failure NOT confirmed.
+No phone/fastboot/adb commands executed. No hardware or graphics driver edits.
+
+Input artifacts independently rehashed: graphics boot
+f11a12254baa43dcce58d9ab9bef8c8fd2ef361d2fbe9e239421784e41ec8387;
+gui-debug raw41ebe2c0d48718359ead4fecaae86128bbbc0cb0454d15ad7f0b83fe41e6eaf4;
+gui-debug sparsecbc95746991ed2883999ec7a86a8a9b5befab4f31059410780d8aec267eb0bf4.
+Existing exact linked-kernel/payload/ADT/boot graphics audit rerun PASS
+(/tmp/gui-original-graphics-audit.txt). All four graphics classes linked.
+Final shared SweetSurface.cpp IOCoreSurfaceRoot::start logs MARBLE SURF:
+IOCoreSurfaceRoot registered AFTER registerService() at lines402/403.
+SweetFramebuffer.cpp AppleCLCD::start logs MARBLE FB: AppleCLCD geometry
+AFTER registerService() at208/209, after surface/workloop/timer setup; setup
+failure paths already print. ADT gic+disp0 only, framebuffer0xb8000000,
+1080x2400 stride4320 visible0x009e3400, canvas1125x2436 scale3 retained.
+These are registration expectations, NOT physical registration proof.
+
+NEW gui-clean cloned from verified debug raw. Only mounted launchd cache
+changed through HFS filesystem. clean-gui-launchd-plist.py checks the ENTIRE
+input against the exact known transformation of original Apple plist, then
+restores only GUI job output/environment fields from Apple original. Bluetoothd
+absent, both GUI jobs present, all7 existing _PanicOnCrasX suppressions retained.
+No stdout/stderr overrides on either GUI job. Original Apple backboardd has no
+EnvironmentVariables; SpringBoard retains CA_ASSERT_MAIN_THREAD_TRANSACTIONS=1.
+OS_ACTIVITY_DT_MODE/CFLOG_FORCE_STDERR absent originally and now removed.
+All unrelated jobs semantically unchanged versus debug root. Mounted and
+post-fsck read-only comparisons PASS, extracted final plist byte-match PASS.
+plist root:80 0644; launchd/dyld root:wheel0755 unchanged SHA256s from prior
+handoff; xpcproxy also unchanged. fsck_hfs -f -n exit0: iOSRoot appears OK.
+No exhaustive Unicode tree traversal repeated. Sparse/hash validation below.
+
+0044 final reason printing is SWEET-only in kern_exit.c; its full stack/heap
+helpers in exception.c also SWEET-only.0082 adds ONLY a MARBLE branch at same
+crash-exit site: target names backboardd/SpringBoard, first32 crash reports,
+signal/exception/subcode and exit namespace/code/reason text (max512 chars).
+No sampler/heap scanner imported, no exit/corpse semantics changed.
+0048 final mem.c tee SWEET-only: shared existing selected-write path; MARBLE
+has fixed backboardd/SpringBoard allowlist, max256 chunks of256B per boot.
+0049 final IOUserClient.cpp tracing SWEET-only;0054 expanded default to both
+GUI processes.0082 shares existing matching/matching1/notifications/path/
+children/open probes with MARBLE, same400-line limit. MARBLE fixed GUI allowlist.
+All three MARBLE diagnostics require marbleguidiag=1, default OFF. SWEET args,
+defaults and limits unchanged. No global /dev/null tee or console plist logging.
+
+Local PASS: full0001..0081 reverse/replay then strict0082; real CI-header arm64
+compiles kern_exit.c, mem.c, IOUserClient.cpp; SWEET/BCM2837/T8103 preprocessed
+tokens identical with __LINE__ normalized at preprocessing (diagnostic line
+numbers naturally shift). ASan/UBSan actual MARBLE helper tests PASS: disabled,
+other process rejection, exact two names, null256/IOK400 exhaustion. Old0082
+prefix unchanged; graphics source and all hardware/root/AMFI/AKS/WDT unchanged.
+Artifacts /tmp/gui-diag-edit.py, diag-compile.py, diag-bound-test.py, diag-objects.
+Exact old args retained plus ONE bounded arg marbleguidiag=1:
+debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1 ufsrw=1 rootrw=1 launchd_unsecure_cache=1 marbleguidiag=1
+Root milestone COMPLETE: full17179869184-byte sparse expansion compared to raw
+using independent RAW/FILL/DONTCARE decoder (no extra16GiB disk copy), PASS.
+Primary/alternate HX0005 attributes0x2100, journal bit13 SET.
+Raw shim/out/marble-xnu/ios16-root-marble-20H392-gui-clean.img SHA256
+5d61c497f1d025afb9abb10152230bfe838bd549c104fc8d2390a27eddb283aa
+Sparse shim/out/marble-xnu/ios16-root-marble-20H392-gui-clean.simg SHA256
+cf5d9c434166aefb99f0d4d2d951c1cee4a16fbd911adb74010557b0915e75cd
+Validation /tmp/gui-clean-sparse-audit.txt, gui-sparse-check.py; all mounts closed.
+CI/package pending below. Unrelated sparse helper mode/breadcrumb doc preserved.
+
+
 ## Active handoff: MARBLE IOSurface / framebuffer (2026-10-22)
 
 User physical milestone: SpringBoard exec PASS; SpringBoard stable FAIL / respawn

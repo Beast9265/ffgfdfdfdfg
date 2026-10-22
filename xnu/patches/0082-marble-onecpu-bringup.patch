@@ -13315,3 +13315,193 @@ diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFrame
  }
 -#endif /* SWEET */
 +#endif /* SWEET || MARBLE */
+diff --git a/bsd/kern/kern_exit.c b/bsd/kern/kern_exit.c
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -1897,6 +1897,27 @@
+ 				    desc != NULL ? desc : "(none)");
+ 			}
+ 		}
++#elif defined(ARM64_BOARD_CONFIG_MARBLE)
++		/* Diagnostic only: never change exit/corpse handling. CPU0 bring-up. */
++		{
++			static unsigned int gui_crashes;
++			int enabled = 0;
++			if (p == current_proc() && gui_crashes < 32 &&
++			    (!strcmp(p->p_comm, "backboardd") || !strcmp(p->p_comm, "SpringBoard")) &&
++			    PE_parse_boot_argn("marbleguidiag", &enabled, sizeof(enabled)) && enabled) {
++				gui_crashes++;
++				printf("CRASH %s[%d] sig %d code 0x%llx sub 0x%llx\n",
++				    p->p_comm, proc_getpid(p), WTERMSIG(rv),
++				    ((uint64_t)ut->uu_exception << 32) | (uint32_t)ut->uu_code,
++				    (uint64_t)ut->uu_subcode);
++				if (PROC_HAS_EXITREASON(p)) {
++					char *desc = exit_reason_get_string_desc(p->p_exit_reason);
++					printf("CRASH %s reason ns %u code 0x%llx: %.512s\n", p->p_comm,
++					    p->p_exit_reason->osr_namespace, p->p_exit_reason->osr_code,
++					    desc != NULL ? desc : "(none)");
++				}
++			}
++		}
+ #endif
+ 		/* Defualt to EXC_CRASH if the exception is not an EXC_RESOURCE or EXC_GUARD */
+ 		if (etype != EXC_RESOURCE || etype != EXC_GUARD) {
+diff --git a/bsd/dev/mem.c b/bsd/dev/mem.c
+--- a/bsd/dev/mem.c
++++ b/bsd/dev/mem.c
+@@ -153,7 +153,7 @@
+ 	return 0;
+ }
+ 
+-#if defined(ARM64_BOARD_CONFIG_SWEET)
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_MARBLE)
+ /*
+  * SWEET: daemons started by launchd write stdout/stderr to /dev/null, and
+  * pointing a launchd job at /dev/console stops it from launching at all
+@@ -162,12 +162,28 @@
+  * /dev/null goes to the console (and so to the persistent log) as
+  * "|name| text". sweetnull=- turns it off.
+  */
++#if defined(ARM64_BOARD_CONFIG_SWEET)
+ static char sweet_null_names[128];
+ static int sweet_null_parsed;
++#endif
+ 
+ static bool
+ sweet_null_tee(char *name, size_t len)
+ {
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++	/* Opt-in, fixed two-process allowlist; at most 256 chunks per boot. */
++	static unsigned int chunks;
++	int enabled = 0;
++	if (chunks >= 256 || !PE_parse_boot_argn("marbleguidiag", &enabled, sizeof(enabled)) || !enabled) {
++		return false;
++	}
++	proc_selfname(name, (int)len);
++	if (strcmp(name, "backboardd") && strcmp(name, "SpringBoard")) {
++		return false;
++	}
++	chunks++;
++	return true;
++#else
+ 	if (!sweet_null_parsed) {
+ 		if (!PE_parse_boot_argn("sweetnull", sweet_null_names, sizeof(sweet_null_names))) {
+ 			strlcpy(sweet_null_names, "backboardd,SpringBoard", sizeof(sweet_null_names));
+@@ -188,6 +204,7 @@
+ 		t = end + 1;
+ 	}
+ 	return false;
++#endif
+ }
+ #endif
+ 
+@@ -254,7 +271,7 @@
+ 			if (rw == UIO_READ) {
+ 				return 0;
+ 			}
+-#if defined(ARM64_BOARD_CONFIG_SWEET)
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_MARBLE)
+ 			{
+ 				char name[32];
+ 				if (sweet_null_tee(name, sizeof(name))) {
+diff --git a/iokit/Kernel/IOUserClient.cpp b/iokit/Kernel/IOUserClient.cpp
+--- a/iokit/Kernel/IOUserClient.cpp
++++ b/iokit/Kernel/IOUserClient.cpp
+@@ -2600,20 +2600,34 @@
+ }
+ 
+ static 
+-#if defined(ARM64_BOARD_CONFIG_SWEET)
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_MARBLE)
+ /*
+  * SWEET IOKit trace: registry and matching calls made by the processes
+  * named in boot-arg sweetiolog (comma separated, default "backboardd,SpringBoard";
+  * "-" turns it off) are printed as "IOK name: ...", at most 400 lines per
+  * boot, to find out what a daemon looks for before it gives up.
+  */
++#if defined(ARM64_BOARD_CONFIG_SWEET)
+ static char sweet_iolog_names[128];
+ static int sweet_iolog_parsed;
++#endif
+ static uint32_t sweet_iolog_lines;
+ 
+ static bool
+ sweet_iolog(char *name, size_t len)
+ {
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++	int enabled = 0;
++	if (sweet_iolog_lines >= 400 || !PE_parse_boot_argn("marbleguidiag", &enabled, sizeof(enabled)) || !enabled) {
++		return false;
++	}
++	proc_selfname(name, (int)len);
++	if (strcmp(name, "backboardd") && strcmp(name, "SpringBoard")) {
++		return false;
++	}
++	sweet_iolog_lines++;
++	return true;
++#else
+ 	if (!sweet_iolog_parsed) {
+ 		if (!PE_parse_boot_argn("sweetiolog", sweet_iolog_names, sizeof(sweet_iolog_names))) {
+ 			strlcpy(sweet_iolog_names, "backboardd,SpringBoard", sizeof(sweet_iolog_names));
+@@ -2638,6 +2652,7 @@
+ 		t = end + 1;
+ 	}
+ 	return false;
++#endif
+ }
+ 
+ /* Compact XML of a matching dictionary, at most 240 characters. */
+@@ -2675,7 +2690,7 @@
+ 	if ((dict = OSDynamicCast( OSDictionary, obj))) {
+ 		IOTaskRegistryCompatibilityMatching(current_task(), dict);
+ 		OSIterator *found = IOService::getMatchingServices( dict );
+-#if defined(ARM64_BOARD_CONFIG_SWEET)
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_MARBLE)
+ 		char sname[32];
+ 		if (sweet_iolog(sname, sizeof(sname))) {
+ 			unsigned int count = 0;
+@@ -2775,7 +2790,7 @@
+ 		IOTaskRegistryCompatibilityMatching(current_task(), dict);
+ 		*service = IOService::copyMatchingService( dict );
+ 		kr = *service ? kIOReturnSuccess : kIOReturnNotFound;
+-#if defined(ARM64_BOARD_CONFIG_SWEET)
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_MARBLE)
+ 		char sname[32];
+ 		if (sweet_iolog(sname, sizeof(sname))) {
+ 			sweet_iolog_dict(sname, "matching1", dict,
+@@ -2885,7 +2900,7 @@
+ 			continue;
+ 		}
+ 		IOTaskRegistryCompatibilityMatching(current_task(), dict);
+-#if defined(ARM64_BOARD_CONFIG_SWEET)
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_MARBLE)
+ 		{
+ 			char sname[32];
+ 			if (sweet_iolog(sname, sizeof(sname))) {
+@@ -3360,7 +3375,7 @@
+ 	}
+ 
+ 	entry = IORegistryEntry::fromPath( path );
+-#if defined(ARM64_BOARD_CONFIG_SWEET)
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_MARBLE)
+ 	{
+ 		char sname[32];
+ 		if (sweet_iolog(sname, sizeof(sname))) {
+@@ -4178,7 +4193,7 @@
+ 
+ 	*iterator = IOUserIterator::withIterator(entry->getChildIterator(
+ 		    IORegistryEntry::getPlane( plane )));
+-#if defined(ARM64_BOARD_CONFIG_SWEET)
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_MARBLE)
+ 	{
+ 		char sname[32];
+ 		if (sweet_iolog(sname, sizeof(sname))) {
+@@ -4401,7 +4416,7 @@
+ #endif
+ 		res = service->newUserClient( owningTask, (void *) owningTask,
+ 		    connect_type, propertiesDict, &client );
+-#if defined(ARM64_BOARD_CONFIG_SWEET)
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_MARBLE)
+ 		{
+ 			char sname[32];
+ 			if (sweet_iolog(sname, sizeof(sname))) {

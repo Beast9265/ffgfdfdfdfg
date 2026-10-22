@@ -5,11 +5,10 @@
 
 IN is /System/Library/xpc/launchd.plist (binary plist, read by launchd when
 booted with launchd_unsecure_cache=1). For every job whose Label is given,
-stdout/stderr go to /dev/console (mode 0622, writable by the mobile user)
-and the environment asks Apple's frameworks to mirror their logs there:
-OS_ACTIVITY_DT_MODE=YES copies os_log to stderr (as under Xcode),
-CFLOG_FORCE_STDERR=1 does the same for CFLog/NSLog. Uncaught exception
-reasons and the frameworks' own error messages then show on screen.
+stdout/stderr go to /dev/console and diagnostic environment variables are added.
+WARNING: historical SWEET testing proved these paths can prevent backboardd
+from spawning (EACCES). Do not use this logging mode for GUI jobs. Prefer the
+kernel /dev/null tee; clean-gui-launchd-plist.py restores the known debug cache.
 
 Every job's _PanicOnCrash key is also renamed (_PanicOnCrasX), so a crashing
 daemon does not panic the system during bring-up.
