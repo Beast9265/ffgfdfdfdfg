@@ -11279,3 +11279,1313 @@ diff --git a/bsd/sweet_hfs/sweet_hfs_iokit.c b/bsd/sweet_hfs/sweet_hfs_iokit.c
 -
 +
  /* Built in, not a loadable kext: there is no kext to retain per mount. */
+diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -1,24 +1,25 @@
+ /*
+  * SWEET internal UFS root device.
+  *
+  * The Qualcomm UFS host (UFSHCI 2.1) is left enabled with the link up by the
+  * bootloader, which loaded our boot image from it. This driver reuses that
+  * state: it points the transfer request list at its own memory (verifying the
+  * host took it before ringing any doorbell) and issues polled SCSI commands,
+  * one at a time, to LUN 0. It finds one GPT partition by name (boot-arg
+  * ufsroot=, default "userdata") and exposes it as the BSD disk ufsroot0
+  * (rufsroot0), with 512-byte logical sectors over the device's 4 KiB blocks.
+  * Root on it with rd=ufsroot0.
+  *
+  * All DMA goes through one physically contiguous allocation (descriptors and
+  * a 1 MiB bounce buffer); the host is not cache coherent, so caches are
+  * cleaned/invalidated around each command.
+  *
+- * Writes are refused unless boot-arg ufsrw=1 is set. Every write is checked
++ * MARBLE is unconditionally read-only (TUR/capacity/read plus gated volatile device activation).
++ * On SWEET, writes are refused unless boot-arg ufsrw=1 is set. Every write is checked
+  * against the partition bounds again right before it is issued, so nothing
+  * outside the named partition can be written.
+  */
+-#if defined(ARM64_BOARD_CONFIG_SWEET)
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_MARBLE)
+ #include <sys/param.h>
+ #include <sys/systm.h>
+ #include <sys/buf.h>
+@@ -48,11 +49,24 @@
+ extern kern_return_t kernel_thread_start(thread_continue_t, void *, thread_t *);
+ extern void thread_deallocate(thread_t);
+ extern int hz;
++#ifdef ARM64_BOARD_CONFIG_SWEET
+ static void sweet_log_start(void);
++#endif
+ extern void sweet_sample_start(void);
+ extern void sweet_keys_init(void);
+ extern void sweet_touch_init(void);
+ extern void sweet_usb_probe(void);
+
++/* Keep the historical filename: patches 0030..0077 still apply before 0082.
++ * MARBLE compiles only the read transport; SWEET retains its original policy. */
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++#define UFS_LOG "MARBLE UFS: "
++#define UFS_DT_PATH "/marble-ufs"
++#else
++#define UFS_LOG "SWEET UFS: "
++#define UFS_DT_PATH "/sweet-ufs"
++#endif
++#define REG_VER         0x08
++
+ #define REG_CAP         0x00
+ #define REG_IS          0x20
+@@ -97,21 +111,36 @@
+ #define DMA_UCD         0x1000                  /* 128 byte aligned */
+ #define DMA_BOUNCE      0x4000
+ #define DMA_SIZE        (DMA_BOUNCE + BOUNCE_SIZE)
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++_Static_assert(sizeof(struct utrd) == 32, "UFSHCI transfer descriptor size");
++_Static_assert((DMA_UTRL & 1023) == 0, "UTRL alignment");
++_Static_assert((DMA_UCD & 127) == 0, "UCD alignment");
++_Static_assert((DMA_BOUNCE & 4095) == 0, "data alignment");
++_Static_assert(sizeof(struct ucd) <= DMA_BOUNCE - DMA_UCD, "descriptor region overlap");
++#endif
+
+ static struct {
+-	vm_offset_t regs;
++	vm_offset_t regs;
+-	vm_offset_t dma;                        /* kernel VA of the DMA allocation */
++	vm_offset_t dma;                        /* kernel VA of the DMA allocation */
+-	uint64_t dma_pa;
++	uint64_t dma_pa;
+-	uint8_t lun;
++	uint8_t lun;
+-	uint8_t tag;
++	uint8_t tag;
+-	uint64_t first_block, nblocks;          /* partition, in 4 KiB device blocks */
++	uint64_t first_block, nblocks;          /* partition, in 4 KiB device blocks */
+-	uint32_t secsize;                       /* logical sector size for the BSD layer */
++	uint32_t secsize;                       /* logical sector size for the BSD layer */
+-	bool writable;                          /* boot-arg ufsrw=1 */
++	bool writable;                          /* boot-arg ufsrw=1 */
+-	bool cache;                             /* boot-arg ufscache=1 */
++	bool cache;                             /* boot-arg ufscache=1 */
+-	bool wait;                              /* boot-arg ufswait=1 */
++	bool wait;                              /* boot-arg ufswait=1 */
+-	int bmajor, cmajor;
++	int bmajor, cmajor;
+-	dev_t bdev;
++	dev_t bdev;
+-	bool ready;
++	bool ready;
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++	uint64_t ready_deadline;
++	bool quiet;
++	bool activate_allowed;
++	bool initializing;
++	bool failed;                           /* never reuse DMA after a timeout */
++	uint64_t device_blocks;
++#endif
+ } su;
+
+ static LCK_GRP_DECLARE(sweet_ufs_grp, "sweet_ufs");
+@@ -148,131 +177,276 @@
+ static int
+ ufs_scsi(const uint8_t *cdb, unsigned cdb_len, uint32_t len, bool write)
+ {
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++	/* Defense at the only submission entry: no data-out, write, sync or
++	 * cache-sync commands can reach a doorbell, even with hostile boot args.
++	 * The sole non-read SCSI operation is gated device-WLUN ACTIVE. */
++	static const uint8_t active[6] = { 0x1b, 0, 0, 0, 0x10, 0 };
++	bool devact = su.activate_allowed && su.lun == 0xd0 && len == 0 &&
++	    cdb_len == sizeof(active) && memcmp(cdb, active, sizeof(active)) == 0;
++	if (write || !cdb_len || cdb_len > 16 ||
++	    (!devact && (su.lun != 0 || (cdb[0] != 0x00 && cdb[0] != 0x25 && cdb[0] != 0x28)))) {
++		return EROFS;
++	}
++	uint64_t list = su.dma_pa + DMA_UTRL;
++	if (su.failed || ufs_rd(REG_UTRLBA) != (uint32_t)list ||
++	    ufs_rd(REG_UTRLBAU) != (uint32_t)(list >> 32) ||
++	    !(ufs_rd(REG_UTRLRSR) & 1) || ufs_rd(REG_UTRLDBR)) {
++		return EIO;
++	}
++#endif
+-	struct utrd *utrd = (struct utrd *)(su.dma + DMA_UTRL);
++	struct utrd *utrd = (struct utrd *)(su.dma + DMA_UTRL);
+-	struct ucd *ucd = (struct ucd *)(su.dma + DMA_UCD);
++	struct ucd *ucd = (struct ucd *)(su.dma + DMA_UCD);
+-	uint64_t ucd_pa = su.dma_pa + DMA_UCD, bounce_pa = su.dma_pa + DMA_BOUNCE;
++	uint64_t ucd_pa = su.dma_pa + DMA_UCD, bounce_pa = su.dma_pa + DMA_BOUNCE;
+
+-	assert(len <= BOUNCE_SIZE);
++	assert(len <= BOUNCE_SIZE);
+-	bzero(utrd, sizeof(*utrd));
++	bzero(utrd, sizeof(*utrd));
+-	bzero(ucd, sizeof(*ucd));
++	bzero(ucd, sizeof(*ucd));
+
+-	ucd->cmd[0] = 0x01;                     /* COMMAND UPIU */
++	ucd->cmd[0] = 0x01;                     /* COMMAND UPIU */
+-	ucd->cmd[1] = len ? (write ? 0x20 : 0x40) : 0x00;      /* W: data out, R: data in */
++	ucd->cmd[1] = len ? (write ? 0x20 : 0x40) : 0x00;      /* W: data out, R: data in */
+-	ucd->cmd[2] = su.lun;
++	ucd->cmd[2] = su.lun;
+-	ucd->cmd[3] = ++su.tag;
++	ucd->cmd[3] = ++su.tag;
+-	ucd->cmd[12] = (uint8_t)(len >> 24);
++	ucd->cmd[12] = (uint8_t)(len >> 24);
+-	ucd->cmd[13] = (uint8_t)(len >> 16);
++	ucd->cmd[13] = (uint8_t)(len >> 16);
+-	ucd->cmd[14] = (uint8_t)(len >> 8);
++	ucd->cmd[14] = (uint8_t)(len >> 8);
+-	ucd->cmd[15] = (uint8_t)len;
++	ucd->cmd[15] = (uint8_t)len;
+-	memcpy(&ucd->cmd[16], cdb, cdb_len);
++	memcpy(&ucd->cmd[16], cdb, cdb_len);
+
+-	/* DD: 1 = memory to device, 2 = device to memory. */
++	/* DD: 1 = memory to device, 2 = device to memory. */
+-	utrd->dw0 = (1u << 28) | ((len ? (write ? 1u : 2u) : 0u) << 25) | (1u << 24);
++	utrd->dw0 = (1u << 28) | ((len ? (write ? 1u : 2u) : 0u) << 25) | (1u << 24);
+-	utrd->dw2 = 0x0f;                       /* OCS invalid until updated */
++	utrd->dw2 = 0x0f;                       /* OCS invalid until updated */
+-	utrd->ucdba = (uint32_t)ucd_pa;
++	utrd->ucdba = (uint32_t)ucd_pa;
+-	utrd->ucdbau = (uint32_t)(ucd_pa >> 32);
++	utrd->ucdbau = (uint32_t)(ucd_pa >> 32);
+-	utrd->resp = (512u / 4) << 16 | (512u / 4);
++	utrd->resp = (512u / 4) << 16 | (512u / 4);
+-	if (len) {
++	if (len) {
+-		uint32_t n = 0;
++		uint32_t n = 0;
+-		for (uint32_t done = 0; done < len; done += PRDT_CHUNK, n++) {
++		for (uint32_t done = 0; done < len; done += PRDT_CHUNK, n++) {
+-			uint32_t chunk = MIN(PRDT_CHUNK, len - done);
++			uint32_t chunk = MIN(PRDT_CHUNK, len - done);
+-			ucd->prdt[n].addr_lo = (uint32_t)(bounce_pa + done);
++			ucd->prdt[n].addr_lo = (uint32_t)(bounce_pa + done);
+-			ucd->prdt[n].addr_hi = (uint32_t)((bounce_pa + done) >> 32);
++			ucd->prdt[n].addr_hi = (uint32_t)((bounce_pa + done) >> 32);
+-			ucd->prdt[n].dbc = chunk - 1;
++			ucd->prdt[n].dbc = chunk - 1;
+-		}
++		}
+-		utrd->prdt = (1024u / 4) << 16 | n;
++		utrd->prdt = (1024u / 4) << 16 | n;
+-	}
++	}
+
+-	if (su.cache) {
++	if (su.cache) {
+-		dma_clean(DMA_UTRL, sizeof(*utrd));
++		dma_clean(DMA_UTRL, sizeof(*utrd));
+-		dma_clean(DMA_UCD, 16 + cdb_len);
++		dma_clean(DMA_UCD, 16 + cdb_len);
+-		dma_sync(DMA_UCD + offsetof(struct ucd, resp), sizeof(ucd->resp));
++		dma_sync(DMA_UCD + offsetof(struct ucd, resp), sizeof(ucd->resp));
+-		if (len) {
++		if (len) {
+-			dma_clean(DMA_UCD + offsetof(struct ucd, prdt),
++			dma_clean(DMA_UCD + offsetof(struct ucd, prdt),
+-			    (utrd->prdt & 0xffff) * sizeof(ucd->prdt[0]));
++			    (utrd->prdt & 0xffff) * sizeof(ucd->prdt[0]));
+-		}
++		}
+-	} else {
++	} else {
+-		dma_sync(DMA_UTRL, sizeof(*utrd));
++		dma_sync(DMA_UTRL, sizeof(*utrd));
+-		dma_sync(DMA_UCD, sizeof(*ucd));
++		dma_sync(DMA_UCD, sizeof(*ucd));
+-	}
++	}
+-	if (len) {
++	if (len) {
+-		if (su.cache && write) {
++		if (su.cache && write) {
+-			dma_clean(DMA_BOUNCE, len);
++			dma_clean(DMA_BOUNCE, len);
+-		} else {
++		} else {
+-			dma_sync(DMA_BOUNCE, len);
++			dma_sync(DMA_BOUNCE, len);
+-		}
++		}
+-	}
++	}
+-	__builtin_arm_dsb(0xf);
++	__builtin_arm_dsb(0xf);
+
+-	ufs_wr(REG_UTRLDBR, 1);
++	ufs_wr(REG_UTRLDBR, 1);
+-	uint64_t deadline;
++	uint64_t deadline;
+-	nanoseconds_to_absolutetime(CMD_TIMEOUT_NS, &deadline);
++	nanoseconds_to_absolutetime(CMD_TIMEOUT_NS, &deadline);
+-	deadline += mach_absolute_time();
++	deadline += mach_absolute_time();
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++	if (su.ready_deadline && su.ready_deadline < deadline) deadline = su.ready_deadline;
++#endif
+-	bool sleepable = su.wait && su.ready && ml_get_interrupts_enabled() &&
++	bool sleepable = su.wait && su.ready && ml_get_interrupts_enabled() &&
+-	    !ml_at_interrupt_context() && get_preemption_level() == 0;
++	    !ml_at_interrupt_context() && get_preemption_level() == 0;
+-	uint64_t spin_until = 0, sleep_interval = 0;
++	uint64_t spin_until = 0, sleep_interval = 0;
+-	if (sleepable) {
++	if (sleepable) {
+-		nanoseconds_to_absolutetime(CMD_SPIN_NS, &spin_until);
++		nanoseconds_to_absolutetime(CMD_SPIN_NS, &spin_until);
+-		spin_until += mach_absolute_time();
++		spin_until += mach_absolute_time();
+-		nanoseconds_to_absolutetime(CMD_SLEEP_NS, &sleep_interval);
++		nanoseconds_to_absolutetime(CMD_SLEEP_NS, &sleep_interval);
+-	}
++	}
+-	while (ufs_rd(REG_UTRLDBR) & 1) {
++	while (ufs_rd(REG_UTRLDBR) & 1) {
+-		uint64_t now = mach_absolute_time();
++		uint64_t now = mach_absolute_time();
+-		if (now > deadline) {
++		if (now > deadline) {
+-			ufs_wr(REG_UTRLCLR, ~1u);
++			ufs_wr(REG_UTRLCLR, ~1u);
+-			printf("SWEET UFS: command 0x%02x timed out\n", cdb[0]);
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++			su.failed = true;
++#endif
++			printf(UFS_LOG "command 0x%02x timed out\n", cdb[0]);
+-			return ETIMEDOUT;
++			return ETIMEDOUT;
+-		}
++		}
+-		if (sleepable && now >= spin_until) {
++		if (sleepable && now >= spin_until) {
+-			uint64_t wake = now + MIN(sleep_interval, deadline - now);
++			uint64_t wake = now + MIN(sleep_interval, deadline - now);
+-			/* Keep the mutex: slot 0 and the bounce buffer are still owned. */
++			/* Keep the mutex: slot 0 and the bounce buffer are still owned. */
+-			if (assert_wait_deadline_with_leeway((event_t)&su.wait, THREAD_UNINT,
++			if (assert_wait_deadline_with_leeway((event_t)&su.wait, THREAD_UNINT,
+-			    TIMEOUT_URGENCY_SYS_CRITICAL, wake, 0) == THREAD_WAITING) {
++			    TIMEOUT_URGENCY_SYS_CRITICAL, wake, 0) == THREAD_WAITING) {
+-				thread_block(THREAD_CONTINUE_NULL);
++				thread_block(THREAD_CONTINUE_NULL);
+-			}
++			}
+-		} else {
++		} else {
+-			delay(1);
++			delay(1);
+-		}
++		}
+-	}
++	}
+-	__builtin_arm_dsb(0xf);
++	__builtin_arm_dsb(0xf);
+-	ufs_wr(REG_IS, ufs_rd(REG_IS));         /* acknowledge completion status */
++	ufs_wr(REG_IS, ufs_rd(REG_IS));         /* acknowledge completion status */
+
+-	dma_sync(DMA_UTRL, sizeof(*utrd));
++	dma_sync(DMA_UTRL, sizeof(*utrd));
+-	if (su.cache) {
++	if (su.cache) {
+-		dma_sync(DMA_UCD + offsetof(struct ucd, resp), sizeof(ucd->resp));
++		dma_sync(DMA_UCD + offsetof(struct ucd, resp), sizeof(ucd->resp));
+-	} else {
++	} else {
+-		dma_sync(DMA_UCD, sizeof(*ucd));
++		dma_sync(DMA_UCD, sizeof(*ucd));
+-	}
++	}
+-	if (len && !(su.cache && write)) {
++	if (len && !(su.cache && write)) {
+-		dma_sync(DMA_BOUNCE, len);
++		dma_sync(DMA_BOUNCE, len);
+-	}
++	}
+
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++	su.initializing = false;
++	if (ucd->resp[3] != ucd->cmd[3]) return EIO;
++	/* Same bounded fixed/descriptor sense decoding as shim/ufs_response.h. */
++	unsigned sense_len = (unsigned)ucd->resp[32] << 8 | ucd->resp[33];
++	const uint8_t *sense = ucd->resp + 34;
++	unsigned code = sense[0] & 0x7f;
++	unsigned key = 0xff, asc = 0xff, ascq = 0xff;
++	if (sense_len <= sizeof(ucd->resp) - 34) {
++		if ((code == 0x70 || code == 0x71) && sense_len >= 14) {
++			key = sense[2] & 0xf; asc = sense[12]; ascq = sense[13];
++		} else if ((code == 0x72 || code == 0x73) && sense_len >= 4) {
++			key = sense[1] & 0xf; asc = sense[2]; ascq = sense[3];
++		}
++	}
++	su.initializing = !(utrd->dw2 & 0xff) && ucd->resp[0] == 0x21 &&
++	    !ucd->resp[6] && ucd->resp[7] == 2 && key == 2 && asc == 4 && ascq == 2;
++	if (ucd->resp[7] && !su.quiet) printf(UFS_LOG "sense %02x/%02x/%02x\n", key, asc, ascq);
++#endif
+-	uint32_t ocs = utrd->dw2 & 0xff;
++	uint32_t ocs = utrd->dw2 & 0xff;
+-	if (ocs || ucd->resp[0] != 0x21 || ucd->resp[6] || ucd->resp[7]) {
++	if (ocs || ucd->resp[0] != 0x21 || ucd->resp[6] || ucd->resp[7]) {
+-		printf("SWEET UFS: command 0x%02x failed: ocs 0x%x upiu 0x%x response 0x%x status 0x%x\n",
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++		if (!su.quiet)
++#endif
++		printf(UFS_LOG "command 0x%02x failed: ocs 0x%x upiu 0x%x response 0x%x status 0x%x\n",
+-		    cdb[0], ocs, ucd->resp[0], ucd->resp[6], ucd->resp[7]);
++		    cdb[0], ocs, ucd->resp[0], ucd->resp[6], ucd->resp[7]);
+-		return EIO;
++		return EIO;
+-	}
++	}
+-	return 0;
++	return 0;
+ }
+
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++/* NOP / READ_FLAG only: no query-write opcode or general management API. */
++static int
++ufs_marble_query(bool query, unsigned *flag)
++{
++	struct utrd *d = (struct utrd *)(su.dma + DMA_UTRL);
++	struct ucd *c = (struct ucd *)(su.dma + DMA_UCD);
++	uint64_t list = su.dma_pa + DMA_UTRL, command = su.dma_pa + DMA_UCD;
++	if (su.failed || ufs_rd(REG_UTRLDBR) || !(ufs_rd(REG_UTRLRSR) & 1) ||
++	    ufs_rd(REG_UTRLBA) != (uint32_t)list || ufs_rd(REG_UTRLBAU) != (uint32_t)(list >> 32))
++		return EIO;
++	bzero(d, sizeof(*d)); bzero(c, sizeof(*c));
++	c->cmd[3] = ++su.tag;
++	if (query) {
++		c->cmd[0] = 0x16; c->cmd[5] = 1; /* QUERY REQUEST, standard read */
++		c->cmd[12] = 5; c->cmd[13] = 1; /* READ_FLAG fDeviceInit */
++	}
++	d->dw0 = (1u << 28) | (1u << 24); /* no data, no PRDT */
++	d->dw2 = 0xf; d->ucdba = (uint32_t)command; d->ucdbau = (uint32_t)(command >> 32);
++	d->resp = (512u / 4) << 16 | (512u / 4);
++	dma_sync(DMA_UTRL, sizeof(*d)); dma_sync(DMA_UCD, sizeof(*c));
++	__builtin_arm_dsb(0xf);
++	ufs_wr(REG_UTRLDBR, 1);
++	uint64_t budget; nanoseconds_to_absolutetime(NSEC_PER_SEC / 2, &budget);
++	uint64_t start = mach_absolute_time();
++	while (ufs_rd(REG_UTRLDBR) & 1) {
++		if (mach_absolute_time() - start >= budget) {
++			ufs_wr(REG_UTRLCLR, ~1u); su.failed = true; return ETIMEDOUT;
++		}
++		delay(1);
++	}
++	__builtin_arm_dsb(0xf);
++	dma_sync(DMA_UTRL, sizeof(*d)); dma_sync(DMA_UCD, sizeof(*c));
++	ufs_wr(REG_IS, ufs_rd(REG_IS));
++	if ((d->dw2 & 0xff) || c->resp[0] != (query ? 0x36 : 0x20) || c->resp[3] != c->cmd[3])
++		return EIO;
++	if (query) {
++		if (c->resp[6] || c->resp[7] || c->resp[8] || c->resp[10] || c->resp[11] ||
++		    c->resp[12] != 5 || c->resp[13] != 1 || c->resp[14] || c->resp[15]) return EIO;
++		*flag = c->resp[23] & 1; /* BE32 value at byte 20 */
++	}
++	return 0;
++}
++
++static int
++ufs_marble_ready(void)
++{
++	unsigned flag = 1;
++	int error = ufs_marble_query(false, &flag);
++	printf(UFS_LOG "NOP result %d\n", error);
++	if (error) return error;
++	error = ufs_marble_query(true, &flag);
++	printf(UFS_LOG "READ_FLAG fDeviceInit result %d flag %u\n", error, flag);
++	/* Observed firmware value is zero; unexpected state stops without writes. */
++	if (error || flag) return error ? error : ENXIO;
++	static const uint8_t tur[6] = { 0 };
++	error = ufs_scsi(tur, sizeof(tur), 0, false);
++	if (!error || !su.initializing) return error;
++	static const uint8_t active[6] = { 0x1b, 0, 0, 0, 0x10, 0 };
++	printf(UFS_LOG "device-WLUN ACTIVE LUN d0 CDB 1b0000001000\n");
++	su.activate_allowed = true; su.lun = 0xd0;
++	error = ufs_scsi(active, sizeof(active), 0, false);
++	su.activate_allowed = false; su.lun = 0;
++	printf(UFS_LOG "device-WLUN ACTIVE result %d\n", error);
++	if (error) return error;
++	uint64_t budget;
++	nanoseconds_to_absolutetime(CMD_TIMEOUT_NS, &budget);
++	su.ready_deadline = mach_absolute_time() + budget;
++	/* Only repeated 02/04/02 is retryable; no other state is changed. */
++	for (unsigned i = 0; i < 50; i++) {
++		if (mach_absolute_time() >= su.ready_deadline) break;
++		su.quiet = i != 0 && i != 49;
++		error = ufs_scsi(tur, sizeof(tur), 0, false);
++		su.quiet = false;
++		if (!error || !su.initializing) {
++			su.ready_deadline = 0;
++			return error;
++		}
++		delay(100000);
++	}
++	su.ready_deadline = 0;
++	return ETIMEDOUT;
++}
++#endif
++
+ /* READ(10) of count device blocks at lba into the bounce buffer. */
+ static int
+ ufs_read_blocks(uint64_t lba, uint32_t count)
+ {
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++	static bool first_read = true;
++	if (!count || lba > UINT32_MAX || count - 1 > UINT32_MAX - lba ||
++	    (su.device_blocks && (lba >= su.device_blocks || count > su.device_blocks - lba)) ||
++	    (su.nblocks && (lba < su.first_block || lba - su.first_block >= su.nblocks ||
++	    count > su.nblocks - (lba - su.first_block)))) {
++		return EINVAL;
++	}
++	if (first_read) {
++		printf(UFS_LOG "first READ(10): lba 0x%llx count %u\n", lba, count);
++		first_read = false;
++	}
++#endif
+-	if (lba > UINT32_MAX || count > BOUNCE_SIZE / UFS_BLOCK) {
++	if (lba > UINT32_MAX || count > BOUNCE_SIZE / UFS_BLOCK) {
+-		return EINVAL;
++		return EINVAL;
+-	}
++	}
+-	uint8_t cdb[10] = {
++	uint8_t cdb[10] = {
+-		0x28, 0,
++		0x28, 0,
+-		(uint8_t)(lba >> 24), (uint8_t)(lba >> 16), (uint8_t)(lba >> 8), (uint8_t)lba,
++		(uint8_t)(lba >> 24), (uint8_t)(lba >> 16), (uint8_t)(lba >> 8), (uint8_t)lba,
+-		0, (uint8_t)(count >> 8), (uint8_t)count, 0
++		0, (uint8_t)(count >> 8), (uint8_t)count, 0
+-	};
++	};
+-	return ufs_scsi(cdb, sizeof(cdb), count * UFS_BLOCK, false);
++	return ufs_scsi(cdb, sizeof(cdb), count * UFS_BLOCK, false);
+ }
+
++#ifdef ARM64_BOARD_CONFIG_SWEET
+ /*
+  * WRITE(10) of count device blocks from the bounce buffer to lba. The range
+  * must lie inside the partition: this is the only place data goes out.
+  */
+ static int
+@@ -280,14 +454,14 @@
+ {
+-	if (!su.writable || !su.nblocks || count == 0 || count > BOUNCE_SIZE / UFS_BLOCK ||
++	if (!su.writable || !su.nblocks || count == 0 || count > BOUNCE_SIZE / UFS_BLOCK ||
+-	    lba < su.first_block || lba - su.first_block >= su.nblocks ||
++	    lba < su.first_block || lba - su.first_block >= su.nblocks ||
+-	    count > su.nblocks - (lba - su.first_block) || lba + count - 1 > UINT32_MAX) {
++	    count > su.nblocks - (lba - su.first_block) || lba + count - 1 > UINT32_MAX) {
+-		printf("SWEET UFS: refusing write of %u blocks at 0x%llx\n", count, lba);
++		printf(UFS_LOG "refusing write of %u blocks at 0x%llx\n", count, lba);
+-		return EPERM;
++		return EPERM;
+-	}
++	}
+-	uint8_t cdb[10] = {
++	uint8_t cdb[10] = {
+-		0x2a, 0,
++		0x2a, 0,
+-		(uint8_t)(lba >> 24), (uint8_t)(lba >> 16), (uint8_t)(lba >> 8), (uint8_t)lba,
++		(uint8_t)(lba >> 24), (uint8_t)(lba >> 16), (uint8_t)(lba >> 8), (uint8_t)lba,
+-		0, (uint8_t)(count >> 8), (uint8_t)count, 0
++		0, (uint8_t)(count >> 8), (uint8_t)count, 0
+-	};
++	};
+-	return ufs_scsi(cdb, sizeof(cdb), count * UFS_BLOCK, true);
++	return ufs_scsi(cdb, sizeof(cdb), count * UFS_BLOCK, true);
+ }
+@@ -297,92 +471,150 @@
+ {
+-	static const uint8_t cdb[10] = { 0x35 };       /* SYNCHRONIZE CACHE(10), whole LUN */
++	static const uint8_t cdb[10] = { 0x35 };       /* SYNCHRONIZE CACHE(10), whole LUN */
+-	return ufs_scsi(cdb, sizeof(cdb), 0, false);
++	return ufs_scsi(cdb, sizeof(cdb), 0, false);
+ }
++
++#endif
++
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++/* GPT uses IEEE CRC32, including the header with its CRC field zeroed. */
++static uint32_t
++ufs_gpt_crc(const uint8_t *p, uint32_t len)
++{
++	uint32_t crc = ~0u;
++	while (len--) {
++		crc ^= *p++;
++		for (unsigned i = 0; i < 8; i++)
++			crc = (crc >> 1) ^ (0xedb88320u & (0u - (crc & 1)));
++	}
++	return ~crc;
++}
++#endif
+
+ static int
+ ufs_find_partition(const char *want)
+ {
+-	const uint8_t *b = (const uint8_t *)(su.dma + DMA_BOUNCE);
++	const uint8_t *b = (const uint8_t *)(su.dma + DMA_BOUNCE);
+-	int error = ufs_read_blocks(1, 1);
++	int error = ufs_read_blocks(1, 1);
+-	if (error) {
++	if (error) {
+-		return error;
++		return error;
+-	}
++	}
+-	if (memcmp(b, "EFI PART", 8) != 0) {
++	if (memcmp(b, "EFI PART", 8) != 0) {
+-		printf("SWEET UFS: LUN %u has no GPT\n", su.lun);
++		printf(UFS_LOG "LUN %u has no GPT\n", su.lun);
+-		return ENXIO;
++		return ENXIO;
+-	}
++	}
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++	uint32_t header_size, header_crc, entries_crc;
++	uint64_t current_lba, first_usable, last_usable;
++	memcpy(&header_size, b + 12, 4);
++	memcpy(&header_crc, b + 16, 4);
++	memcpy(&current_lba, b + 24, 8);
++	memcpy(&first_usable, b + 40, 8);
++	memcpy(&last_usable, b + 48, 8);
++	memcpy(&entries_crc, b + 88, 4);
++	if (header_size < 92 || header_size > UFS_BLOCK || current_lba != 1 ||
++	    first_usable < 2 || last_usable < first_usable || last_usable >= su.device_blocks)
++		return ENXIO;
++	bzero((void *)(b + 16), 4);
++	if (ufs_gpt_crc(b, header_size) != header_crc) return ENXIO;
++#endif
+-	uint64_t entry_lba;
++	uint64_t entry_lba;
+-	uint32_t nent, esz;
++	uint32_t nent, esz;
+-	memcpy(&entry_lba, b + 72, 8);
++	memcpy(&entry_lba, b + 72, 8);
+-	memcpy(&nent, b + 80, 4);
++	memcpy(&nent, b + 80, 4);
+-	memcpy(&esz, b + 84, 4);
++	memcpy(&esz, b + 84, 4);
+-	if (esz != 128 || nent == 0 || nent * esz > BOUNCE_SIZE) {
+-		printf("SWEET UFS: unsupported GPT entries %u x %u\n", nent, esz);
++	if (esz != 128 || nent == 0 ||
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++	    nent > BOUNCE_SIZE / 128
++#else
++	    nent * esz > BOUNCE_SIZE
++#endif
++	    ) {
++		printf(UFS_LOG "unsupported GPT entries %u x %u\n", nent, esz);
+-		return ENXIO;
++		return ENXIO;
+-	}
++	}
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++	if (entry_lba < 2 || entry_lba >= first_usable ||
++	    (nent * esz + UFS_BLOCK - 1) / UFS_BLOCK > first_usable - entry_lba)
++		return ENXIO;
++	printf(UFS_LOG "GPT header valid; entries %u at 0x%llx\n", nent, entry_lba);
++#endif
+-	error = ufs_read_blocks(entry_lba, (nent * esz + UFS_BLOCK - 1) / UFS_BLOCK);
++	error = ufs_read_blocks(entry_lba, (nent * esz + UFS_BLOCK - 1) / UFS_BLOCK);
+-	if (error) {
++	if (error) {
+-		return error;
++		return error;
+-	}
++	}
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++	if (ufs_gpt_crc(b, nent * esz) != entries_crc) return ENXIO;
++#endif
+-	for (uint32_t i = 0; i < nent; i++) {
++	for (uint32_t i = 0; i < nent; i++) {
+-		const uint8_t *e = b + i * esz;
++		const uint8_t *e = b + i * esz;
+-		char name[37];
++		char name[37];
+-		unsigned c;
++		unsigned c;
+-		for (c = 0; c < 36; c++) {
++		for (c = 0; c < 36; c++) {
+-			uint16_t ch = (uint16_t)(e[56 + 2 * c] | e[57 + 2 * c] << 8);
++			uint16_t ch = (uint16_t)(e[56 + 2 * c] | e[57 + 2 * c] << 8);
+-			if (ch == 0 || ch > 0x7f) {
++			if (ch == 0 || ch > 0x7f) {
+-				break;
++				break;
+-			}
++			}
+-			name[c] = (char)ch;
++			name[c] = (char)ch;
+-		}
++		}
+-		name[c] = 0;
++		name[c] = 0;
+-		if (strcmp(name, want) != 0) {
++		if (strcmp(name, want) != 0) {
+-			continue;
++			continue;
+-		}
++		}
+-		uint64_t first, last;
++		uint64_t first, last;
+-		memcpy(&first, e + 32, 8);
++		memcpy(&first, e + 32, 8);
+-		memcpy(&last, e + 40, 8);
++		memcpy(&last, e + 40, 8);
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++		if (first < first_usable || last > last_usable || last >= su.device_blocks || last > UINT32_MAX) {
++			return ENXIO;
++		}
++#endif
+-		if (last < first) {
++		if (last < first) {
+-			return ENXIO;
++			return ENXIO;
+-		}
++		}
+-		su.first_block = first;
++		su.first_block = first;
+-		su.nblocks = last - first + 1;
++		su.nblocks = last - first + 1;
+-		return 0;
++		return 0;
+-	}
++	}
+-	printf("SWEET UFS: no GPT partition named \"%s\"\n", want);
++	printf(UFS_LOG "no GPT partition named \"%s\"\n", want);
+-	return ENOENT;
++	return ENOENT;
+ }
+
+ static int
+ ufs_take_over_host(void)
+ {
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++	printf(UFS_LOG "CAP 0x%x VER 0x%x\n", ufs_rd(REG_CAP), ufs_rd(REG_VER));
++#endif
+-	uint32_t hce = ufs_rd(REG_HCE), hcs = ufs_rd(REG_HCS);
++	uint32_t hce = ufs_rd(REG_HCE), hcs = ufs_rd(REG_HCS);
+-	if (!(hce & 1) || !(hcs & HCS_DP) || !(hcs & HCS_UTRLRDY)) {
++	if (!(hce & 1) || !(hcs & HCS_DP) || !(hcs & HCS_UTRLRDY)) {
+-		printf("SWEET UFS: host not ready (hce 0x%x hcs 0x%x)\n", hce, hcs);
++		printf(UFS_LOG "host not ready (hce 0x%x hcs 0x%x)\n", hce, hcs);
+-		return ENXIO;
++		return ENXIO;
+-	}
++	}
+-	if (ufs_rd(REG_UTRLDBR)) {
++	if (ufs_rd(REG_UTRLDBR)) {
+-		printf("SWEET UFS: requests outstanding from the bootloader\n");
++		printf(UFS_LOG "requests outstanding from the bootloader\n");
+-		return EBUSY;
++		return EBUSY;
+-	}
++	}
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++	printf(UFS_LOG "controller ready HCE 0x%x HCS 0x%x\n", hce, hcs);
++#endif
+-	/* With RAM above 4 GiB (mkadt.py --highmem) the DMA memory can be there too. */
++	/* With RAM above 4 GiB (mkadt.py --highmem) the DMA memory can be there too. */
+-	if (((su.dma_pa + DMA_SIZE - 1) >> 32) && !(ufs_rd(REG_CAP) & CAP_64AS)) {
++	if (((su.dma_pa + DMA_SIZE - 1) >> 32) && !(ufs_rd(REG_CAP) & CAP_64AS)) {
+-		printf("SWEET UFS: DMA memory at 0x%llx but the host has no 64-bit addressing\n",
++		printf(UFS_LOG "DMA memory at 0x%llx but the host has no 64-bit addressing\n",
+-		    su.dma_pa);
++		    su.dma_pa);
+-		return ENXIO;
++		return ENXIO;
+-	}
++	}
+-	ufs_wr(REG_IE, 0);                      /* polled operation */
++	ufs_wr(REG_IE, 0);                      /* polled operation */
+-	ufs_wr(REG_IS, ufs_rd(REG_IS));
++	ufs_wr(REG_IS, ufs_rd(REG_IS));
+-	ufs_wr(REG_UTRLRSR, 0);
++	ufs_wr(REG_UTRLRSR, 0);
+-	uint64_t list = su.dma_pa + DMA_UTRL;
++	uint64_t list = su.dma_pa + DMA_UTRL;
+-	ufs_wr(REG_UTRLBA, (uint32_t)list);
++	ufs_wr(REG_UTRLBA, (uint32_t)list);
+-	ufs_wr(REG_UTRLBAU, (uint32_t)(list >> 32));
++	ufs_wr(REG_UTRLBAU, (uint32_t)(list >> 32));
+-	ufs_wr(REG_UTRLRSR, 1);
++	ufs_wr(REG_UTRLRSR, 1);
+-	/* Never ring a doorbell unless the host uses our list. */
++	/* Never ring a doorbell unless the host uses our list. */
+-	if (ufs_rd(REG_UTRLBA) != (uint32_t)list || ufs_rd(REG_UTRLBAU) != (uint32_t)(list >> 32) ||
++	if (ufs_rd(REG_UTRLBA) != (uint32_t)list || ufs_rd(REG_UTRLBAU) != (uint32_t)(list >> 32) ||
+-	    !(ufs_rd(REG_UTRLRSR) & 1)) {
++	    !(ufs_rd(REG_UTRLRSR) & 1)) {
+-		printf("SWEET UFS: host did not take our request list\n");
++		printf(UFS_LOG "host did not take our request list\n");
+-		return EIO;
++		return EIO;
+-	}
++	}
+-	return 0;
++	return 0;
+ }
+@@ -392,8 +624,12 @@
+ {
+-	if (!su.ready) {
++	if (!su.ready) {
+-		return ENXIO;
++		return ENXIO;
+-	}
++	}
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++	return (flags & FWRITE) ? EROFS : 0;
++#else
+-	return ((flags & FWRITE) && !su.writable) ? EROFS : 0;
++	return ((flags & FWRITE) && !su.writable) ? EROFS : 0;
++#endif
+ }
+
+ static int
+@@ -407,59 +643,73 @@
+ {
+-	int error = 0;
++	int error = 0;
+-	caddr_t vaddr = NULL;
++	caddr_t vaddr = NULL;
+-	uint64_t off = (uint64_t)buf_blkno(bp) * su.secsize;
++	uint64_t off = (uint64_t)buf_blkno(bp) * su.secsize;
+-	uint32_t count = buf_count(bp);
++	uint32_t count = buf_count(bp);
+-	uint64_t part_bytes = su.nblocks * UFS_BLOCK;
++	uint64_t part_bytes = su.nblocks * UFS_BLOCK;
+
+-	bool rd = buf_flags(bp) & B_READ;
++	bool rd = buf_flags(bp) & B_READ;
+
+-	buf_setresid(bp, count);
++	buf_setresid(bp, count);
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++	if (!rd) {
++#else
+-	if (!rd && !su.writable) {
++	if (!rd && !su.writable) {
++#endif
+-		error = EROFS;
++		error = EROFS;
+-		goto done;
++		goto done;
+-	}
++	}
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++	/* Reject negative or overflowing logical block numbers before multiply. */
++	if (buf_blkno(bp) < 0 || (uint64_t)buf_blkno(bp) > UINT64_MAX / su.secsize) {
++		error = EINVAL;
++		goto done;
++	}
++#endif
+-	if (off > part_bytes || count > part_bytes - off) {
++	if (off > part_bytes || count > part_bytes - off) {
+-		error = EINVAL;
++		error = EINVAL;
+-		goto done;
++		goto done;
+-	}
++	}
+-	if (count == 0) {
++	if (count == 0) {
+-		goto done;
++		goto done;
+-	}
++	}
+-	if (buf_map(bp, &vaddr)) {
++	if (buf_map(bp, &vaddr)) {
+-		error = EIO;
++		error = EIO;
+-		goto done;
++		goto done;
+-	}
++	}
+
+-	lck_mtx_lock(&sweet_ufs_lock);
++	lck_mtx_lock(&sweet_ufs_lock);
+-	for (uint32_t done = 0; done < count;) {
++	for (uint32_t done = 0; done < count;) {
+-		uint64_t pos = off + done;
++		uint64_t pos = off + done;
+-		uint64_t lba = pos / UFS_BLOCK;
++		uint64_t lba = pos / UFS_BLOCK;
+-		uint32_t skip = (uint32_t)(pos % UFS_BLOCK);
++		uint32_t skip = (uint32_t)(pos % UFS_BLOCK);
+-		uint32_t want = MIN(count - done, BOUNCE_SIZE - skip);
++		uint32_t want = MIN(count - done, BOUNCE_SIZE - skip);
+-		uint32_t blocks = (skip + want + UFS_BLOCK - 1) / UFS_BLOCK;
++		uint32_t blocks = (skip + want + UFS_BLOCK - 1) / UFS_BLOCK;
+-		void *bounce = (void *)(su.dma + DMA_BOUNCE);
++		void *bounce = (void *)(su.dma + DMA_BOUNCE);
+-		if (rd) {
++		if (rd) {
+-			error = ufs_read_blocks(su.first_block + lba, blocks);
++			error = ufs_read_blocks(su.first_block + lba, blocks);
+-			if (!error) {
++			if (!error) {
+-				memcpy(vaddr + done, (const char *)bounce + skip, want);
++				memcpy(vaddr + done, (const char *)bounce + skip, want);
+-			}
++			}
+-		} else {
++		}
++#ifdef ARM64_BOARD_CONFIG_SWEET
++		else {
+-			/* Partial device blocks at either end: read, merge, write back. */
++			/* Partial device blocks at either end: read, merge, write back. */
+-			if (skip || (want % UFS_BLOCK)) {
++			if (skip || (want % UFS_BLOCK)) {
+-				error = ufs_read_blocks(su.first_block + lba, blocks);
++				error = ufs_read_blocks(su.first_block + lba, blocks);
+-			}
++			}
+-			if (!error) {
++			if (!error) {
+-				memcpy((char *)bounce + skip, vaddr + done, want);
++				memcpy((char *)bounce + skip, vaddr + done, want);
+-				error = ufs_write_blocks(su.first_block + lba, blocks);
++				error = ufs_write_blocks(su.first_block + lba, blocks);
+-			}
++			}
+-		}
++		}
++#endif
+-		if (error) {
++		if (error) {
+-			break;
++			break;
+-		}
++		}
+-		done += want;
++		done += want;
+-		buf_setresid(bp, count - done);
++		buf_setresid(bp, count - done);
+-	}
++	}
+-	lck_mtx_unlock(&sweet_ufs_lock);
++	lck_mtx_unlock(&sweet_ufs_lock);
+-	buf_unmap(bp);
++	buf_unmap(bp);
+
+ done:
+@@ -475,50 +725,54 @@
+ {
+-	uint32_t *f = (uint32_t *)data;
++	uint32_t *f = (uint32_t *)data;
+-	uint64_t *o = (uint64_t *)data;
++	uint64_t *o = (uint64_t *)data;
+
+-	switch (cmd) {
++	switch (cmd) {
+-	case DKIOCGETBLOCKSIZE:
++	case DKIOCGETBLOCKSIZE:
+-		*f = su.secsize;
++		*f = su.secsize;
+-		return 0;
++		return 0;
+-	case DKIOCSETBLOCKSIZE:
++	case DKIOCSETBLOCKSIZE:
+-		if (is_char) {
++		if (is_char) {
+-			return ENODEV;
++			return ENODEV;
+-		}
++		}
+-		if (*f < DEV_BSIZE || *f > UFS_BLOCK || (*f & (*f - 1))) {
++		if (*f < DEV_BSIZE || *f > UFS_BLOCK || (*f & (*f - 1))) {
+-			return EINVAL;
++			return EINVAL;
+-		}
++		}
+-		su.secsize = *f;
++		su.secsize = *f;
+-		return 0;
++		return 0;
+-	case DKIOCGETPHYSICALBLOCKSIZE:
++	case DKIOCGETPHYSICALBLOCKSIZE:
+-		*f = UFS_BLOCK;
++		*f = UFS_BLOCK;
+-		return 0;
++		return 0;
+-	case DKIOCGETBLOCKCOUNT:
++	case DKIOCGETBLOCKCOUNT:
+-		*o = su.nblocks * UFS_BLOCK / su.secsize;
++		*o = su.nblocks * UFS_BLOCK / su.secsize;
+-		return 0;
++		return 0;
+-	case DKIOCISWRITABLE:
++	case DKIOCISWRITABLE:
+-		*f = su.writable;
++		*f = su.writable;
+-		return 0;
++		return 0;
+-	case DKIOCSYNCHRONIZE:
++	case DKIOCSYNCHRONIZE:
+-	case DKIOCSYNCHRONIZECACHE: {
++	case DKIOCSYNCHRONIZECACHE: {
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++		return EROFS;
++#else
+-		if (!su.writable) {
++		if (!su.writable) {
+-			return 0;
++			return 0;
+-		}
++		}
+-		lck_mtx_lock(&sweet_ufs_lock);
++		lck_mtx_lock(&sweet_ufs_lock);
+-		int error = ufs_sync_cache();
++		int error = ufs_sync_cache();
+-		lck_mtx_unlock(&sweet_ufs_lock);
++		lck_mtx_unlock(&sweet_ufs_lock);
+-		return error;
++		return error;
++#endif
+-	}
++	}
+-	case DKIOCGETMAXBLOCKCOUNTREAD:
++	case DKIOCGETMAXBLOCKCOUNTREAD:
+-		*o = BOUNCE_SIZE / su.secsize;
++		*o = BOUNCE_SIZE / su.secsize;
+-		return 0;
++		return 0;
+-	case DKIOCGETMAXBLOCKCOUNTWRITE:
++	case DKIOCGETMAXBLOCKCOUNTWRITE:
+-		*o = su.writable ? BOUNCE_SIZE / su.secsize : 0;
++		*o = su.writable ? BOUNCE_SIZE / su.secsize : 0;
+-		return 0;
++		return 0;
+-	case DKIOCGETMAXSEGMENTCOUNTREAD:
++	case DKIOCGETMAXSEGMENTCOUNTREAD:
+-	case DKIOCGETMAXSEGMENTCOUNTWRITE:
++	case DKIOCGETMAXSEGMENTCOUNTWRITE:
+-		*o = 1;
++		*o = 1;
+-		return 0;
++		return 0;
+-	default:
++	default:
+-		return ENOTTY;
++		return ENOTTY;
+-	}
++	}
+ }
+@@ -550,10 +804,16 @@
+ static int
+ sweet_ufs_write(dev_t dev, struct uio *uio, __unused int ioflag)
+ {
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++	(void)dev;
++	(void)uio;
++	return EROFS;
++#else
+-	if (!su.writable) {
++	if (!su.writable) {
+-		return EROFS;
++		return EROFS;
+-	}
++	}
+-	return physio(sweet_ufs_strategy, NULL, dev, B_WRITE, minphys, uio, (int)su.secsize);
++	return physio(sweet_ufs_strategy, NULL, dev, B_WRITE, minphys, uio, (int)su.secsize);
++#endif
+ }
+
+ static const struct bdevsw sweet_ufs_bdevsw = {
+@@ -588,92 +848,135 @@
+ {
+-	DTEntry node;
++	DTEntry node;
+-	uintptr_t const *reg = NULL;
++	uintptr_t const *reg = NULL;
+-	unsigned int size = 0;
++	unsigned int size = 0;
+-	char want[64] = "userdata";
++	char want[64] = "userdata";
+-	int error;
++	int error;
+
+-	if (SecureDTLookupEntry(NULL, "/sweet-ufs", &node) != kSuccess ||
++	if (SecureDTLookupEntry(NULL, UFS_DT_PATH, &node) != kSuccess ||
+-	    SecureDTGetProperty(node, "reg", (void const **)&reg, &size) != kSuccess ||
++	    SecureDTGetProperty(node, "reg", (void const **)&reg, &size) != kSuccess ||
+-	    size < 2 * sizeof(uintptr_t)) {
++	    size < 2 * sizeof(uintptr_t)) {
+-		printf("SWEET UFS: no /sweet-ufs node in the device tree\n");
++		printf(UFS_LOG "no " UFS_DT_PATH " node in the device tree\n");
+-		return ENXIO;
++		return ENXIO;
+-	}
++	}
+-	PE_parse_boot_argn("ufsroot", want, sizeof(want));
++	PE_parse_boot_argn("ufsroot", want, sizeof(want));
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++	printf(UFS_LOG "controller found: ADT " UFS_DT_PATH " PA 0x%lx size 0x%lx\n", reg[0], reg[1]);
++	if (!reg[0] || reg[1] < 0x64 || reg[1] > 0x10000) {
++		return ENXIO;
++	}
++#else
+-	uint32_t rw = 0;
++	uint32_t rw = 0;
+-	PE_parse_boot_argn("ufsrw", &rw, sizeof(rw));
++	PE_parse_boot_argn("ufsrw", &rw, sizeof(rw));
+-	uint32_t cache = 0, wait = 0;
++	uint32_t cache = 0, wait = 0;
+-	PE_parse_boot_argn("ufscache", &cache, sizeof(cache));
++	PE_parse_boot_argn("ufscache", &cache, sizeof(cache));
+-	PE_parse_boot_argn("ufswait", &wait, sizeof(wait));
++	PE_parse_boot_argn("ufswait", &wait, sizeof(wait));
+-	su.cache = (cache == 1);
++	su.cache = (cache == 1);
+-	su.wait = (wait == 1);
++	su.wait = (wait == 1);
+
++
++#endif
+-	su.regs = ml_io_map(reg[0], reg[1]);
++	su.regs = ml_io_map(reg[0], reg[1]);
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++	if (!su.regs) return ENOMEM;
++	printf(UFS_LOG "MMIO mapped 0x%lx\n", su.regs);
++#endif
+-	if (kmem_alloc_contig(kernel_map, &su.dma, DMA_SIZE, PAGE_MASK, 0, 0,
++	if (kmem_alloc_contig(kernel_map, &su.dma, DMA_SIZE, PAGE_MASK, 0, 0,
+-	    KMA_DATA | KMA_ZERO | KMA_PERMANENT, VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS) {
++	    KMA_DATA | KMA_ZERO | KMA_PERMANENT, VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS) {
+-		printf("SWEET UFS: no contiguous DMA memory\n");
++		printf(UFS_LOG "no contiguous DMA memory\n");
+-		return ENOMEM;
++		return ENOMEM;
+-	}
++	}
+-	ppnum_t pn = pmap_find_phys(kernel_pmap, (addr64_t)su.dma);
++	ppnum_t pn = pmap_find_phys(kernel_pmap, (addr64_t)su.dma);
+-	if (!pn) {
++	if (!pn) {
+-		return ENOMEM;
++		return ENOMEM;
+-	}
++	}
+-	su.dma_pa = ptoa_64(pn);
++	su.dma_pa = ptoa_64(pn);
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++	if (su.dma_pa & PAGE_MASK) return EINVAL;
++	printf(UFS_LOG "UTRL allocation PA 0x%llx size 0x%x\n", su.dma_pa, DMA_SIZE);
++#endif
+-	su.lun = 0;
++	su.lun = 0;
+-	su.secsize = DEV_BSIZE;
++	su.secsize = DEV_BSIZE;
+
+-	lck_mtx_lock(&sweet_ufs_lock);
++	lck_mtx_lock(&sweet_ufs_lock);
+-	error = ufs_take_over_host();
++	error = ufs_take_over_host();
+-	if (!error) {
++	if (!error) {
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++		error = ufs_marble_ready();
++#else
+-		static const uint8_t tur[6] = { 0x00 };
++		static const uint8_t tur[6] = { 0x00 };
+-		/* The first command after the bootloader may report a unit attention. */
++		/* The first command after the bootloader may report a unit attention. */
+-		for (int i = 0; i < 3 && (error = ufs_scsi(tur, sizeof(tur), 0, false)); i++) {
++		for (int i = 0; i < 3 && (error = ufs_scsi(tur, sizeof(tur), 0, false)); i++) {
+-		}
++		}
++#endif
+-	}
++	}
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++	printf(UFS_LOG "TEST UNIT READY result %d\n", error);
++	if (!error) {
++		printf(UFS_LOG "LUN 0 ready\n");
++		static const uint8_t capacity[10] = { 0x25 };
++		error = ufs_scsi(capacity, sizeof(capacity), 8, false);
++		if (!error) {
++			const uint8_t *b = (const uint8_t *)(su.dma + DMA_BOUNCE);
++			uint32_t last = (uint32_t)b[0] << 24 | (uint32_t)b[1] << 16 | (uint32_t)b[2] << 8 | b[3];
++			uint32_t block = (uint32_t)b[4] << 24 | (uint32_t)b[5] << 16 | (uint32_t)b[6] << 8 | b[7];
++			printf(UFS_LOG "capacity last 0x%x block %u\n", last, block);
++			if (last == UINT32_MAX || block != UFS_BLOCK) error = ENXIO;
++			else su.device_blocks = (uint64_t)last + 1;
++		}
++	}
++#endif
+-	if (!error) {
++	if (!error) {
+-		error = ufs_find_partition(want);
++		error = ufs_find_partition(want);
+-	}
++	}
+-	lck_mtx_unlock(&sweet_ufs_lock);
++	lck_mtx_unlock(&sweet_ufs_lock);
+-	if (error) {
++	if (error) {
+-		return error;
++		return error;
+-	}
++	}
+
+-	su.bmajor = bdevsw_add(-1, &sweet_ufs_bdevsw);
++	su.bmajor = bdevsw_add(-1, &sweet_ufs_bdevsw);
+-	if (su.bmajor < 0) {
++	if (su.bmajor < 0) {
+-		return ENXIO;
++		return ENXIO;
+-	}
++	}
+-	su.cmajor = cdevsw_add_with_bdev(-1, &sweet_ufs_cdevsw, su.bmajor);
++	su.cmajor = cdevsw_add_with_bdev(-1, &sweet_ufs_cdevsw, su.bmajor);
+-	if (su.cmajor < 0) {
++	if (su.cmajor < 0) {
+-		return ENXIO;
++		return ENXIO;
+-	}
++	}
+-	su.bdev = makedev(su.bmajor, 0);
++	su.bdev = makedev(su.bmajor, 0);
+-	devfs_make_node(su.bdev, DEVFS_BLOCK, UID_ROOT, GID_OPERATOR, 0640, "ufsroot0");
++	devfs_make_node(su.bdev, DEVFS_BLOCK, UID_ROOT, GID_OPERATOR, 0640, "ufsroot0");
+-	devfs_make_node(makedev(su.cmajor, 0), DEVFS_CHAR, UID_ROOT, GID_OPERATOR, 0640, "rufsroot0");
++	devfs_make_node(makedev(su.cmajor, 0), DEVFS_CHAR, UID_ROOT, GID_OPERATOR, 0640, "rufsroot0");
+-	/* Only now, with the partition bounds known, can writes be allowed. */
++	/* Only now, with the partition bounds known, can writes be allowed. */
++#ifdef ARM64_BOARD_CONFIG_SWEET
+-	su.writable = (rw != 0);
++	su.writable = (rw != 0);
++#endif
+-	su.ready = true;
++	su.ready = true;
+-	printf("SWEET UFS: \"%s\" on LUN %u: first block 0x%llx, %llu MiB, %s, DMA at 0x%llx\n",
++	printf(UFS_LOG "\"%s\" on LUN %u: first block 0x%llx, %llu MiB, %s, DMA at 0x%llx\n",
+-	    want, su.lun, su.first_block, su.nblocks * UFS_BLOCK >> 20,
++	    want, su.lun, su.first_block, su.nblocks * UFS_BLOCK >> 20,
+-	    su.writable ? "read-write" : "read-only", su.dma_pa);
++	    su.writable ? "read-write" : "read-only", su.dma_pa);
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++	printf(UFS_LOG "BSD devices created ufsroot0/rufsroot0 major %d/%d minor 0\n", su.bmajor, su.cmajor);
++#else
+-	sweet_log_start();
++	sweet_log_start();
+-	sweet_sample_start();
++	sweet_sample_start();
+-	/* Input drivers (HID services in iokit/Kernel/arm/hid/SweetHID.cpp). */
++	/* Input drivers (HID services in iokit/Kernel/arm/hid/SweetHID.cpp). */
+-	sweet_keys_init();
++	sweet_keys_init();
+-	sweet_touch_init();
++	sweet_touch_init();
+-	sweet_usb_probe();
++	sweet_usb_probe();
++#endif
+-	return 0;
++	return 0;
+ }
+
++#ifdef ARM64_BOARD_CONFIG_SWEET
+ /*
+  * Persistent console log ("sweetlog"). Filming the phone screen is the only
+  * other way to see the console, so every character that reaches the
+  * console (kernel printf and /dev/console writes of daemons, both through
+  * _cnputs) is also kept in a 4 MiB ring, and once the partition is known
+  * and writable a thread copies new ring blocks to the LAST 4 MiB + 4 KiB of
+  * the partition every ufslogsecs seconds (default 10), far behind the HFS
+  * image at its start. Device block 0 of that area is a header:
+  *   "SWEETLOG" | u32 version 1 | u32 ring size | u64 total bytes written
+  *   | u64 flush sequence
+  * ring offset of byte n = n % ring size. Read it from a recovery with
+  * tools/sweet-log-pull.sh. Disabled with boot-arg sweetlog=0.
+  */
+ #define SWEET_LOG_SIZE          (4u << 20)
+@@ -791,21 +1094,23 @@
+ {
+-	uint32_t on = 1;
++	uint32_t on = 1;
+-	thread_t thread;
++	thread_t thread;
+
+-	PE_parse_boot_argn("sweetlog", &on, sizeof(on));
++	PE_parse_boot_argn("sweetlog", &on, sizeof(on));
+-	if (!on || !su.writable || su.nblocks < 2 * SWEET_LOG_BLOCKS) {
++	if (!on || !su.writable || su.nblocks < 2 * SWEET_LOG_BLOCKS) {
+-		return;
++		return;
+-	}
++	}
+-	PE_parse_boot_argn("ufslogsecs", &sweet_log_secs, sizeof(sweet_log_secs));
++	PE_parse_boot_argn("ufslogsecs", &sweet_log_secs, sizeof(sweet_log_secs));
+-	if (sweet_log_secs == 0 || sweet_log_secs > 60) {
++	if (sweet_log_secs == 0 || sweet_log_secs > 60) {
+-		sweet_log_secs = SWEET_LOG_SECS;
++		sweet_log_secs = SWEET_LOG_SECS;
+-	}
++	}
+-	if (kernel_thread_start(sweet_log_thread, NULL, &thread) == KERN_SUCCESS) {
++	if (kernel_thread_start(sweet_log_thread, NULL, &thread) == KERN_SUCCESS) {
+-		thread_deallocate(thread);
++		thread_deallocate(thread);
+-	}
++	}
+ }
+
++#endif
++
+ /* Root device for rd=ufsroot0 (IOFindBSDRoot). */
+ int sweet_ufs_rootdev(dev_t *dev);
+
+ int
+diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
+--- a/iokit/bsddev/IOKitBSDInit.cpp
++++ b/iokit/bsddev/IOKitBSDInit.cpp
+@@ -765,24 +765,28 @@
+ #endif /* __LP64__ */
+-				(void)mdevadd(-1, ml_static_ptovirt(ramdParms[0]) >> 12, (unsigned int) (ramdParms[1] >> 12), 0);        /* Initialize it and pass back the device number */
++				(void)mdevadd(-1, ml_static_ptovirt(ramdParms[0]) >> 12, (unsigned int) (ramdParms[1] >> 12), 0);        /* Initialize it and pass back the device number */
+-			}
++			}
+-			regEntry->release();                                                            /* Toss the entry */
++			regEntry->release();                                                            /* Toss the entry */
+-		}
++		}
+-	}
++	}
+
+-#if defined(ARM64_BOARD_CONFIG_SWEET)
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_MARBLE)
+ //
+ //	SWEET: root on a GPT partition of the internal UFS (bsd/dev/sweet_ufs.c)
+ //
+-	if (strcmp(rdBootVar, "ufsroot0") == 0) {
++	if (strcmp(rdBootVar, "ufsroot0") == 0) {
+-		extern int sweet_ufs_rootdev(dev_t *dev);
++		extern int sweet_ufs_rootdev(dev_t *dev);
+-		OSSafeReleaseNULL(matching);
++		OSSafeReleaseNULL(matching);
+-		int ufs_error = sweet_ufs_rootdev(root);
++		int ufs_error = sweet_ufs_rootdev(root);
+-		if (ufs_error) {
++		if (ufs_error) {
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++			panic("IOFindBSDRoot: MARBLE UFS root %s unavailable: %d", rdBootVar, ufs_error);
++#else
+-			panic("IOFindBSDRoot: SWEET UFS root %s unavailable: %d", rdBootVar, ufs_error);
++			panic("IOFindBSDRoot: SWEET UFS root %s unavailable: %d", rdBootVar, ufs_error);
++#endif
+-		}
++		}
+-		strlcpy(rootName, rdBootVar, rootNameSize);
++		strlcpy(rootName, rdBootVar, rootNameSize);
+-		IOLog("BSD root: %s, major %d, minor %d\n", rootName, major(*root), minor(*root));
++		IOLog("BSD root: %s, major %d, minor %d\n", rootName, major(*root), minor(*root));
+-		*oflags = 0;
++		*oflags = 0;
+-		goto iofrootx;
++		goto iofrootx;
+-	}
++	}
+ #endif

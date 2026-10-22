@@ -37,6 +37,9 @@ class MarbleTreeTests(unittest.TestCase):
         self.assertEqual(root.prop('compatible'),
                          b'D22AP\0iPhone10,3\0xiaomi,marble\0qcom,sm7475\0AppleARM\0')
         self.assertNotIn('sweet-ufs', [c.name for c in root.children])
+        ufs = child(root, 'marble-ufs')
+        self.assertEqual(struct.unpack('<2Q', ufs.prop('reg')), (0x01d84000, 0x3000))
+        self.assertEqual(ufs.prop('compatible'), b'qcom,ufshc\0')
 
     def test_modes_are_exclusive_and_sweet_remains_default(self):
         for kwargs in ({'qemu': True}, {'highmem': True}):

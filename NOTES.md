@@ -2,6 +2,40 @@
 
 
 
+## Active handoff: MARBLE read-only UFS root (2026-10-22)
+
+USER PHYSICAL MILESTONE: HFS RAMDisk fully successful: mockfs declines non-Mach-O,
+hfs mounts MarbleRoot; hfs-627.100.6 registered, launchd exec/codesigning0,
+EL0 PID1 and indefinite heartbeat. All kernel/scheduler/GIC/timer/SGI/BSD/MD/HFS/
+root/exec/PID1 scheduling PASS. Supersedes older pending HFS statements below.
+User also confirms later stage0: NOP/READ_FLAG0, initial TUR02/04/02, correct
+DEVICE WLUN d0 ACTIVE1b0000001000 succeeds, LUN0 ready, capacity4096, data/MBR/
+GPT/entries/userdata reads PASS, no sector writes. Supersedes older DEVACT
+untested entries. Numeric MARBLE CAP/VER not retained; do not borrow SWEET's.
+
+Reuse sweet_ufs.c via appended0082 after unchanged0001..0081. MARBLE reads
+/marble-ufs/reg PA01d84000+3000 from ADT (base matches actual shim/board.h).
+Same UFSHCI descriptors/ownership/polling/DMA model as SWEET; MARBLE adds proven
+NOP/read-flag/TUR/exact gated d0 ACTIVE readiness, runtime capacity4096 check,
+CAP/VER logs, CRC-checked GPT and stronger read bounds. Compile out all MARBLE
+WRITE10/sync/log/ufsrw/physio-write paths; FWRITE/strategy/raw write EROFS,
+submission whitelist, timeout poisoning, high-DMA CAP64 check and cache flushes.
+SWEET behavior unchanged modulo preprocessor line numbers/string formatting.
+HFS/MD5/hardware/MMU/timer27/SGI1/GIC/CPU0/EL0 old0082 prefix byte-identical.
+
+Local PASS: full replay0001..0081 + strict0082; both changed units real-header
+arm64 compile; SWEET preprocessed equivalence; no preprocessed MARBLE write
+constructors/parser/log thread; host actual read/GPT and readiness functions
+ASan/UBSan PASS incl CRC/overflow/bounds/gate/single ACTIVE/timeout;6 existing
+MARBLE tests PASS incl ADT UFS assertions; old-kernel sparse map preflight PASS
+(reference only); diff check PASS. /tmp/ufs-* holds scripts/objects/audits.
+Full link must be validated in exact Actions run (Linux has no full XNU SDK).
+Details docs/MARBLE_UFS_ROOT.md. Pipeline next: commit/push/Actions/package with
+--cmdline-extra rd=ufsroot0, NO --ramdisk. No rootrw/ufsrw. No phone commands.
+Do not modify userdata; mount failure after ufsroot0 discovery is expected.
+
+Earlier handoffs below are historical.
+
 ## Active handoff: MARBLE HFS RAMDisk root (2026-10-22)
 
 **MARBLE PHYSICAL PID1 SUCCESS**: user reports physical latest mockfs boot:
