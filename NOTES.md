@@ -2,6 +2,47 @@
 
 
 
+## Active handoff: MARBLE original early-abort capture (2026-10-22)
+
+User reports real POCO F5 sparse-map boot reaches SWEET EARLY 1..7,
+including cpu_init and entry to arm_vm_init. Working MMU/cache/SCTLR baseline
+is preserved. User symbolication of exact Actions 39715458390 artifact:
+PC fffffe00073c3608 = vm_fault_internal+0x6c, LR fffffe00073c3504 =
+vm_fault$XNU_INTERNAL+0x14; ldrb w8,[x0,#0x9e], x0=0, ESR96000006,
+FAR9e. This is user-provided evidence, not a new hardware test here.
+
+0082 changes only sleh.c behavior: MARBLE-only sweet_early.h include and
+kernel_map == VM_MAP_NULL guard at the very start of handle_kernel_abort,
+before current_thread/recovery lookup, DTrace and fault classification.
+Prints stage8 "early kernel abort before kernel_map", then
+panic_with_thread_kernel_state("MARBLE early kernel abort before kernel_map initialization", state).
+No recovery, early map initialization, or mapping changes. Existing diagnostics
+retained. Patch uses expanded context/whitespace-neutral replacements.
+
+Exact local xnu-8796.141.3 source confirms map=kernel_map for kernel/no-recovery
+faults; translation faults skip arm_fast_fault and call vm_fault(map,...).
+Non-translation VM faults access map->pmap before that call. vm_fault forwards
+its first vm_map_t argument unchanged to vm_fault_internal, whose first map
+read is map->never_faults. Thus NULL map explains the reported secondary
+read at9e; original PC/ESR/FAR remain unknown until physical diagnostic boot.
+
+Observed PASS: reverse/replay0001..0081, strict0082 check/application;
+real-header MARBLE sleh.c plain-arm64 Mach-O compile (/tmp/abort-sleh.o,
+/tmp/abort-compile.log); SWEET preprocessing byte-identical with __LINE__
+normalized (line-number-generated identifiers/panic locations otherwise shift);
+zero preprocessed MARBLE GICR_IPRIORITYR; every non-sleh.c patch section
+byte-identical to task start; git diff --check. No full kernel link or new boot.
+Safe for diagnostic Actions build; next output expected stage8 + original
+saved-state panic if the early NULL-kernel_map hypothesis holds.
+No CI dispatched, no new run ID, commit/push/device/storage operation.
+Explicit user no-commit/no-push overrides repository default.
+Artifacts: /tmp/abort-before.patch, /tmp/abort-before-sleh.c,
+/tmp/abort-{edit,finish}.py, /tmp/marble-mmu-tree/xnu.
+Next: separately build exact diagnostic artifact and temporary boot to collect
+original PC/LR/SP/ESR/FAR/registers. Do not modify the working MMU baseline.
+
+Earlier handoffs below are historical.
+
 ## Active handoff: MARBLE sparse bootstrap mapping experiment (2026-10-22)
 
 User physical staged result: original SCTLR=0x30d00988, white bits
