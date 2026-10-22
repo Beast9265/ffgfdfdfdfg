@@ -2,6 +2,34 @@
 
 
 
+## Active handoff: MARBLE mockfs RAMDisk PID 1 (2026-10-22)
+
+User physical observation of latest boot: Skywalk self-tests PASSED, BSD
+kinit, lo0/gif0/stf0 and !BSD, then IOFindBSDRoot waits for IOMedia/Apple_HFS.
+No panic. This supersedes the suspected zone hang: root-filesystem boundary
+reached, same as SWEET. No independent physical test this session.
+
+Diagnostic changes: append minimal MARBLE missing-storage-class exceptions and
+root/mount/signature breadcrumbs to0082; reuse sweet-init.S with MARBLE_INIT;
+static signed Mach-O itself is mockfs root /sbin/launchd,16635 bytes. Helper
+accepts --ramdisk and --cmdline-extra; exact extra rd=md0, no rootrw/UFS work.
+Payload audit checks packed RAMDisk ADT/placement/bytes and enlarged sparse
+owned tail plus160-page arena. docs/MARBLE_RAMDISK_ROOT.md has format, rebuild
+commands and failure boundaries. Existing hardware patch sections untouched.
+
+Local PASS: replay0001..0081, strict0082; real-header arm64 objects for all4
+changed XNU units; SWEET preprocessing equal except __LINE__ derivatives; SWEET
+init byte-identical; MARBLE deterministic static signed LC_UNIXTHREAD Mach-O;
+packed RAMDisk ADT/placement/cmdline; enlarged sparse map and160-page arena;
+timer27/SGI1/Group1 and zero GICR group/priority MMIO. Original0082 prefix
+byte-identical. Prior linked kernel has zero physical timer instructions; exact
+new kernel scan pending CI. Shell syntax, existing MARBLE tests and diff check
+PASS. /tmp/ramdisk-* contains compile/comparison/audit artifacts. No device
+interaction. Next: commit/push exact MARBLE CI, package exact artifact
+with root and report hashes. Physical PID1 remains unproven until manual boot.
+
+Earlier handoffs below are historical.
+
 ## Active handoff: MARBLE zone hang diagnostics (2026-10-22)
 
 User physically booted CNTP-fix commit62b42e842515f6389732cb6ad30beaf460bc4a2e,

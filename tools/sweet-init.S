@@ -10,6 +10,14 @@
  *
  * Raw XNU syscalls: number in x16, svc #0x80, carry set on error.
  */
+#if defined(MARBLE_INIT)
+#define INIT_BANNER "\n*** MARBLE USERSPACE: PID 1 RUNNING ***\nPID "
+#define INIT_HEARTBEAT "MARBLE init: still alive\n"
+#else
+#define INIT_BANNER "\n*** SWEET userspace: init running as PID "
+#define INIT_HEARTBEAT "SWEET init: still alive\n"
+#endif
+
 #define SYS_write	4
 #define SYS_open	5
 #define SYS_getpid	20
@@ -35,7 +43,7 @@ _start:
 	mov	x2, #0
 	mov	x16, #SYS_open
 	svc	#0x80
-	b.cs	hang			/* no console: nothing to report to */
+	b.cs	console_failed			/* no console: nothing to report to */
 	mov	x19, x0
 
 	adr	x1, hello
@@ -81,6 +89,11 @@ write_console:
 	svc	#0x80
 	ret
 
+console_failed:
+#if defined(MARBLE_INIT)
+	/* Distinct trap PC/immediate identifies console-open failure in PID 1. */
+	brk	#0x434f
+#endif
 hang:
 	b	hang
 
@@ -91,9 +104,9 @@ five_sec:
 path:
 	.asciz	"/dev/console"
 hello:
-	.ascii	"\n*** SWEET userspace: init running as PID "
+	.ascii	INIT_BANNER
 hello_tail:
 	.ascii	" ***\n"
 alive:
-	.ascii	"SWEET init: still alive\n"
+	.ascii	INIT_HEARTBEAT
 alive_end:

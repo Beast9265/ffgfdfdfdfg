@@ -10708,3 +10708,543 @@ diff --git a/osfmk/kern/zalloc.c b/osfmk/kern/zalloc.c
 -	 */
 +	 */
  #if __x86_64__
+diff --git a/iokit/Kernel/IOService.cpp b/iokit/Kernel/IOService.cpp
+--- a/iokit/Kernel/IOService.cpp
++++ b/iokit/Kernel/IOService.cpp
+@@ -5131,15 +5131,15 @@
+ #endif
+
+-	LOCKWRITENOTIFY();
++	LOCKWRITENOTIFY();
+-	wasHiding = gIOServiceHideIOMedia;
++	wasHiding = gIOServiceHideIOMedia;
+-	if (wasHiding && !parent) {
++	if (wasHiding && !parent) {
+-		gIOServiceHideIOMedia = false;
++		gIOServiceHideIOMedia = false;
+-	}
++	}
+-	UNLOCKNOTIFY();
++	UNLOCKNOTIFY();
+
+-#if defined(ARM64_BOARD_CONFIG_SWEET)
+-	/* SWEET has no IOStorageFamily: without the IOMedia class no media exists to unhide. */
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_MARBLE)
++	/* SWEET/MARBLE have no IOStorageFamily: without the IOMedia class no media exists to unhide. */
+-	if (!iomediaClass) {
++	if (!iomediaClass) {
+-		wasHiding = false;
++		wasHiding = false;
+-	}
++	}
+ #endif
+@@ -5186,14 +5186,14 @@
+ {
+-	const OSMetaClass * ioblockstoragedriverClass;
++	const OSMetaClass * ioblockstoragedriverClass;
+-	bool unhide;
++	bool unhide;
+
+-	ioblockstoragedriverClass = OSMetaClass::getMetaClassWithName(gIOBlockStorageDriverKey);
++	ioblockstoragedriverClass = OSMetaClass::getMetaClassWithName(gIOBlockStorageDriverKey);
+-#if defined(ARM64_BOARD_CONFIG_SWEET)
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_MARBLE)
+-	/*
++	/*
+-	 * SWEET has no IOStorageFamily, so no service can be a block storage
++	 * SWEET/MARBLE have no IOStorageFamily, so no service can be a block storage
+-	 * driver: the root (e.g. a RAM disk) is not block media, as for image boot.
++	 * driver: the root (e.g. a RAM disk) is not block media, as for image boot.
+-	 */
++	 */
+-	if (!ioblockstoragedriverClass) {
++	if (!ioblockstoragedriverClass) {
+-		root = NULL;
++		root = NULL;
+-	}
++	}
+ #else
+diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
+--- a/iokit/bsddev/IOKitBSDInit.cpp
++++ b/iokit/bsddev/IOKitBSDInit.cpp
+@@ -748,10 +748,13 @@
+ //
+
+-	if (!didRam) {                                                                                           /* Have we already build this ram disk? */
++	if (!didRam) {                                                                                           /* Have we already build this ram disk? */
+-		didRam = 1;                                                                                             /* Remember we did this */
++		didRam = 1;                                                                                             /* Remember we did this */
+-		if ((regEntry = IORegistryEntry::fromPath( "/chosen/memory-map", gIODTPlane ))) {        /* Find the map node */
++		if ((regEntry = IORegistryEntry::fromPath( "/chosen/memory-map", gIODTPlane ))) {        /* Find the map node */
+-			data = (OSData *)regEntry->getProperty("RAMDisk");      /* Find the ram disk, if there */
++			data = (OSData *)regEntry->getProperty("RAMDisk");      /* Find the ram disk, if there */
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++			IOLog("MARBLE ROOT: RAMDisk property %s\n", data ? "present" : "MISSING");
++#endif
+-			if (data) {                                                                                      /* We found one */
++			if (data) {                                                                                      /* We found one */
+-				uintptr_t *ramdParms;
++				uintptr_t *ramdParms;
+-				ramdParms = (uintptr_t *)data->getBytesNoCopy();        /* Point to the ram disk base and size */
++				ramdParms = (uintptr_t *)data->getBytesNoCopy();        /* Point to the ram disk base and size */
+ #if __LP64__
+@@ -927,81 +930,87 @@
+ #endif
+-		}
++		}
+-	} while (!service);
++	} while (!service);
+
+-	OSSafeReleaseNULL(matching);
++	OSSafeReleaseNULL(matching);
+
+-	if (service && mediaProperty) {
++	if (service && mediaProperty) {
+-		service = (IOService *)service->getProperty(mediaProperty);
++		service = (IOService *)service->getProperty(mediaProperty);
+-	}
++	}
+
+-	mjr = 0;
++	mjr = 0;
+-	mnr = 0;
++	mnr = 0;
+
+-	// If the IOService we matched to is a subclass of IONetworkInterface,
++	// If the IOService we matched to is a subclass of IONetworkInterface,
+-	// then make sure it has been registered with BSD and has a BSD name
++	// then make sure it has been registered with BSD and has a BSD name
+-	// assigned.
++	// assigned.
+
+-	if (service
++	if (service
+-	    && service->metaCast( "IONetworkInterface" )
++	    && service->metaCast( "IONetworkInterface" )
+-	    && !IORegisterNetworkInterface( service )) {
++	    && !IORegisterNetworkInterface( service )) {
+-		service = NULL;
++		service = NULL;
+-	}
++	}
+
+-	if (service) {
++	if (service) {
+-		len = kMaxPathBuf;
++		len = kMaxPathBuf;
+-		service->getPath( str.data(), &len, gIOServicePlane );
++		service->getPath( str.data(), &len, gIOServicePlane );
+-		IOLog("Got boot device = %s\n", str.data());
++		IOLog("Got boot device = %s\n", str.data());
+
+-		iostr = (OSString *) service->getProperty( kIOBSDNameKey );
++		iostr = (OSString *) service->getProperty( kIOBSDNameKey );
+-		if (iostr) {
++		if (iostr) {
+-			strlcpy( rootName, iostr->getCStringNoCopy(), rootNameSize );
++			strlcpy( rootName, iostr->getCStringNoCopy(), rootNameSize );
+-		}
++		}
+-		off = (OSNumber *) service->getProperty( kIOBSDMajorKey );
++		off = (OSNumber *) service->getProperty( kIOBSDMajorKey );
+-		if (off) {
++		if (off) {
+-			mjr = off->unsigned32BitValue();
++			mjr = off->unsigned32BitValue();
+-		}
++		}
+-		off = (OSNumber *) service->getProperty( kIOBSDMinorKey );
++		off = (OSNumber *) service->getProperty( kIOBSDMinorKey );
+-		if (off) {
++		if (off) {
+-			mnr = off->unsigned32BitValue();
++			mnr = off->unsigned32BitValue();
+-		}
++		}
+
+-		if (service->metaCast( "IONetworkInterface" )) {
++		if (service->metaCast( "IONetworkInterface" )) {
+-			flags |= 1;
++			flags |= 1;
+-		}
++		}
+-	} else {
++	} else {
+-		IOLog( "Wait for root failed\n" );
++		IOLog( "Wait for root failed\n" );
+-		strlcpy( rootName, "en0", rootNameSize );
++		strlcpy( rootName, "en0", rootNameSize );
+-		flags |= 1;
++		flags |= 1;
+-	}
++	}
+
+-	IOLog( "BSD root: %s", rootName );
++	IOLog( "BSD root: %s", rootName );
+-	if (mjr) {
++	if (mjr) {
+-		IOLog(", major %d, minor %d\n", mjr, mnr );
++		IOLog(", major %d, minor %d\n", mjr, mnr );
+-	} else {
++	} else {
+-		IOLog("\n");
++		IOLog("\n");
+-	}
++	}
+
+-	*root = makedev( mjr, mnr );
++	*root = makedev( mjr, mnr );
+-	*oflags = flags;
++	*oflags = flags;
+
+ iofrootx:
+
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++	IOLog("MARBLE ROOT: setRootMedia begin\n");
++#endif
+-	IOService::setRootMedia(service);
++	IOService::setRootMedia(service);
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++	IOLog("MARBLE ROOT: setRootMedia complete\n");
++#endif
+
+-	if ((gIOKitDebug & (kIOLogDTree | kIOLogServiceTree | kIOLogMemory)) && !debugInfoPrintedOnce) {
++	if ((gIOKitDebug & (kIOLogDTree | kIOLogServiceTree | kIOLogMemory)) && !debugInfoPrintedOnce) {
+-		IOService::getPlatform()->waitQuiet();
++		IOService::getPlatform()->waitQuiet();
+-		if (gIOKitDebug & kIOLogDTree) {
++		if (gIOKitDebug & kIOLogDTree) {
+-			IOLog("\nDT plane:\n");
++			IOLog("\nDT plane:\n");
+-			IOPrintPlane( gIODTPlane );
++			IOPrintPlane( gIODTPlane );
+-		}
++		}
+-		if (gIOKitDebug & kIOLogServiceTree) {
++		if (gIOKitDebug & kIOLogServiceTree) {
+-			IOLog("\nService plane:\n");
++			IOLog("\nService plane:\n");
+-			IOPrintPlane( gIOServicePlane );
++			IOPrintPlane( gIOServicePlane );
+-		}
++		}
+-		if (gIOKitDebug & kIOLogMemory) {
++		if (gIOKitDebug & kIOLogMemory) {
+-			IOPrintMemory();
++			IOPrintMemory();
+-		}
++		}
+-	}
++	}
+
+-	return kIOReturnSuccess;
++	return kIOReturnSuccess;
+ }
+diff --git a/bsd/miscfs/mockfs/mockfs_vfsops.c b/bsd/miscfs/mockfs/mockfs_vfsops.c
+--- a/bsd/miscfs/mockfs/mockfs_vfsops.c
++++ b/bsd/miscfs/mockfs/mockfs_vfsops.c
+@@ -106,92 +106,101 @@
+ {
+-	int rvalue = 0;
++	int rvalue = 0;
+-	mockfs_fsnode_t root_fsnode = NULL;
++	mockfs_fsnode_t root_fsnode = NULL;
+-	mockfs_fsnode_t dev_fsnode = NULL;
++	mockfs_fsnode_t dev_fsnode = NULL;
+-	mockfs_fsnode_t file_fsnode = NULL;
++	mockfs_fsnode_t file_fsnode = NULL;
+-	mockfs_mount_t mockfs_mount_data = NULL;
++	mockfs_mount_t mockfs_mount_data = NULL;
+-	dk_memdev_info_t memdev_info;
++	dk_memdev_info_t memdev_info;
+
+-	/*
++	/*
+-	 * Validate that the device at least LOOKS like a mach-o (has a sane header); this prevents us from
++	 * Validate that the device at least LOOKS like a mach-o (has a sane header); this prevents us from
+-	 *   claiming devices that hold real filesystems, and from causing EBADMACHO panics further along the boot path.
++	 *   claiming devices that hold real filesystems, and from causing EBADMACHO panics further along the boot path.
+-	 */
++	 */
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++	printf("MARBLE ROOT: mockfs mount begin\n");
++#endif
+-	if ((rvalue = mockfs_check_macho(rvp))) {
++	if ((rvalue = mockfs_check_macho(rvp))) {
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++		printf("MARBLE ROOT: mockfs Mach-O check failed: %d\n", rvalue);
++#endif
+-		return rvalue;
++		return rvalue;
+-	}
++	}
+
+-	/*
++	/*
+-	 * There are no M_MOCKFS* definitions at the moment, just use M_TEMP.
++	 * There are no M_MOCKFS* definitions at the moment, just use M_TEMP.
+-	 */
++	 */
+
+-	mockfs_mount_data = kalloc_type(struct mockfs_mount, Z_WAITOK | Z_ZERO);
++	mockfs_mount_data = kalloc_type(struct mockfs_mount, Z_WAITOK | Z_ZERO);
+-	mockfs_fsnode_create(mp, MOCKFS_ROOT, &root_fsnode);
++	mockfs_fsnode_create(mp, MOCKFS_ROOT, &root_fsnode);
+-	mockfs_fsnode_create(mp, MOCKFS_DEV, &dev_fsnode);
++	mockfs_fsnode_create(mp, MOCKFS_DEV, &dev_fsnode);
+-	mockfs_fsnode_create(mp, MOCKFS_FILE, &file_fsnode);
++	mockfs_fsnode_create(mp, MOCKFS_FILE, &file_fsnode);
+
+-	if (!root_fsnode || !dev_fsnode || !file_fsnode) {
++	if (!root_fsnode || !dev_fsnode || !file_fsnode) {
+-		rvalue = ENOMEM;
++		rvalue = ENOMEM;
+-		goto done;
++		goto done;
+-	}
++	}
+
+-	/*
++	/*
+-	 * If rvp is a memory device (with a few caveats), we can point to the same physical memory as the device
++	 * If rvp is a memory device (with a few caveats), we can point to the same physical memory as the device
+-	 *   and avoid pointless paging/copying; query the device node for the information we need to determine
++	 *   and avoid pointless paging/copying; query the device node for the information we need to determine
+-	 *   if we can do this.
++	 *   if we can do this.
+-	 */
++	 */
+-	bzero(&memdev_info, sizeof(memdev_info));
++	bzero(&memdev_info, sizeof(memdev_info));
+
+-	if (!VNOP_IOCTL(rvp, DKIOCGETMEMDEVINFO, (caddr_t)&memdev_info, 0, NULL)) {
++	if (!VNOP_IOCTL(rvp, DKIOCGETMEMDEVINFO, (caddr_t)&memdev_info, 0, NULL)) {
+-		/*
++		/*
+-		 * For the moment, we won't try to optimize when mi_phys is true.
++		 * For the moment, we won't try to optimize when mi_phys is true.
+-		 */
++		 */
+-		if (!mockfs_mount_data->mockfs_physical_memory) {
++		if (!mockfs_mount_data->mockfs_physical_memory) {
+-			/*
++			/*
+-			 * Only a physical memory device has an address the pager can map
++			 * Only a physical memory device has an address the pager can map
+-			 * directly; a virtual one (IOKit's RAMDisk) goes through normal
++			 * directly; a virtual one (IOKit's RAMDisk) goes through normal
+-			 * device I/O. mi_base is a physical page number only when mi_phys.
++			 * device I/O. mi_base is a physical page number only when mi_phys.
+-			 */
++			 */
+-			mockfs_mount_data->mockfs_memory_backed = memdev_info.mi_mdev && memdev_info.mi_phys;
++			mockfs_mount_data->mockfs_memory_backed = memdev_info.mi_mdev && memdev_info.mi_phys;
+-			mockfs_mount_data->mockfs_physical_memory = memdev_info.mi_phys;
++			mockfs_mount_data->mockfs_physical_memory = memdev_info.mi_phys;
+-			mockfs_mount_data->mockfs_memdev_base = memdev_info.mi_base;
++			mockfs_mount_data->mockfs_memdev_base = memdev_info.mi_base;
+-			mockfs_mount_data->mockfs_memdev_size = memdev_info.mi_size;
++			mockfs_mount_data->mockfs_memdev_size = memdev_info.mi_size;
+-		}
++		}
+-	}
++	}
+
+-	lck_mtx_init(&mockfs_mount_data->mockfs_mnt_mtx, &mockfs_mtx_grp, LCK_ATTR_NULL);
++	lck_mtx_init(&mockfs_mount_data->mockfs_mnt_mtx, &mockfs_mtx_grp, LCK_ATTR_NULL);
+
+-	/*
++	/*
+-	 * All of the needed nodes/structures have been set up; now we just need to establish the relationships
++	 * All of the needed nodes/structures have been set up; now we just need to establish the relationships
+-	 *   between the various mockfs nodes.
++	 *   between the various mockfs nodes.
+-	 */
++	 */
+-	if ((rvalue = mockfs_fsnode_adopt(root_fsnode, dev_fsnode))) {
++	if ((rvalue = mockfs_fsnode_adopt(root_fsnode, dev_fsnode))) {
+-		goto done;
++		goto done;
+-	}
++	}
+
+-	if ((rvalue = mockfs_fsnode_adopt(root_fsnode, file_fsnode))) {
++	if ((rvalue = mockfs_fsnode_adopt(root_fsnode, file_fsnode))) {
+-		goto done;
++		goto done;
+-	}
++	}
+
+-	mockfs_mount_data->mockfs_root = root_fsnode;
++	mockfs_mount_data->mockfs_root = root_fsnode;
+-	mp->mnt_data = (typeof(mp->mnt_data))mockfs_mount_data;
++	mp->mnt_data = (typeof(mp->mnt_data))mockfs_mount_data;
+
+ done:
+-	if (rvalue) {
++	if (rvalue) {
+-		if (file_fsnode) {
++		if (file_fsnode) {
+-			mockfs_fsnode_destroy(file_fsnode);
++			mockfs_fsnode_destroy(file_fsnode);
+-		}
++		}
+-		if (dev_fsnode) {
++		if (dev_fsnode) {
+-			mockfs_fsnode_destroy(dev_fsnode);
++			mockfs_fsnode_destroy(dev_fsnode);
+-		}
++		}
+-		if (root_fsnode) {
++		if (root_fsnode) {
+-			mockfs_fsnode_destroy(root_fsnode);
++			mockfs_fsnode_destroy(root_fsnode);
+-		}
++		}
+-		if (mockfs_mount_data) {
++		if (mockfs_mount_data) {
+-			lck_mtx_destroy(&mockfs_mount_data->mockfs_mnt_mtx, &mockfs_mtx_grp);
++			lck_mtx_destroy(&mockfs_mount_data->mockfs_mnt_mtx, &mockfs_mtx_grp);
+-			kfree_type(struct mockfs_mount, mockfs_mount_data);
++			kfree_type(struct mockfs_mount, mockfs_mount_data);
+-		}
++		}
+-	}
++	}
+
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++	printf("MARBLE ROOT: mockfs mount result %d\n", rvalue);
++#endif
+-	return rvalue;
++	return rvalue;
+ }
+
+ /*
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -7527,64 +7527,69 @@
+ done:
+-	if (0 == error) {
++	if (0 == error) {
+-		/*
++		/*
+-		 * Update the new process's signature-dependent process state.
++		 * Update the new process's signature-dependent process state.
+-		 * state.
++		 * state.
+-		 */
++		 */
+
+-		error = proc_process_signature(p, &signature_failure_reason);
++		error = proc_process_signature(p, &signature_failure_reason);
+-	}
++	}
+
+-	if (0 == error) {
++	if (0 == error) {
+-		/*
++		/*
+-		 * Update the new main thread's signature-dependent thread
++		 * Update the new main thread's signature-dependent thread
+-		 * state. This was also called when the thread was created,
++		 * state. This was also called when the thread was created,
+-		 * but for the main thread the signature was not yet attached
++		 * but for the main thread the signature was not yet attached
+-		 * at that time.
++		 * at that time.
+-		 */
++		 */
+-		kr = thread_process_signature(imgp->ip_new_thread, proc_get_task_raw(p));
++		kr = thread_process_signature(imgp->ip_new_thread, proc_get_task_raw(p));
+
+-		if (kr != KERN_SUCCESS) {
++		if (kr != KERN_SUCCESS) {
+-			error = EINVAL;
++			error = EINVAL;
+-			signature_failure_reason = os_reason_create(OS_REASON_EXEC, EXEC_EXIT_REASON_MACHINE_THREAD);
++			signature_failure_reason = os_reason_create(OS_REASON_EXEC, EXEC_EXIT_REASON_MACHINE_THREAD);
+-		}
++		}
+-	}
++	}
+
+-	if (0 == error) {
++	if (0 == error) {
+-		/* The process's code signature related properties are
++		/* The process's code signature related properties are
+-		 * fully set up, so this is an opportune moment to log
++		 * fully set up, so this is an opportune moment to log
+-		 * platform binary execution, if desired. */
++		 * platform binary execution, if desired. */
+-		if (platform_exec_logging != 0 && csproc_get_platform_binary(p)) {
++		if (platform_exec_logging != 0 && csproc_get_platform_binary(p)) {
+-			uint8_t cdhash[CS_CDHASH_LEN];
++			uint8_t cdhash[CS_CDHASH_LEN];
+-			char cdhash_string[CS_CDHASH_STRING_SIZE];
++			char cdhash_string[CS_CDHASH_STRING_SIZE];
+-			proc_getcdhash(p, cdhash);
++			proc_getcdhash(p, cdhash);
+-			cdhash_to_string(cdhash_string, cdhash);
++			cdhash_to_string(cdhash_string, cdhash);
+
+-			os_log(peLog, "CS Platform Exec Logging: Executing platform signed binary "
++			os_log(peLog, "CS Platform Exec Logging: Executing platform signed binary "
+-			    "'%s' with cdhash %s\n", p->p_name, cdhash_string);
++			    "'%s' with cdhash %s\n", p->p_name, cdhash_string);
+-		}
++		}
+-	} else {
++	} else {
+-		if (!unexpected_failure) {
++		if (!unexpected_failure) {
+-			proc_csflags_set(p, CS_KILLED);
++			proc_csflags_set(p, CS_KILLED);
+-		}
++		}
+-		/* make very sure execution fails */
++		/* make very sure execution fails */
+-		if (vfexec || spawn) {
++		if (vfexec || spawn) {
+-			assert(signature_failure_reason != OS_REASON_NULL);
++			assert(signature_failure_reason != OS_REASON_NULL);
+-			psignal_vfork_with_reason(p, proc_task(p), imgp->ip_new_thread,
++			psignal_vfork_with_reason(p, proc_task(p), imgp->ip_new_thread,
+-			    SIGKILL, signature_failure_reason);
++			    SIGKILL, signature_failure_reason);
+-			signature_failure_reason = OS_REASON_NULL;
++			signature_failure_reason = OS_REASON_NULL;
+-			error = 0;
++			error = 0;
+-		} else {
++		} else {
+-			assert(signature_failure_reason != OS_REASON_NULL);
++			assert(signature_failure_reason != OS_REASON_NULL);
+-			psignal_with_reason(p, SIGKILL, signature_failure_reason);
++			psignal_with_reason(p, SIGKILL, signature_failure_reason);
+-			signature_failure_reason = OS_REASON_NULL;
++			signature_failure_reason = OS_REASON_NULL;
+-		}
++		}
+-	}
++	}
+
+-	if (port != IPC_PORT_NULL) {
++	if (port != IPC_PORT_NULL) {
+-		ipc_port_release_send(port);
++		ipc_port_release_send(port);
+-	}
++	}
+
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++	if (p->p_pid == 1) {
++		printf("MARBLE ROOT: PID 1 codesigning result %d\n", error);
++	}
++#endif
+-	/* If we hit this, we likely would have leaked an exit reason */
++	/* If we hit this, we likely would have leaked an exit reason */
+-	assert(signature_failure_reason == OS_REASON_NULL);
++	assert(signature_failure_reason == OS_REASON_NULL);
+-	return error;
++	return error;
+ }

@@ -5,12 +5,30 @@ REPO="Beast9265/ios-marble"
 BRANCH="marble"
 WORKFLOW="xnu.yml"
 
-if [[ $# -lt 1 ]]; then
-    echo "Usage: $0 \"commit message\""
-    exit 1
-fi
-
+RAMDISK=""
+CMDLINE_EXTRA=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --ramdisk|--cmdline-extra)
+            [[ $# -ge 2 ]] || { echo "ERROR: $1 needs a value"; exit 1; }
+            if [[ "$1" == --ramdisk ]]; then RAMDISK="$2"; else CMDLINE_EXTRA="$2"; fi
+            shift 2 ;;
+        --*) echo "ERROR: unknown option $1"; exit 1 ;;
+        *) break ;;
+    esac
+done
+[[ $# -eq 1 ]] || { echo "Usage: $0 [--ramdisk PATH] [--cmdline-extra ARGS] \"commit message\""; exit 1; }
 COMMIT_MSG="$1"
+# Resolve before changing directory. No default behavior changes.
+if [[ -n "$RAMDISK" ]]; then
+    [[ -s "$RAMDISK" ]] || { echo "ERROR: missing/empty RAMDisk: $RAMDISK"; exit 1; }
+    RAMDISK="$(realpath "$RAMDISK")"
+fi
+CMDLINE="debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam"
+if [[ -n "$CMDLINE_EXTRA" ]]; then CMDLINE+=" $CMDLINE_EXTRA"; fi
+[[ ${#CMDLINE} -lt 608 ]] || { echo "ERROR: cmdline too long"; exit 1; }
+PAYLOAD_ARGS=()
+if [[ -n "$RAMDISK" ]]; then PAYLOAD_ARGS=(--ramdisk "$RAMDISK"); fi
 
 cd "$(git rev-parse --show-toplevel)"
 
@@ -148,8 +166,7 @@ echo "== Download exact XNU artifact =="
 
 ARTIFACT_DIR="xnu/out-marble-ci-${RUN_ID}"
 
-rm -rf "$ARTIFACT_DIR"
-mkdir -p "$ARTIFACT_DIR"
+mkdir "$ARTIFACT_DIR" # fail rather than reuse/delete an old artifact directory
 
 gh run download "$RUN_ID" \
     -R "$REPO" \
@@ -193,7 +210,12 @@ python3 tools/mkpayload.py \
     "$KERNEL" \
     shim/out/marble-xnu/marble.adt \
     shim/out/marble-xnu/marble-xnu.payload \
-    --cmdline "debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam"
+    --cmdline "$CMDLINE" "${PAYLOAD_ARGS[@]}"
+
+if [[ -n "$RAMDISK" ]]; then
+    python3 tools/marble-ramdisk-audit.py "$KERNEL" \
+        shim/out/marble-xnu/marble-xnu.payload "$RAMDISK"
+fi
 
 # ------------------------------------------------------------------
 # Shim
@@ -242,6 +264,7 @@ BOOT_SHA="$(sha256sum "$FINAL_IMAGE" | awk '{print $1}')"
 
 echo "Kernel : $KERNEL_SHA"
 echo "ADT    : $ADT_SHA"
+if [[ -n "$RAMDISK" ]]; then sha256sum "$RAMDISK"; fi
 echo "Payload: $PAYLOAD_SHA"
 echo "Shim   : $SHIM_SHA"
 echo "Boot   : $BOOT_SHA"

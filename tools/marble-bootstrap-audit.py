@@ -22,7 +22,7 @@ def roundup(value):
     return (value + PAGE - 1) & -PAGE
 
 
-def audit(kernel, adt_size, reference=False, allocator_pages=160):
+def audit(kernel, adt_size, reference=False, allocator_pages=160, ramdisk_size=0):
     raw = Path(kernel).read_bytes()
     macho = parse_macho(raw)
     segments = []
@@ -39,7 +39,7 @@ def audit(kernel, adt_size, reference=False, allocator_pages=160):
     base = header & -BLOCK
     delta = base - PHYS
     end = roundup(max(hi for _, hi, _ in segments)) - delta
-    ba = roundup(end + adt_size)
+    ba = roundup(end + roundup(ramdisk_size) + adt_size)
     top = ba + PAGE
     arena_end = top + allocator_pages * PAGE
     first = (header - delta) & -BLOCK
@@ -137,8 +137,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('kernel')
     parser.add_argument('--adt-size', type=lambda n: int(n, 0), required=True)
+    parser.add_argument('--ramdisk-size', type=lambda n: int(n, 0), default=0)
     parser.add_argument('--reference', action='store_true')
     parser.add_argument('--allocator-pages', type=int, choices=[0,160], default=160, help='0 reproduces the pre-arena policy; 160 audits the new policy')
     options = parser.parse_args()
     assert options.adt_size > 0
-    audit(options.kernel, options.adt_size, options.reference, options.allocator_pages)
+    audit(options.kernel, options.adt_size, options.reference, options.allocator_pages, options.ramdisk_size)
