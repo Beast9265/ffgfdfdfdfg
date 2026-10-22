@@ -2,6 +2,34 @@
 
 
 
+## Active handoff: MARBLE GICR_IGROUPR0 SEA experiment (2026-10-22)
+
+User physical exact Actions39719201880 clears allocator/bzero crash and reaches
+complete arm_vm_init, serial/kprintf and later PE initialization. New SEA:
+PCfffffe0007a01e08 LRfffffe0007a01df4 FARfffffe000b3e8080 ESR96000010.
+Local allocator kernel confirms _pe_init_fiq+0x1a0 = b8080d09,
+str w9,[x8,#0x80]!; preceding add0x10000 and mov-1 prove IGROUPR0.
+PE VAfffffe000b3d8000 +0x10080 = FAR, PA17190080.
+
+0082 changes only pe_fiq.c: MARBLE skips IGROUPR0 entirely, preserves existing
+priority-window exclusion and ISENABLER0(timer27|SGI1), adds granular MARBLE
+breadcrumbs around discovery/WAKER/enable/ICC/GICD. SWEET preprocessed output
+byte-identical including __LINE__; three blank lines removed to preserve it.
+ADT warnings audited (generic master string vs empty property; missing debug
+node), ADT unchanged. Exact source/report: docs/MARBLE_GICR_IGROUPR0.md.
+
+Observed PASS: reverse/replay0001..0081, strict0082 check/application, real-header
+MARBLE pe_fiq.c arm64 Mach-O compile/preprocess; no preprocessed IGROUPR0 or
+IPRIORITYR MMIO, enable mask08000002, Group1 ICC writes, all other patch
+sections byte-identical, git diff --check. Artifacts /tmp/gic-*.
+Safe for diagnostic Actions BUILD; full new link and physical result pending.
+No new CI run, commit/push (explicitly prohibited), device/storage operation.
+Next: separate Actions build and temporary boot; if enable begin appears but
+done does not, collect saved state to test ISENABLER0 accessibility. Preserve
+working MMU/arena and all firmware-owned security/priority configuration.
+
+Earlier handoffs below are historical.
+
 ## Active handoff: MARBLE early allocator arena (2026-10-22)
 
 User physical run39717047014 reaches MMU-on arm_vm_init; exact original
