@@ -1,6 +1,66 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
 
+## Active handoff: MARBLE container prerequisites (2026-10-23)
+
+LATEST USER PHYSICAL RESULT: clean GUI root + bounded diagnostic kernel reaches
+backboardd, AppleKeyStore open success and HID/accessory lookups, but NO lookup
+or open of IOMobileFramebuffer/AppleCLCD/IOCoreSurfaceRoot during observed
+lifetime. This is before display discovery, not evidence of a broken graphics
+ABI. Graphics remains frozen; no phone/fastboot/adb commands executed.
+
+0082 ONLY extends 0052 kpi_vfs.c guard to SWEET || MARBLE. Exact fallback body
+unchanged: ENOTSUP, flags exactly VFS_RENAME_SWAP, non-null destination,
+two regular files, same mount -> VNOP_EXCHANGE. No cross-volume/other flags.
+Existing bounded GUI IOKit/null/exit diagnostics unchanged. Historical0051/0053
+heap-string helper safely shared ONLY for MARBLE current exiting backboardd or
+SpringBoard on SIGABRT/SIGTRAP, marbleguidiag=1; four scans/boot,4096 region
+queries/scan,96MiB attempted copies/scan (failed copies count),700 strings/scan,
+64KiB buffer,159-character strings. Zero-size/overflow stops traversal. No
+sampler/stack helper port. Single CPU config retained. SWEET behavior unchanged.
+
+Local PASS: complete0001..0082 reverse/replay, strict0082 check/application;
+actual CI-header arm64 compiles kpi_vfs.c,exception.c,kern_exit.c; normalized
+preprocessing SWEET/BCM2837/T8103 unchanged. Actual fallback ASan/UBSan harness
+passes51200 guard/return cases. Actual heap helper ASan/UBSan passes GUI-only,
+opt-in,four scans,96MiB success/failure-copy bounds,700 lines,4096 regions,
+zero-size/overflow cases. All0082 graphics/hardware/UFS/HFS/AKS/WDT/AMFI/IOKit
+sections byte-identical to HEAD. git diff --check uses historical patch-context
+whitespace settings; strict git apply --whitespace=error validates source adds.
+Scripts/logs /tmp/containers-{compile.py,source-proof.py,scan-test.py}.
+
+Root COMPLETE: cloned independently hash-verified JOURNALED gui-clean root,
+only mkdir/chown/chmod for four requested directories and necessary parents.
+No wholesale sweet-root-tweaks, activation/audio/telephony/migration changes.
+Exact tools/sweet-root-tweaks.py ownership/modes:
+/private/var/containers/Bundle 33:33 0755
+/private/var/containers/Data/System 0:0 0755
+/private/var/containers/Shared/SystemGroup 0:0 0755
+/private/var/containers/Temp 0:0 0755
+Bluetoothd absent,backboardd/SpringBoard present,no stdout/stderr overrides;
+launchd cache byte-identical to gui-clean. launchd/dyld SHA256 unchanged:
+12370e5ee35bf28ae479b6c4b4455f4f4693ab803e37c5eb3032537c18cac61c
+5806834564fe6462ae981d0915d612b1eb2f6f168822b5d278bee56254933757
+keybags root:wheel0700; systembag.kb root:wheel0600,227B,unchanged SHA256
+b04160a5b4f84f6318549fd420d1d2efa591af6df08f3c9b1abba587e931604d.
+usersession.kb/persona.kb absent,not manufactured. Existing kernel personas
+confirmed config_personas plus linked persona_alloc/find/init/kpersona syscalls.
+Independent read-only mounted audit + fsck_hfs -f -n exit0: iOSRoot appears OK.
+Both primary/alternate HX0005 attributes0x2100,journal bit13 SET.
+Full sparse expansion compared all17179869184 bytes with independent decoder:
+PASS byte-identical; no exhaustive Unicode full-tree traversal repeated.
+Raw shim/out/marble-xnu/ios16-root-marble-20H392-containers.img SHA256
+ e37661d455f97abd29c392c7cd41894d4aa70c8d49ff4872a630ab26426927bb
+Sparse shim/out/marble-xnu/ios16-root-marble-20H392-containers.simg SHA256
+ 01f6cac2653379c35fb4b1043c7031fd1cf4e044e2a8d7e1862556ef356f54f0
+Logs /tmp/containers-{root.log,root-recheck.log,sparse-audit.txt}; mounts closed.
+
+CI/full link/package NEXT, exact existing real-iOS args including marbleguidiag=1
+retained. Unrelated iosroot-sparse.sh mode/breadcrumb doc preserved,not staged.
+Expected physical success: IOK backboardd matching IOMobileFramebuffer,
+open AppleCLCD/IOCoreSurfaceRoot and MARBLE FB: backboardd. Physical outcome
+PENDING user manual flash/boot; do not claim display ABI failure before lookup.
+
 ## Active handoff: MARBLE clean GUI startup / bounded diagnostics (2026-10-22)
 
 LATEST PHYSICAL USER OBSERVATION supersedes earlier display-MISSING wording:

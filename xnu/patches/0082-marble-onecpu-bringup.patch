@@ -13318,7 +13318,7 @@ diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFrame
 diff --git a/bsd/kern/kern_exit.c b/bsd/kern/kern_exit.c
 --- a/bsd/kern/kern_exit.c
 +++ b/bsd/kern/kern_exit.c
-@@ -1897,6 +1897,27 @@
+@@ -1897,6 +1897,31 @@
  				    desc != NULL ? desc : "(none)");
  			}
  		}
@@ -13331,6 +13331,10 @@ diff --git a/bsd/kern/kern_exit.c b/bsd/kern/kern_exit.c
 +			    (!strcmp(p->p_comm, "backboardd") || !strcmp(p->p_comm, "SpringBoard")) &&
 +			    PE_parse_boot_argn("marbleguidiag", &enabled, sizeof(enabled)) && enabled) {
 +				gui_crashes++;
++				if (WTERMSIG(rv) == 6 || WTERMSIG(rv) == 5) {
++					extern void marble_crash_strings(const char *);
++					marble_crash_strings(p->p_comm);
++				}
 +				printf("CRASH %s[%d] sig %d code 0x%llx sub 0x%llx\n",
 +				    p->p_comm, proc_getpid(p), WTERMSIG(rv),
 +				    ((uint64_t)ut->uu_exception << 32) | (uint32_t)ut->uu_code,
@@ -13505,3 +13509,136 @@ diff --git a/iokit/Kernel/IOUserClient.cpp b/iokit/Kernel/IOUserClient.cpp
  		{
  			char sname[32];
  			if (sweet_iolog(sname, sizeof(sname))) {
+diff --git a/bsd/vfs/kpi_vfs.c b/bsd/vfs/kpi_vfs.c
+--- a/bsd/vfs/kpi_vfs.c
++++ b/bsd/vfs/kpi_vfs.c
+@@ -4459,7 +4459,7 @@
+ 					_err = VNOP_RENAME(fdvp, *fvpp, fcnp, tdvp, *tvpp, tcnp, ctx);
+ 				}
+ 			}
+-#if defined(ARM64_BOARD_CONFIG_SWEET)
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_MARBLE)
+ 			/*
+ 			 * SWEET: HFS has no RENAME_SWAP, which Foundation's atomic
+ 			 * writes use (usermanagerd: "Failed to atomically swap writing
+diff --git a/osfmk/kern/exception.c b/osfmk/kern/exception.c
+--- a/osfmk/kern/exception.c
++++ b/osfmk/kern/exception.c
+@@ -897,6 +897,13 @@
+ 	}
+ }
+ 
++#endif /* ARM64_BOARD_CONFIG_SWEET */
++
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_MARBLE)
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++static void sweet_crash_strings(const char *name);
++#endif
++
+ /*
+  * SWEET: for a process named in boot-arg sweetscan (comma separated,
+  * default "backboardd,SpringBoard"; "-" = off) that dies with SIGABRT or
+@@ -908,7 +915,9 @@
+ static void
+ sweet_crash_strings(const char *name)
+ {
++#if defined(ARM64_BOARD_CONFIG_SWEET)
+ 	static char names[128];
++#endif
+ 	char *buf;
+ 	vm_map_t map = current_map();
+ 	vm_map_offset_t addr = 0;
+@@ -916,6 +925,17 @@
+ 	int lines = 0;
+ 	char last[96] = "";
+ 
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++	/* Current exiting GUI task only; four scans per boot, opt-in. */
++	static unsigned int scans;
++	unsigned int regions = 0;
++	int enabled = 0;
++	if ((strcmp(name, "backboardd") && strcmp(name, "SpringBoard")) ||
++	    scans >= 4 || !PE_parse_boot_argn("marbleguidiag", &enabled, sizeof(enabled)) || !enabled) {
++		return;
++	}
++	scans++;
++#else
+ 	if (!PE_parse_boot_argn("sweetscan", names, sizeof(names))) {
+ 		strlcpy(names, "backboardd,SpringBoard", sizeof(names));
+ 	}
+@@ -935,6 +955,7 @@
+ 	if (!found) {
+ 		return;
+ 	}
++#endif
+ 	buf = kalloc_data(65536, Z_WAITOK);
+ 	if (buf == NULL) {
+ 		return;
+@@ -946,11 +967,21 @@
+ 		vm_region_submap_info_data_64_t info;
+ 		mach_msg_type_number_t count = VM_REGION_SUBMAP_INFO_V2_COUNT_64;
+ 
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++		if (++regions > 4096) {
++			break;
++		}
++#endif
+ 		if (vm_map_region_recurse_64(map, &addr, &size, &depth,
+ 		    (vm_region_submap_info_64_t)&info, &count) != KERN_SUCCESS) {
+ 			break;
+ 		}
+ 		vm_map_offset_t base = addr;
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++		if (size == 0 || addr + size <= addr) {
++			break;
++		}
++#endif
+ 		addr += size;
+ 		if (info.is_submap || (info.protection & (VM_PROT_READ | VM_PROT_WRITE)) !=
+ 		    (VM_PROT_READ | VM_PROT_WRITE) || info.user_tag < 1 || info.user_tag > 11) {
+@@ -958,13 +989,26 @@
+ 		}
+ 		for (vm_map_offset_t off = 0; off < size && lines < 700; off += 65536) {
+ 			size_t len = (size - off) < 65536 ? (size_t)(size - off) : 65536;
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++			if (scanned >= (96ull << 20)) {
++				break;
++			}
++			/* Count failed copy attempts too; len is at most 64 KiB. */
++			scanned += len;
++#endif
+ 			if (copyin((user_addr_t)(base + off), buf, len) != 0) {
+ 				continue;
+ 			}
++#if defined(ARM64_BOARD_CONFIG_SWEET)
+ 			scanned += len;
++#endif
+ 			size_t start = 0;
+ 			int spaces = 0;
+-			for (size_t i = 0; i <= len; i++) {
++			for (size_t i = 0; i <= len
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++			    && lines < 700
++#endif
++			    ; i++) {
+ 				bool ok = i < len && ((unsigned char)buf[i] >= 0x20 && (unsigned char)buf[i] < 0x7f);
+ 				if (ok) {
+ 					spaces += buf[i] == ' ';
+@@ -990,6 +1034,17 @@
+ 	printf("STR done: %llu KiB scanned, %d strings\n", scanned >> 10, lines);
+ 	kfree_data(buf, 65536);
+ }
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++void marble_crash_strings(const char *name);
++void
++marble_crash_strings(const char *name)
++{
++	sweet_crash_strings(name);
++}
++#endif
++#endif /* SWEET || MARBLE heap strings */
++
++#if defined(ARM64_BOARD_CONFIG_SWEET)
+ /*
+  * SWEET process sampler (bsd/dev/sweet_sample.c): user pc/lr/sp and a frame
+  * pointer backtrace of every thread of a task, from the saved user state.
