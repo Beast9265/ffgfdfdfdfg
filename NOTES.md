@@ -24,8 +24,32 @@ CNTPCT comment actually calls CNTV hwclock. GIC real-header compile/preprocess
 PASS: timer27/SGI1/Group1 unchanged, zero group/priority MMIO. Other sections
 identical, git diff --check PASS. Artifacts /tmp/cntp-* and /tmp/gic-*.
 
-Next: authorized tools/marble-ci-build.sh commit/push/CI/package after staging
-only0082, this handoff and report. Exact new run/link/hashes pending.
+Milestone: source/docs committed and pushed as
+62b42e842515f6389732cb6ad30beaf460bc4a2e. Exact workflow run39724251384
+is building that commit with requested13.5/DEVELOPMENT/MARBLE/keep_going=true.
+Run39724251384 SUCCESS (build4m33s); exact xnu-kernel artifact downloaded to
+xnu/out-marble-ci-39724251384. Plain arm64 linked kernel verified: four
+executable sections scanned by instruction encoding, zero physical timer
+instructions; one CNTV_CTL MSR. fiq_context_init atfffffe000747b9d4 retains
+CNTV MSR atfffffe000747b9e0 and calls kprintf; old fault PC now ADD.
+Linked sparse-bootstrap audit PASS with actual3760-byte ADT;160-page arena,
+all aliases/stacks/tables/attributes/capacity verified. Exact ADT regenerated
+with unchanged generator (random seed/hash naturally regenerated).
+Payload cmdline debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam.
+BOARD=marble-xnu shim build PASS; stock marble-boot-backup-clean/boot_a.img
+repack PASS; boot-v4 inspect and independent post-write verification PASS.
+Final image16637952 bytes: shim/out/marble-xnu/latest-marble-xnu.img.
+SHA256 kernel650a50bf9e0e174f14ddf41111e11fd61760a318a2f48d6ef8009031fe9aea2b
+payload5562faacc4c8774909c13b37d4cf73b3096e158075b2bf47cd666d2b56743211
+boot2fc4b0b8d93c534c48a0b8cfecbf11c978f96b33e912369b14bc6945ce841365
+ADT1183df8745240237a022823da65c77a6d240d7d33c226f20d39bc45c8de40c98
+shim586713d3b4c5862f73443cb1e5f555e465a9ffa5f3e2662672d41fff1715ee05
+Hashes independently re-read after packaging. Full linked audit output
+/tmp/cntp-new-linked.txt, /tmp/cntp-linked-map.txt. Hardware result pending.
+Next user manual command:
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
+Final follow-up commit records results only; kernel provenance remains62b42e8. Old exact kernel instruction scan independently
+finds its sole physical timer instruction at user-reported PCfffffe000747b9e8.
 Stop at verified latest-marble-xnu.img; user manually boots. No device command.
 
 Earlier handoffs below are historical.

@@ -72,3 +72,27 @@ Local artifacts: /tmp/cntp-{MARBLE,SWEET}-{before,after}.i,
 Local clang differs from CI Apple clang. Exact CI link, image packaging and
 final hashes are recorded in NOTES.md after the automated workflow completes.
 No physical-device command is authorized or performed by automation.
+
+## Exact CI and package result
+
+Source commit `62b42e842515f6389732cb6ad30beaf460bc4a2e`, Actions
+[39724251384](https://github.com/Beast9265/ios-marble/actions/runs/39724251384)
+PASS. Artifact: xnu/out-marble-ci-39724251384/kernel.development.marble.
+All four executable sections scanned by physical timer instruction encoding:
+zero CNTP_CTL/TVAL/CVAL or CNTPCT instructions; one CNTV_CTL write.
+The same scanner against the old exact artifact detects its sole physical
+timer instruction precisely at the reported fault PC, validating the scanner.
+New linked fiq_context_init: CNTV MSR at `0xfffffe000747b9e0`, then kprintf;
+former fault PC now contains ADD. No physical timer access remains on any
+linked boot, resume or secondary path. Bootstrap-map audit also passes with
+actual 3760-byte ADT and 160-page arena. Boot-v4 repack/inspection and
+independent post-write boundaries/padding/component verification pass.
+
+SHA256:
+
+- Kernel: `650a50bf9e0e174f14ddf41111e11fd61760a318a2f48d6ef8009031fe9aea2b`
+- Payload: `5562faacc4c8774909c13b37d4cf73b3096e158075b2bf47cd666d2b56743211`
+- Boot image: `2fc4b0b8d93c534c48a0b8cfecbf11c978f96b33e912369b14bc6945ce841365`
+
+Final image: `shim/out/marble-xnu/latest-marble-xnu.img` (16,637,952 bytes).
+Hardware behavior remains untested by this automation. No device commands ran.
