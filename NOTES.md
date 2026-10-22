@@ -19,6 +19,8 @@ semantics unchanged.0082 and UFS/HFS/hardware source patches unchanged.
 Full replay0001..0081 + strict0082 PASS. MARBLE bsd_init real-header arm64
 object compile PASS (local reused flags need DRIVER_PRIVATE; modern host
 clang pointer diagnostic downgraded for existing mbuf_t header mismatch).
+Follow-up local compile using actual recovered CI flags PASS without diagnostic
+workaround: /tmp/internal-real-cc.py and internal-objects/bsd__kern__bsd_init.c.o.
 SWEET/BCM2837 preprocessed behavior identical before/after; generic panic
 retained. MARBLE adds only intended log/continue. UFS preprocessed read-only
 exclusions PASS; no WRITE10/sync/parser enabled. Exact CI compile pending.
@@ -38,6 +40,35 @@ Automated pipeline next: NO RAMDisk, rd=ufsroot0, no ufsrw/rootrw.
 No phone commands; destructive userdata flash requires user's later manual
 approval/action. DESTRUCTIVE USERDATA FLASH NOT PERFORMED.
 Preserve unrelated untracked docs/MARBLE_BOOTSTRAP_BREADCRUMBS.md.
+
+Exact build2c1db6651ae096df992ced36cd923b31d08c1036 / Actions39751769521
+SUCCESS; headSha independently verified. Fresh xnu/out-marble-ci-39751769521;
+artifact SHA256SUMS matches. Full CI bsd_init compile and link PASS. Pinned
+HFS retained. Full linked kernel zero undefined symbols; UFS/HFS linked;
+write/sync/persistent-log symbols absent. MARBLE unsealed-root string present,
+mount-time root-auth panic string absent.4 executable sections: zero physical
+CNTP instructions,one CNTV_CTL MSR. Exact payload all segments match kernel;
+no extra root segment/RAMDisk ADT property; PA01d84000; exact cmdline
+ debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam rd=ufsroot0
+No rootrw/ufsrw. Sparse bootstrap map/160-page allocator/aliases/stacks/tables
+PASS. Shim build, stock boot_a repack, inspect, independent header/bounds/
+padding/content/locator PASS. Boot17137664 bytes,no trailing bytes.
+Hashes independently reread:
+Kernel 031e0b79c9cb3f88bf5675d30cbb9ac22eb2b31b37d1059d381af6ee33f20205
+Payload dcf90a7ec79cb24368e01c2dcac312ffd02234c43b179aacb9e2a20f3237de78
+Boot 2b8450f3096c0f77a8512b59c557b82acca2747f6318356a953cfca1b99f0c17
+Root 467df791de4da04e157ac074852d82371d158d95ba45977b4bea9ede75feab7a
+Sparse 697789be8b0aaaa27dbaa6e85d282a2ca5d9aa9d379a3606e55b0351161f0e6a
+Final boot shim/out/marble-xnu/latest-marble-xnu.img; root/sparse paths above.
+Logs /tmp/marble-internal-{pipeline,ci}.log, /tmp/internal-final-audit.txt,
+/tmp/internal-linked-cntp.txt. Existing6 tests and UFS sense regression PASS
+(ASan/UBSan; leak detection off due sandbox ptrace limitation). diff checks PASS.
+No device commands. Internal HFS physical boot is pending later manual userdata
+placement; current Android userdata will still fail HFS as expected.
+DESTRUCTIVE USERDATA FLASH NOT PERFORMED.
+Documentation-only follow-up records results; kernel provenance stays above.
+Manual boot (after the user separately handles root placement):
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
 
 ## Active handoff: MARBLE UFS readiness classifier correction (2026-10-22)
 

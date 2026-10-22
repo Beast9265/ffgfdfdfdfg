@@ -278,3 +278,27 @@ CDB1b0000001000, request/completion/result, then TUR polling if ACTIVE succeeds.
 ACTIVE success remains stage-0 evidence only. No phone commands executed.
 Documentation follow-up does not change kernel provenance.
 Manual: fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
+
+## Verified first internal HFS boot artifacts
+
+Build commit `2c1db6651ae096df992ced36cd923b31d08c1036`;
+[Actions39751769521](https://github.com/Beast9265/ios-marble/actions/runs/39751769521)
+succeeded with exact headSha verified and fresh artifact checksum matching.
+Kernel `xnu/out-marble-ci-39751769521/kernel.development.marble`.
+Payload `shim/out/marble-xnu/marble-xnu.payload`.
+Boot `shim/out/marble-xnu/latest-marble-xnu.img`.
+
+```text
+kernel  031e0b79c9cb3f88bf5675d30cbb9ac22eb2b31b37d1059d381af6ee33f20205
+payload dcf90a7ec79cb24368e01c2dcac312ffd02234c43b179aacb9e2a20f3237de78
+boot    2b8450f3096c0f77a8512b59c557b82acca2747f6318356a953cfca1b99f0c17
+```
+
+Independent exact-payload/boot-v4 and sparse bootstrap mapping audits PASS.
+No RAMDisk; rd=ufsroot0; no ufsrw/rootrw. Linked MARBLE authentication diagnostic
+present, initial-root panic excluded. HFS/UFS linked, no undefined symbols;
+UFS write/sync/logger absent. No physical CNTP instructions; CNTV retained.
+Local actual CI-flag bsd_init real-header object compile also passed without
+the earlier reused-header diagnostic workaround. No phone commands executed.
+Internal HFS userspace boot awaits later user-managed destructive root placement.
+DESTRUCTIVE USERDATA FLASH NOT PERFORMED.
