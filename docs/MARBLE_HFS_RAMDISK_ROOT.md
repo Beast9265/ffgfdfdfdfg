@@ -59,7 +59,14 @@ python3 tools/mkmarble-test-root.py shim/out/marble-xnu/marble-init \
 ```
 
 Requires hfsprogs `mkfs.hfsplus`, `fsck.hfsplus`, and libdmg-hfsplus `hfsplus`.
-Override paths with `MKFS_HFSPLUS`, `FSCK_HFSPLUS`, `HFSPLUS`. No mount, sudo,
+Override paths with `MKFS_HFSPLUS`, `FSCK_HFSPLUS`, `HFSPLUS`. Local validation
+used rbrito/pkg-hfsprogs commit `1b7634dc22420d9e5b00b77962a58d29b851bfef`
+with its Debian patch series, clang/fcommon and obsolete sys/sysctl.h include
+removed (Linux calls are already excluded); and planetbeing/libdmg-hfsplus
+commit `7ac55ec64c96f7800d9818ce64c79670e7f02b67`. Local tool paths are
+`/tmp/marble-hfsprogs/{newfs_hfs.tproj/newfs_hfs,fsck_hfs.tproj/fsck_hfs}`
+and `/tmp/marble-libdmg/build/hfs/hfsplus`. These are host utilities, separate
+from the exact Apple kernel HFS revision above. No mount, sudo,
 block device or Apple userland is required. Builder refuses existing output,
 uses an exclusive temporary regular file and atomically installs the result.
 The pipeline regenerates this image after rebuilding init following CI download.
@@ -109,3 +116,31 @@ ufsrw, rd=ufsroot0, UFS driver changes or storage operations.
 Expected manual physical result: BSD root md0; HFS mounts MarbleRoot;
 `/sbin/launchd` executes; MARBLE PID 1 banner and sustained heartbeat.
 A host build/audit is not proof of that physical result.
+
+## Exact completed build
+
+Build commit `00e9810ed9f6b44768c781f2c5e56af8fefe9c55`;
+[Actions 39731873003](https://github.com/Beast9265/ios-marble/actions/runs/39731873003)
+succeeded. CI log confirms all 40 HFS units compiled and exact pinned staging.
+Linked kernel has zero undefined symbols and all HFS/MD5 provider symbols.
+Executable instruction scan: four sections, zero physical CNTP instructions,
+one CNTV_CTL MSR. Final exact map audit passes with RAMDisk
+`[0x842128000,0x843128000)`, ADT `0x843128000`, boot_args `0x84312c000`,
+top `0x843130000`, allocator `[0x843130000,0x8433b0000)`.
+Post-CI root regenerated identically, fsck and extracted init checks passed.
+Boot-v4 repack/inspect and independent post-write bytes/padding checks passed.
+
+```
+Kernel SHA256 721c31711460cebefc9dc0fca1adf9a02c78fce63c8b6aa7a267e3715168bd2a
+Test init SHA256 f39a3fad30988599af8ed3c2d4d882d21f59f6478113bff8edef458d1476b40b
+HFS root SHA256 467df791de4da04e157ac074852d82371d158d95ba45977b4bea9ede75feab7a
+Payload SHA256 871dfbfa40e96e9ac9d7453b1aaff973eeb5318ce16cd05c9aa9e70d0afb2f26
+Boot SHA256 00dc9f0fd6af2891ef15ac4e8dc26ffe53702fbe4b5330f66fbe70400e21420a
+```
+
+Final image: `shim/out/marble-xnu/latest-marble-xnu.img`.
+No device interaction; HFS physical result remains pending.
+
+```sh
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
+```

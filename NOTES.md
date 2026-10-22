@@ -27,8 +27,39 @@ Init f39a3fad30988599af8ed3c2d4d882d21f59f6478113bff8edef458d1476b40b
 HFS467df791de4da04e157ac074852d82371d158d95ba45977b4bea9ede75feab7a
 Preflight old-kernel HFS payload sparse-map/160-page arena/ADT/rd=md0 PASS.
 Existing6 tests PASS; shell syntax/diff checks PASS. /tmp/hfs-* holds audits.
-Next: commit/push exact MARBLE CI, full link and final image audits/hashes.
+Build commit00e9810ed9f6b44768c781f2c5e56af8fefe9c55 pushed origin marble.
+Exact Actions39731873003 completed SUCCESS with13.5/DEVELOPMENT/MARBLE/keep_going=true.
+Final link/package audits and hashes recorded below.
 No phone commands. HFS physical boot remains pending user's manual test.
+
+Exact build00e9810ed9f6b44768c781f2c5e56af8fefe9c55 / Actions39731873003
+SUCCESS, headSha independently verified; fresh artifact xnu/out-marble-ci-39731873003.
+CI log verifies pinned staging and all40 HFS compile commands; full kernel has
+zero undefined symbols, linked HFS registration/getvoluuid and portable MD5.
+Four executable sections: zero physical CNTP instructions, one CNTV_CTL MSR.
+Post-CI init rebuilt unchanged;16MiB HFSX rebuilt same hash, fsck -fn twice OK,
+independent launchd extraction exact, catalog root:wheel0755 verified.
+Exact payload/map PASS: RAMDisk[842128000,843128000), ADT843128000,
+boot_args84312c000, top843130000;160-page arena ends8433b0000. Sparse map,
+owned tail, aliases, stacks, tables and allocator capacity PASS. No hardware
+source changes; timer27/SGI1/GIC/MMU protections retained.
+BOARD=marble-xnu and stock boot_a repack/inspect PASS; independent post-write
+header/boundary/padding/shim/payload verification PASS, no trailing bytes.
+Kernel SHA256 721c31711460cebefc9dc0fca1adf9a02c78fce63c8b6aa7a267e3715168bd2a
+Test init SHA256 f39a3fad30988599af8ed3c2d4d882d21f59f6478113bff8edef458d1476b40b
+HFS root SHA256 467df791de4da04e157ac074852d82371d158d95ba45977b4bea9ede75feab7a
+Payload SHA256 871dfbfa40e96e9ac9d7453b1aaff973eeb5318ce16cd05c9aa9e70d0afb2f26
+Boot SHA256 00dc9f0fd6af2891ef15ac4e8dc26ffe53702fbe4b5330f66fbe70400e21420a
+Final image shim/out/marble-xnu/latest-marble-xnu.img; hashes independently reread
+and CI kernel SHA256SUMS verified. Logs /tmp/marble-hfs-{pipeline,ci}.log,
+/tmp/hfs-{final-map,linked-cntp,linked-symbols,linked-undefined}.txt.
+No phone/device commands, UFS/physical-storage changes or real iOS userspace.
+HFS physical mount/PID1 is pending manual observation; only mockfs PID1 has
+physical proof. Documentation follow-up does not change kernel provenance.
+Next manual command:
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
+Expected: mockfs declines non-Mach-O, hfs mounts MarbleRoot, /sbin/launchd,
+MARBLE PID1 banner and sustained heartbeat. Preserve unrelated breadcrumb doc.
 
 Earlier handoffs below are historical.
 
