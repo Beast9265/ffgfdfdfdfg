@@ -2,6 +2,27 @@
 
 
 
+## Active handoff: MARBLE cache-coherency experiment (2026-10-22)
+
+User physically reports ALL pre-MMU checks green, E/E2 visible, F/sync-red
+absent. New single MARBLE cold-only IVAC loop in 0082 start.s before E:
+[x23 actual adjusted Mach-O header PA, boot_args->topOfKernelData), start
+rounded down to CTR_EL0 DminLine; DSB SY/IC IALLU/DSB SY/ISB; cyan completion
+tile x384,y2272. No existing transition values/layout/checks/tiles changed.
+Exact source/range proof/register audit/shim comparison and results:
+docs/MARBLE_CACHE_EXPERIMENT.md. Hypothesis remains unproven; no new boot.
+
+Observed: full 0001..0081 reverse/replay, strict 0082 check/apply, complete
+MARBLE preprocessing/arm64 Mach-O assembly with real headers pass. SWEET
+start.s byte-identical; unrelated patch sections identical; original source
+recovered exactly by removing new block. RAM range/rounding audit passes;
+zero MARBLE GICR_IPRIORITYR references; cold OSLAR still skipped; diff check
+passes. Local clang, no full new link. Safe for diagnostic Actions build.
+No new CI run/ID, device operation, commit or push (explicitly prohibited).
+Next: review then separately build and obtain completion/E/E2/F/red results.
+Artifacts /tmp/cache-{before.patch,before-start.s,verify.py,audit.py},
+/tmp/mmu-start.{s,macros,o}, /tmp/marble-mmu-tree. Earlier handoffs historical.
+
 ## Active handoff: MARBLE SCTLR transition diagnostic (2026-10-22)
 
 User physical observation supersedes prior handoff: initial cyan/green/white and

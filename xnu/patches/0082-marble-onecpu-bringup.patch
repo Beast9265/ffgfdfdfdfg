@@ -903,7 +903,7 @@ diff --git a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
 diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
 --- a/osfmk/arm64/start.s
 +++ b/osfmk/arm64/start.s
-@@ -1,964 +1,1256 @@
+@@ -1,964 +1,1286 @@
  /*
   * Copyright (c) 2007-2022 Apple Inc. All rights reserved.
   *
@@ -2496,6 +2496,36 @@ diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
 +	PAC_INIT_KEY_STATE tmp=x0, tmp2=x1
  #endif /* HAS_APPLE_PAC */
 -
++
++#if defined(MARBLE)
++ /* Cold boot only: loader RAM writes and bootstrap tables are authoritative.
++  * x23 is the adjusted Mach-O header PA; topOfKernelData is exclusive and
++  * includes the ADT and boot_args page. Both lie in loader-validated RAM.
++  * x9-x13/NZCV are dead here; preserve x20-x26, LR and both stacks.
++  * Never clean stale ABL lines back over the freshly written image. */
++ cbnz x21, Lmarble_cache_done
++ mov x9, x23
++ ldr x10, [x20, BA_TOP_OF_KERNEL_DATA]
++ mrs x11, CTR_EL0
++ ubfx x11, x11, #16, #4
++ mov x12, #4
++ lsl x11, x12, x11
++ sub x12, x11, #1
++ bic x9, x9, x12
++Lmarble_cache_invalidate:
++ cmp x9, x10
++ b.hs Lmarble_cache_complete
++ dc ivac, x9
++ add x9, x9, x11
++ b Lmarble_cache_invalidate
++Lmarble_cache_complete:
++ dsb sy
++ ic iallu
++ dsb sy
++ isb
++ MARBLE_BOOT_MARK cache, 384, 0xff00ffff, 2272
++Lmarble_cache_done:
++#endif
 +
 -	// Enable caches, MMU, ROP and JOP
 +	// Enable caches, MMU, ROP and JOP
