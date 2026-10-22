@@ -10711,7 +10711,18 @@ diff --git a/osfmk/kern/zalloc.c b/osfmk/kern/zalloc.c
 diff --git a/iokit/Kernel/IOService.cpp b/iokit/Kernel/IOService.cpp
 --- a/iokit/Kernel/IOService.cpp
 +++ b/iokit/Kernel/IOService.cpp
-@@ -5131,15 +5131,15 @@
+@@ -5128,18 +5128,24 @@
+-	iomediaClass = OSMetaClass::getMetaClassWithName(gIOMediaKey);
++	iomediaClass = OSMetaClass::getMetaClassWithName(gIOMediaKey);
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++	if (!iomediaClass) {
++		IOLog("MARBLE ROOT: no IOMedia class, skip hidden-media publish\n");
++		return;
++	}
++#endif
+ #if !defined(ARM64_BOARD_CONFIG_SWEET)
+-	assert(iomediaClass);
++	assert(iomediaClass);
  #endif
 
 -	LOCKWRITENOTIFY();
@@ -10738,7 +10749,7 @@ diff --git a/iokit/Kernel/IOService.cpp b/iokit/Kernel/IOService.cpp
 -	}
 +	}
  #endif
-@@ -5186,14 +5186,14 @@
+@@ -5186,14 +5192,14 @@
  {
 -	const OSMetaClass * ioblockstoragedriverClass;
 +	const OSMetaClass * ioblockstoragedriverClass;

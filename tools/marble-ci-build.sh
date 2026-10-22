@@ -206,6 +206,13 @@ python3 tools/mkadt.py \
 echo
 echo "== Build XNU payload =="
 
+# Rebuild the known diagnostic root after CI, before embedding its bytes.
+if [[ "$RAMDISK" == "$(pwd)/shim/out/marble-xnu/marble-init" ]]; then
+    clang -target arm64-apple-ios16.0 -DMARBLE_INIT -c tools/sweet-init.S \
+        -o shim/out/marble-xnu/marble-init.o
+    python3 tools/mkinit.py shim/out/marble-xnu/marble-init.o "$RAMDISK"
+fi
+
 python3 tools/mkpayload.py \
     "$KERNEL" \
     shim/out/marble-xnu/marble.adt \

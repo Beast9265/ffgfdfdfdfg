@@ -1,9 +1,22 @@
 # MARBLE diagnostic RAMDisk root
 
-Physical baseline (user observation, 2026-10-22): normal XNU/BSD initialization,
-Skywalk self-tests PASSED, bsd_autoconf/kinit, lo0/gif0/stf0 and `!BSD`, then
-IOFindBSDRoot waits for IOMedia/Apple_HFS. No panic. MARBLE has reached the root
-filesystem boundary. PID 1 with the new image remains a physical test.
+Physical run (user observation, 2026-10-22), source
+899bfb1f59c66e9091d5bd16376899ac66aec219, Actions 39728864936:
+
+- RAMDisk discovery PASS
+- md0 creation PASS
+- BSD root md0 PASS
+- setRootMedia entered PASS
+- publishHiddenMedia FAIL: missing IOMedia class assertion at IOService.cpp:5130
+
+Kernel SHA256: 55f32622881732e32aa488283930d3c678425d1c005df25f5a1d974535f22026
+Init/root: f39a3fad30988599af8ed3c2d4d882d21f59f6478113bff8edef458d1476b40b
+Payload: fa98545b33b3ec474aeba86e51c06a416160039a584309c81d0973d017bf5d45
+Boot: 54f4375a0e0d83eb48ccdd4e736e5b977e670c34e92e95b78cae4d8e0b88a277
+
+The new MARBLE-only guard returns immediately after a missing IOMedia lookup,
+before the existing assertion. SWEET behavior is preserved. This correction's
+physical behavior remains untested; mockfs mount and PID 1 are not yet proven.
 
 ## Root format and source audit
 
@@ -18,7 +31,8 @@ mdevlookup(0), bypassing IOMedia matching. It still calls setRootMedia.
 Like SWEET, MARBLE supplies no IOStorageFamily/IOBlockStorageDriver/IOMedia.
 0082 extends only the two existing absent-class compatibility guards in
 IOService.cpp to SWEET || MARBLE: setRootMedia's block-driver lookup and
-publishHiddenMedia's IOMedia lookup. Other SWEET guards, notably UFS, are
+publishHiddenMedia's later IOMedia handling. The new early MARBLE return fixes
+the assertion preceding that later handling. Other SWEET guards, notably UFS, are
 unchanged. Patch 0024 is already board-independent: virtual memory devices
 use device I/O rather than treating a virtual page number as physical memory.
 Its physical-page conversion stays 4K independent of kernel PAGE_SHIFT.
@@ -84,6 +98,7 @@ MARBLE ROOT: RAMDisk property present
 Added memory device md0
 BSD root: md0, major 1, minor 0
 MARBLE ROOT: setRootMedia begin
+MARBLE ROOT: no IOMedia class, skip hidden-media publish
 MARBLE ROOT: setRootMedia complete
 MARBLE ROOT: mockfs mount begin
 MARBLE ROOT: mockfs mount result 0
@@ -126,3 +141,23 @@ No physical phone commands are part of this workflow. Boot manually only:
 ```sh
 fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
 ```
+
+## Missing-IOMedia correction audit
+
+setRootMedia finds no IOBlockStorageDriver class, sets root NULL, skips its
+provider loop, records NULL as root parent and calls publishHiddenMedia(NULL)
+when unhide is true. Missing IOMedia now logs and returns before locks, instance
+iteration or assertion; setRootMedia then returns. Existing SWEET compatibility
+and the later missing-class guard are retained. IOFindBSDRoot's md0 branch
+bypasses IOMedia matching. vfs_mountroot and mockfs use vnode/device operations;
+no additional immediately reached storage-family metaclass assertion was found.
+
+Validation: full replay 0001..0081, strict 0082, real-header MARBLE IOService.cpp
+compile; preprocessing proves return before assertion. Object has CBZ after
+getMetaClassWithName to the log/return path. Non-MARBLE assertion conditional
+is unchanged (SWEET already excluded it). SWEET preprocessing is equivalent
+except shifted __LINE__ values; raw byte identity was not obtained. Only this
+six-line guard changes generated XNU source; mockfs, rd=md0, init/root bytes,
+bootstrap, timer27/SGI1/GIC protections remain unchanged. The helper rebuilds
+the known static test init after CI before packaging. Exact linked kernel and
+payload checks are repeated after CI; no physical phone command is automated.

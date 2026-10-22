@@ -2,6 +2,29 @@
 
 
 
+## Active handoff: MARBLE missing IOMedia correction (2026-10-22)
+
+User physical run899bfb1f59c66e9091d5bd16376899ac66aec219 / Actions39728864936:
+RAMDisk discovery PASS; md0 creation PASS; BSD root md0 PASS;
+setRootMedia entered PASS; publishHiddenMedia FAIL: missing IOMedia class
+assertion IOService.cpp:5130. Exact hashes recorded in docs/MARBLE_RAMDISK_ROOT.md
+and prior handoff below. This is user evidence, not an independent device test.
+
+0082 adds only MARBLE early missing-IOMedia log/return before assertion.
+Existing missing IOBlockStorageDriver handling retained: root NULL, unhide,
+publishHiddenMedia(NULL), safe return. Immediate root/vfs/mockfs audit found no
+further required storage-class assertion. No hardware/UFS/mockfs/init changes.
+Helper now rebuilds known MARBLE static init after exact CI download.
+Local PASS: full replay0001..0081 + strict0082, real-header MARBLE IOService.cpp
+compile, preprocessing/object null branch log/return before assertion; SWEET
+preprocessing equivalent except __LINE__, existing non-MARBLE assertion intact.
+Other generated XNU source unchanged; timer27/SGI1/GIC protections unchanged.
+Artifacts /tmp/iomedia-*; exact linked CNTP/map/root audits pending new CI.
+Next: commit/push/exact MARBLE CI and RAMDisk packaging with rd=md0; record
+run and hashes. No phone commands. Physical mockfs/PID1 remains unproven.
+
+Earlier handoffs below are historical.
+
 ## Active handoff: MARBLE mockfs RAMDisk PID 1 (2026-10-22)
 
 User physical observation of latest boot: Skywalk self-tests PASSED, BSD
