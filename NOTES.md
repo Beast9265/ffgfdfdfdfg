@@ -2,6 +2,45 @@
 
 
 
+## Active handoff: MARBLE zone hang diagnostics (2026-10-22)
+
+User physically booted CNTP-fix commit62b42e842515f6389732cb6ad30beaf460bc4a2e,
+Actions39724251384 (kernel650a50bf9e0e174f14ddf41111e11fd61760a318a2f48d6ef8009031fe9aea2b,
+payload5562faacc4c8774909c13b37d4cf73b3096e158075b2bf47cd666d2b56743211,
+boot2fc4b0b8d93c534c48a0b8cfecbf11c978f96b33e912369b14bc6945ce841365).
+CNTP skip PASS. MMU/GIC/CNTV/VM/IOKit/scheduler/security/platform expert/CPU0
+registration and SGI1 PASS: "MARBLE CPU: boot CPU 0 registered, SGI1 verified,
+initialization complete". User reports hard hang after visible map RO, >1 minute,
+no panic/reboot. Earlier GEN0..DATA/metadata/VM bootstrap lines also visible.
+These are user observations, not an independent physical test this session.
+
+Exact source: zone_init has ONE startup-table registration, normally before
+IOKit/clock_init. No normal second-entry call path found. fbcon wraps rows,
+does not scroll; photograph vertical order cannot establish execution order.
+processor_start(master) explicitly invokes cpu_machine_init, no new idle/startup
+thread, reset jump or startup dispatcher. Current SWEET0065 MOVED the call to
+startAll, still includes CPU0. Upstream AppleARMSMP initial start loop likewise
+calls processor_start for all CPUs. Retain MARBLE call; no CPU fix justified.
+
+0082 appends only MARBLE zalloc diagnostics: static per-boot invocation counter,
+entry/completion generations, submap entry plus before/after early-map register,
+kmem_suballoc, guard1, guard2 and completion; metadata boundary. Existing timer_cnt
+printed t= (includes software SIGPdec handling, NOT exclusive CNTV IRQ proof).
+Normal zone_init precedes clock_init, so t=0 is plausible. No allocator behavior
+or baseline mapping/timer/GIC/ADT/loader/UFS/CPU-count changes. Detailed audit,
+expected sequence and stopping-point interpretation: docs/MARBLE_ZONE_HANG.md.
+
+Local PASS:81 reverse/replay + strict0082 check/apply; real-header MARBLE zalloc.c
+Mach-O compile; SWEET full preprocessing byte-identical including __LINE__;
+all old0082 sections identical; physical timer absent in relevant preprocessing/
+object; timer27/SGI1/Group1 unchanged and zero GICR group/priority MMIO;
+zalloc object inspection; diff check. /tmp/zone-* contains validation artifacts.
+Next: stage intentional patch/report/NOTES only, run automated exact-commit
+MARBLE helper, verify linked kernel/packaging/hashes, record results here.
+No physical-device interaction; final image must be booted manually by user.
+
+Earlier handoffs below are historical.
+
 ## Active handoff: MARBLE CNTP trap (2026-10-22)
 
 User exact physical run39723141106 / commit27eba3872b069658c5e109a4d59790aea2725d03

@@ -10024,3 +10024,687 @@ diff --git a/pexpert/pexpert/arm64/board_config.h b/pexpert/pexpert/arm64/board_
  #ifdef ARM64_BOARD_CONFIG_VMAPPLE
  #include <pexpert/arm64/VMAPPLE.h>
  
+diff --git a/osfmk/kern/zalloc.c b/osfmk/kern/zalloc.c
+--- a/osfmk/kern/zalloc.c
++++ b/osfmk/kern/zalloc.c
+@@ -56,50 +56,54 @@
+ /*
+  */
+ /*
+  *	File:	kern/zalloc.c
+  *	Author:	Avadis Tevanian, Jr.
+  *
+  *	Zone-based memory allocator.  A zone is a collection of fixed size
+  *	data blocks for which quick allocation/deallocation is possible.
+  */
+-
++
+ #define ZALLOC_ALLOW_DEPRECATED 1
+ #if !ZALLOC_TEST
+ #include <mach/mach_types.h>
+ #include <mach/vm_param.h>
+ #include <mach/kern_return.h>
+ #include <mach/mach_host_server.h>
+ #include <mach/task_server.h>
+ #include <mach/machine/vm_types.h>
+ #include <machine/machine_routines.h>
+ #include <mach/vm_map.h>
+ #include <mach/sdt.h>
+ #if __x86_64__
+ #include <i386/cpuid.h>
+ #endif
+-
++
++#if defined(MARBLE)
++#include <arm/cpu_data_internal.h>
++#endif
++#line 81
+ #include <kern/bits.h>
+ #include <kern/btlog.h>
+ #include <kern/startup.h>
+ #include <kern/kern_types.h>
+ #include <kern/assert.h>
+ #include <kern/backtrace.h>
+ #include <kern/host.h>
+ #include <kern/macro_help.h>
+ #include <kern/sched.h>
+ #include <kern/locks.h>
+ #include <kern/sched_prim.h>
+ #include <kern/misc_protos.h>
+ #include <kern/thread_call.h>
+ #include <kern/zalloc_internal.h>
+ #include <kern/kalloc.h>
+ #include <kern/debug.h>
+-
++
+ #include <prng/random.h>
+-
++
+ #include <vm/pmap.h>
+ #include <vm/vm_map.h>
+ #include <vm/vm_kern.h>
+ #include <vm/vm_page.h>
+ #include <vm/vm_pageout.h>
+ #include <vm/vm_compressor.h> /* C_SLOT_PACKED_PTR* */
+@@ -9747,146 +9751,195 @@
+ #endif
+-
++
+-	if (zone_map_jetsam_limit == 0 || zone_map_jetsam_limit > 100) {
++	if (zone_map_jetsam_limit == 0 || zone_map_jetsam_limit > 100) {
+-		zone_map_jetsam_limit = ZONE_MAP_JETSAM_LIMIT_DEFAULT;
++		zone_map_jetsam_limit = ZONE_MAP_JETSAM_LIMIT_DEFAULT;
+-	}
++	}
+-	if (PE_parse_boot_argn("wdt", &wdt, sizeof(wdt)) && wdt == -1 &&
++	if (PE_parse_boot_argn("wdt", &wdt, sizeof(wdt)) && wdt == -1 &&
+-	    !PE_parse_boot_argn("zet", NULL, 0)) {
++	    !PE_parse_boot_argn("zet", NULL, 0)) {
+-		zone_exhausted_timeout = -1;
++		zone_exhausted_timeout = -1;
+-	}
++	}
+ }
+ STARTUP(TUNABLES, STARTUP_RANK_MIDDLE, zone_tunables_fixup);
+-
++
+ __startup_func
+ static void
+ zone_submap_init(
+-	mach_vm_offset_t       *submap_min,
++	mach_vm_offset_t       *submap_min,
+-	zone_submap_idx_t       idx,
++	zone_submap_idx_t       idx,
+-	uint64_t                zone_sub_map_numer,
++	uint64_t                zone_sub_map_numer,
+-	uint64_t               *remaining_denom,
++	uint64_t               *remaining_denom,
+-	vm_offset_t            *remaining_size)
++	vm_offset_t            *remaining_size)
+ {
+-	vm_map_create_options_t vmco;
++	vm_map_create_options_t vmco;
+-	vm_map_address_t addr;
++	vm_map_address_t addr;
+-	vm_offset_t submap_start, submap_end;
++	vm_offset_t submap_start, submap_end;
+-	vm_size_t submap_size;
++	vm_size_t submap_size;
+-	vm_map_t  submap;
++	vm_map_t  submap;
+-	vm_prot_t prot = VM_PROT_DEFAULT;
++	vm_prot_t prot = VM_PROT_DEFAULT;
+-	vm_prot_t prot_max = VM_PROT_ALL;
++	vm_prot_t prot_max = VM_PROT_ALL;
+-	kern_return_t kr;
++	kern_return_t kr;
+-
++
++#if defined(MARBLE)
++	kprintf("MARBLE ZONE: %s enter t=%llu\n", zone_submaps_names[idx],
++	    (unsigned long long)getCpuDatap()->cpu_stat.timer_cnt);
++#endif
++#line 9777
+-	submap_size = trunc_page(zone_sub_map_numer * *remaining_size /
++	submap_size = trunc_page(zone_sub_map_numer * *remaining_size /
+-	    *remaining_denom);
++	    *remaining_denom);
+-	submap_start = *submap_min;
++	submap_start = *submap_min;
+-
++
+-	if (idx == Z_SUBMAP_IDX_READ_ONLY) {
++	if (idx == Z_SUBMAP_IDX_READ_ONLY) {
+-		vm_offset_t submap_padding = pmap_ro_zone_align(submap_start) - submap_start;
++		vm_offset_t submap_padding = pmap_ro_zone_align(submap_start) - submap_start;
+-		submap_start += submap_padding;
++		submap_start += submap_padding;
+-		submap_size = pmap_ro_zone_align(submap_size);
++		submap_size = pmap_ro_zone_align(submap_size);
+-		assert(*remaining_size >= (submap_padding + submap_size));
++		assert(*remaining_size >= (submap_padding + submap_size));
+-		*remaining_size -= submap_padding;
++		*remaining_size -= submap_padding;
+-		*submap_min = submap_start;
++		*submap_min = submap_start;
+-	}
++	}
+-
++
+-	submap_end = submap_start + submap_size;
++	submap_end = submap_start + submap_size;
+-	if (idx == Z_SUBMAP_IDX_VM) {
++	if (idx == Z_SUBMAP_IDX_VM) {
+-		vm_packing_verify_range("vm_compressor",
++		vm_packing_verify_range("vm_compressor",
+-		    submap_start, submap_end, VM_PACKING_PARAMS(C_SLOT_PACKED_PTR));
++		    submap_start, submap_end, VM_PACKING_PARAMS(C_SLOT_PACKED_PTR));
+-		vm_packing_verify_range("vm_page",
++		vm_packing_verify_range("vm_page",
+-		    submap_start, submap_end, VM_PACKING_PARAMS(VM_PAGE_PACKED_PTR));
++		    submap_start, submap_end, VM_PACKING_PARAMS(VM_PAGE_PACKED_PTR));
+-	}
++	}
+-
++
+-	vmco = VM_MAP_CREATE_NEVER_FAULTS;
++	vmco = VM_MAP_CREATE_NEVER_FAULTS;
+-	if (!zone_submap_is_sequestered(idx)) {
++	if (!zone_submap_is_sequestered(idx)) {
+-		vmco |= VM_MAP_CREATE_DISABLE_HOLELIST;
++		vmco |= VM_MAP_CREATE_DISABLE_HOLELIST;
+-	}
++	}
+-
++
++#if defined(MARBLE)
++	kprintf("MARBLE ZONE: %s %s t=%llu\n", zone_submaps_names[idx],
++	    "early >", (unsigned long long)getCpuDatap()->cpu_stat.timer_cnt);
++#endif
++#line 9803
+-	vm_map_will_allocate_early_map(&zone_submaps[idx]);
++	vm_map_will_allocate_early_map(&zone_submaps[idx]);
++#if defined(MARBLE)
++	kprintf("MARBLE ZONE: %s %s t=%llu\n", zone_submaps_names[idx],
++	    "early <", (unsigned long long)getCpuDatap()->cpu_stat.timer_cnt);
++#endif
++#line 9804
++#if defined(MARBLE)
++	kprintf("MARBLE ZONE: %s %s t=%llu\n", zone_submaps_names[idx],
++	    "suballoc >", (unsigned long long)getCpuDatap()->cpu_stat.timer_cnt);
++#endif
++#line 9804
+-	submap = kmem_suballoc(kernel_map, submap_min, submap_size, vmco,
++	submap = kmem_suballoc(kernel_map, submap_min, submap_size, vmco,
+-	    VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, KMS_PERMANENT | KMS_NOFAIL,
++	    VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, KMS_PERMANENT | KMS_NOFAIL,
+-	    VM_KERN_MEMORY_ZONE).kmr_submap;
++	    VM_KERN_MEMORY_ZONE).kmr_submap;
+-
++#if defined(MARBLE)
++	kprintf("MARBLE ZONE: %s %s t=%llu\n", zone_submaps_names[idx],
++	    "suballoc <", (unsigned long long)getCpuDatap()->cpu_stat.timer_cnt);
++#endif
++#line 9808
+-	if (idx == Z_SUBMAP_IDX_READ_ONLY) {
++	if (idx == Z_SUBMAP_IDX_READ_ONLY) {
+-		zone_info.zi_ro_range.min_address = submap_start;
++		zone_info.zi_ro_range.min_address = submap_start;
+-		zone_info.zi_ro_range.max_address = submap_end;
++		zone_info.zi_ro_range.max_address = submap_end;
+-		prot_max = prot = VM_PROT_NONE;
++		prot_max = prot = VM_PROT_NONE;
+-	}
++	}
+-
++
+-	addr = submap_start;
++	addr = submap_start;
++#if defined(MARBLE)
++	kprintf("MARBLE ZONE: %s %s t=%llu\n", zone_submaps_names[idx],
++	    "guard1 >", (unsigned long long)getCpuDatap()->cpu_stat.timer_cnt);
++#endif
++#line 9815
+-	kr = vm_map_enter(submap, &addr, ZONE_GUARD_SIZE / 2, 0,
++	kr = vm_map_enter(submap, &addr, ZONE_GUARD_SIZE / 2, 0,
+-	    VM_MAP_KERNEL_FLAGS_FIXED_PERMANENT(.vm_tag = VM_KERN_MEMORY_ZONE),
++	    VM_MAP_KERNEL_FLAGS_FIXED_PERMANENT(.vm_tag = VM_KERN_MEMORY_ZONE),
+-	    kernel_object, addr, FALSE, prot, prot_max, VM_INHERIT_NONE);
++	    kernel_object, addr, FALSE, prot, prot_max, VM_INHERIT_NONE);
++#if defined(MARBLE)
++	kprintf("MARBLE ZONE: %s %s t=%llu\n", zone_submaps_names[idx],
++	    "guard1 <", (unsigned long long)getCpuDatap()->cpu_stat.timer_cnt);
++#endif
++#line 9818
+-	if (kr != KERN_SUCCESS) {
++	if (kr != KERN_SUCCESS) {
+-		panic("ksubmap[%s]: failed to make first entry (%d)",
++		panic("ksubmap[%s]: failed to make first entry (%d)",
+-		    zone_submaps_names[idx], kr);
++		    zone_submaps_names[idx], kr);
+-	}
++	}
+-
++
+-	addr = submap_end - ZONE_GUARD_SIZE / 2;
++	addr = submap_end - ZONE_GUARD_SIZE / 2;
++#if defined(MARBLE)
++	kprintf("MARBLE ZONE: %s %s t=%llu\n", zone_submaps_names[idx],
++	    "guard2 >", (unsigned long long)getCpuDatap()->cpu_stat.timer_cnt);
++#endif
++#line 9824
+-	kr = vm_map_enter(submap, &addr, ZONE_GUARD_SIZE / 2, 0,
++	kr = vm_map_enter(submap, &addr, ZONE_GUARD_SIZE / 2, 0,
+-	    VM_MAP_KERNEL_FLAGS_FIXED_PERMANENT(.vm_tag = VM_KERN_MEMORY_ZONE),
++	    VM_MAP_KERNEL_FLAGS_FIXED_PERMANENT(.vm_tag = VM_KERN_MEMORY_ZONE),
+-	    kernel_object, addr, FALSE, prot, prot_max, VM_INHERIT_NONE);
++	    kernel_object, addr, FALSE, prot, prot_max, VM_INHERIT_NONE);
++#if defined(MARBLE)
++	kprintf("MARBLE ZONE: %s %s t=%llu\n", zone_submaps_names[idx],
++	    "guard2 <", (unsigned long long)getCpuDatap()->cpu_stat.timer_cnt);
++#endif
++#line 9827
+-	if (kr != KERN_SUCCESS) {
++	if (kr != KERN_SUCCESS) {
+-		panic("ksubmap[%s]: failed to make last entry (%d)",
++		panic("ksubmap[%s]: failed to make last entry (%d)",
+-		    zone_submaps_names[idx], kr);
++		    zone_submaps_names[idx], kr);
+-	}
++	}
+-
++
+ #if DEBUG || DEVELOPMENT
+-	printf("zone_init: map %-5s %p:%p (%u%c)\n",
++	printf("zone_init: map %-5s %p:%p (%u%c)\n",
+-	    zone_submaps_names[idx], (void *)submap_start, (void *)submap_end,
++	    zone_submaps_names[idx], (void *)submap_start, (void *)submap_end,
+-	    mach_vm_size_pretty(submap_size), mach_vm_size_unit(submap_size));
++	    mach_vm_size_pretty(submap_size), mach_vm_size_unit(submap_size));
+ #endif /* DEBUG || DEVELOPMENT */
+-
++
+-	zone_submaps[idx] = submap;
++	zone_submaps[idx] = submap;
+-	*submap_min       = submap_end;
++	*submap_min       = submap_end;
+-	*remaining_size  -= submap_size;
++	*remaining_size  -= submap_size;
+-	*remaining_denom -= zone_sub_map_numer;
++	*remaining_denom -= zone_sub_map_numer;
++#if defined(MARBLE)
++	kprintf("MARBLE ZONE: %s %s t=%llu\n", zone_submaps_names[idx],
++	    "complete", (unsigned long long)getCpuDatap()->cpu_stat.timer_cnt);
++#endif
++#line 9842
+ }
+-
++
+ static inline void
+ zone_pva_relocate(zone_pva_t *pva, uint32_t delta)
+ {
+-	if (!zone_pva_is_null(*pva) && !zone_pva_is_queue(*pva)) {
++	if (!zone_pva_is_null(*pva) && !zone_pva_is_queue(*pva)) {
+-		pva->packed_address += delta;
++		pva->packed_address += delta;
+-	}
++	}
+ }
+-
++
+ /*
+  * Allocate metadata array and migrate bootstrap initial metadata and memory.
+  */
+ __startup_func
+ static void
+ zone_metadata_init(void)
+ {
+-	vm_map_t vm_map = zone_submaps[Z_SUBMAP_IDX_VM];
++	vm_map_t vm_map = zone_submaps[Z_SUBMAP_IDX_VM];
+-	vm_map_entry_t first;
++	vm_map_entry_t first;
+-
++
+-	struct mach_vm_range meta_r, bits_r, xtra_r, early_r;
++	struct mach_vm_range meta_r, bits_r, xtra_r, early_r;
+-	vm_size_t early_sz;
++	vm_size_t early_sz;
+-	vm_offset_t reloc_base;
++	vm_offset_t reloc_base;
+-
++
+-	/*
++	/*
+-	 * Step 1: Allocate the metadata + bitmaps range
++	 * Step 1: Allocate the metadata + bitmaps range
+-	 *
++	 *
+-	 * Allocations can't be smaller than 8 bytes, which is 128b / 16B per 1k
++	 * Allocations can't be smaller than 8 bytes, which is 128b / 16B per 1k
+-	 * of physical memory (16M per 1G).
++	 * of physical memory (16M per 1G).
+-	 *
++	 *
+-	 * Let's preallocate for the worst to avoid weird panics.
++	 * Let's preallocate for the worst to avoid weird panics.
+-	 */
++	 */
+-	vm_map_will_allocate_early_map(&zone_meta_map);
++	vm_map_will_allocate_early_map(&zone_meta_map);
+-	meta_r = zone_kmem_suballoc(zone_info.zi_meta_range.min_address,
++	meta_r = zone_kmem_suballoc(zone_info.zi_meta_range.min_address,
+-	    zone_meta_size + zone_bits_size + zone_xtra_size,
++	    zone_meta_size + zone_bits_size + zone_xtra_size,
+-	    VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE,
++	    VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE,
+-	    VM_KERN_MEMORY_ZONE, &zone_meta_map);
++	    VM_KERN_MEMORY_ZONE, &zone_meta_map);
+-	meta_r.min_address += ZONE_GUARD_SIZE;
++	meta_r.min_address += ZONE_GUARD_SIZE;
+-	meta_r.max_address -= ZONE_GUARD_SIZE;
++	meta_r.max_address -= ZONE_GUARD_SIZE;
+-	if (zone_xtra_size) {
++	if (zone_xtra_size) {
+-		xtra_r.max_address  = meta_r.max_address;
++		xtra_r.max_address  = meta_r.max_address;
+-		meta_r.max_address -= zone_xtra_size;
++		meta_r.max_address -= zone_xtra_size;
+-		xtra_r.min_address  = meta_r.max_address;
++		xtra_r.min_address  = meta_r.max_address;
+-	} else {
++	} else {
+-		xtra_r.min_address  = xtra_r.max_address = 0;
++		xtra_r.min_address  = xtra_r.max_address = 0;
+-	}
++	}
+-	bits_r.max_address  = meta_r.max_address;
++	bits_r.max_address  = meta_r.max_address;
+-	meta_r.max_address -= zone_bits_size;
++	meta_r.max_address -= zone_bits_size;
+-	bits_r.min_address  = meta_r.max_address;
++	bits_r.min_address  = meta_r.max_address;
+-
++
+ #if DEBUG || DEVELOPMENT
+@@ -10124,161 +10177,185 @@
+ #if VM_TAG_SIZECLASSES
+-	if (zone_tagging_on) {
++	if (zone_tagging_on) {
+-		zba_xtra_shift = (uint8_t)fls(sizeof(vm_tag_t) - 1);
++		zba_xtra_shift = (uint8_t)fls(sizeof(vm_tag_t) - 1);
+-	}
++	}
+-	if (zba_xtra_shift) {
++	if (zba_xtra_shift) {
+-		/*
++		/*
+-		 * if we need the extra space range, then limit the size of the
++		 * if we need the extra space range, then limit the size of the
+-		 * bitmaps to something reasonable instead of a theoretical
++		 * bitmaps to something reasonable instead of a theoretical
+-		 * worst case scenario of all zones being for the smallest
++		 * worst case scenario of all zones being for the smallest
+-		 * allocation granule, in order to avoid fake VA pressure on
++		 * allocation granule, in order to avoid fake VA pressure on
+-		 * other parts of the system.
++		 * other parts of the system.
+-		 */
++		 */
+-		zone_bits_size = round_page(zone_bits_size / 8);
++		zone_bits_size = round_page(zone_bits_size / 8);
+-		zone_xtra_size = round_page(zone_bits_size * CHAR_BIT << zba_xtra_shift);
++		zone_xtra_size = round_page(zone_bits_size * CHAR_BIT << zba_xtra_shift);
+-	}
++	}
+ #endif /* VM_TAG_SIZECLASSES */
+ }
+ STARTUP(KMEM, STARTUP_RANK_FIRST, zone_set_map_sizes);
+-
++
+ /*
+  * Can't use zone_info.zi_map_range at this point as it is being used to
+  * store the range of early pmap memory that was stolen to bootstrap the
+  * necessary VM zones.
+  */
+ KMEM_RANGE_REGISTER_STATIC(zones, &zone_map_range, ZONE_MAP_VA_SIZE);
+ KMEM_RANGE_REGISTER_DYNAMIC(zone_meta, &zone_info.zi_meta_range, ^{
+-	return zone_meta_size + zone_bits_size + zone_xtra_size;
++	return zone_meta_size + zone_bits_size + zone_xtra_size;
+ });
+-
++
+ /*
+  * Global initialization of Zone Allocator.
+  * Runs after zone_bootstrap.
+  */
++#if defined(MARBLE)
++/* Single boot CPU; no allocation or dynamic initialization required. */
++static unsigned int marble_zone_invocations;
++#endif
++#line 10157
+ __startup_func
+ static void
+ zone_init(void)
+ {
++#if defined(MARBLE)
++	unsigned int marble_zone_generation = ++marble_zone_invocations;
++	kprintf("MARBLE ZONE: zone_init enter #%u t=%llu\n",
++	    marble_zone_generation, (unsigned long long)getCpuDatap()->cpu_stat.timer_cnt);
++#endif
++#line 10161
+-	vm_size_t           remaining_size = ZONE_MAP_VA_SIZE;
++	vm_size_t           remaining_size = ZONE_MAP_VA_SIZE;
+-	mach_vm_offset_t    submap_min = 0;
++	mach_vm_offset_t    submap_min = 0;
+-	uint64_t            denom = zone_submap_ratios_denom();
++	uint64_t            denom = zone_submap_ratios_denom();
+-	/*
++	/*
+-	 * And now allocate the various pieces of VA and submaps.
++	 * And now allocate the various pieces of VA and submaps.
+-	 */
++	 */
+-
++
+-	submap_min = zone_map_range.min_address;
++	submap_min = zone_map_range.min_address;
+-
++
+ #if CONFIG_PROB_GZALLOC
+-	vm_size_t pgz_size = pgz_get_size();
++	vm_size_t pgz_size = pgz_get_size();
+-
++
+-	vm_map_will_allocate_early_map(&pgz_submap);
++	vm_map_will_allocate_early_map(&pgz_submap);
+-	zone_info.zi_pgz_range = zone_kmem_suballoc(submap_min, pgz_size,
++	zone_info.zi_pgz_range = zone_kmem_suballoc(submap_min, pgz_size,
+-	    VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE,
++	    VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE,
+-	    VM_KERN_MEMORY_ZONE, &pgz_submap);
++	    VM_KERN_MEMORY_ZONE, &pgz_submap);
+-
++
+-	submap_min     += pgz_size;
++	submap_min     += pgz_size;
+-	remaining_size -= pgz_size;
++	remaining_size -= pgz_size;
+ #if DEBUG || DEVELOPMENT
+-	printf("zone_init: pgzalloc  %p:%p (%u%c) [%d slots]\n",
++	printf("zone_init: pgzalloc  %p:%p (%u%c) [%d slots]\n",
+-	    (void *)zone_info.zi_pgz_range.min_address,
++	    (void *)zone_info.zi_pgz_range.min_address,
+-	    (void *)zone_info.zi_pgz_range.max_address,
++	    (void *)zone_info.zi_pgz_range.max_address,
+-	    mach_vm_size_pretty(pgz_size), mach_vm_size_unit(pgz_size),
++	    mach_vm_size_pretty(pgz_size), mach_vm_size_unit(pgz_size),
+-	    pgz_slots);
++	    pgz_slots);
+ #endif /* DEBUG || DEVELOPMENT */
+ #endif /* CONFIG_PROB_GZALLOC */
+-
++
+-	/*
++	/*
+-	 * Allocate the submaps
++	 * Allocate the submaps
+-	 */
++	 */
+-	for (zone_submap_idx_t idx = 0; idx < Z_SUBMAP_IDX_COUNT; idx++) {
++	for (zone_submap_idx_t idx = 0; idx < Z_SUBMAP_IDX_COUNT; idx++) {
+-		if (submap_ratios[idx] == 0) {
++		if (submap_ratios[idx] == 0) {
+-			zone_submaps[idx] = VM_MAP_NULL;
++			zone_submaps[idx] = VM_MAP_NULL;
+-		} else {
++		} else {
+-			zone_submap_init(&submap_min, idx, submap_ratios[idx],
++			zone_submap_init(&submap_min, idx, submap_ratios[idx],
+-			    &denom, &remaining_size);
++			    &denom, &remaining_size);
+-		}
++		}
+-	}
++	}
+-
++
++#if defined(MARBLE)
++	kprintf("MARBLE ZONE: metadata begin\n");
++#endif
++#line 10201
+-	zone_metadata_init();
++	zone_metadata_init();
++#if defined(MARBLE)
++	kprintf("MARBLE ZONE: metadata done\n");
++#endif
++#line 10202
+-
++
+ #if VM_TAG_SIZECLASSES
+-	if (zone_tagging_on) {
++	if (zone_tagging_on) {
+-		vm_allocation_zones_init();
++		vm_allocation_zones_init();
+-	}
++	}
+ #endif /* VM_TAG_SIZECLASSES */
+-
++
+-	zone_create_flags_t kma_flags = ZC_NOCACHING | ZC_NOGC | ZC_NOCALLOUT |
++	zone_create_flags_t kma_flags = ZC_NOCACHING | ZC_NOGC | ZC_NOCALLOUT |
+-	    ZC_KASAN_NOQUARANTINE | ZC_KASAN_NOREDZONE | ZC_VM;
++	    ZC_KASAN_NOQUARANTINE | ZC_KASAN_NOREDZONE | ZC_VM;
+-
++
+-	(void)zone_create_ext("vm.permanent", 1, kma_flags,
++	(void)zone_create_ext("vm.permanent", 1, kma_flags,
+-	    ZONE_ID_PERMANENT, ^(zone_t z) {
++	    ZONE_ID_PERMANENT, ^(zone_t z) {
+-		z->z_permanent = true;
++		z->z_permanent = true;
+-		z->z_elem_size = 1;
++		z->z_elem_size = 1;
+-	});
++	});
+-	(void)zone_create_ext("vm.permanent.percpu", 1,
++	(void)zone_create_ext("vm.permanent.percpu", 1,
+-	    kma_flags | ZC_PERCPU, ZONE_ID_PERCPU_PERMANENT, ^(zone_t z) {
++	    kma_flags | ZC_PERCPU, ZONE_ID_PERCPU_PERMANENT, ^(zone_t z) {
+-		z->z_permanent = true;
++		z->z_permanent = true;
+-		z->z_elem_size = 1;
++		z->z_elem_size = 1;
+-	});
++	});
+-
++
+-	zc_magazine_zone = zone_create("zcc_magazine_zone", sizeof(struct zone_magazine) +
++	zc_magazine_zone = zone_create("zcc_magazine_zone", sizeof(struct zone_magazine) +
+-	    zc_mag_size() * sizeof(vm_offset_t),
++	    zc_mag_size() * sizeof(vm_offset_t),
+-	    ZC_VM | ZC_NOCACHING | ZC_ZFREE_CLEARMEM | ZC_PGZ_USE_GUARDS);
++	    ZC_VM | ZC_NOCACHING | ZC_ZFREE_CLEARMEM | ZC_PGZ_USE_GUARDS);
+-	zone_raise_reserve(zc_magazine_zone, (uint16_t)(2 * zpercpu_count()));
++	zone_raise_reserve(zc_magazine_zone, (uint16_t)(2 * zpercpu_count()));
+-
++
+-	/*
++	/*
+-	 * Now migrate the startup statistics into their final storage,
++	 * Now migrate the startup statistics into their final storage,
+-	 * and enable logging for early zones (that zone_create_ext() skipped).
++	 * and enable logging for early zones (that zone_create_ext() skipped).
+-	 */
++	 */
+-	int cpu = cpu_number();
++	int cpu = cpu_number();
+-	zone_index_foreach(idx) {
++	zone_index_foreach(idx) {
+-		zone_t tz = &zone_array[idx];
++		zone_t tz = &zone_array[idx];
+-
++
+-		if (tz->z_stats == __zpcpu_mangle_for_boot(&zone_stats_startup[idx])) {
++		if (tz->z_stats == __zpcpu_mangle_for_boot(&zone_stats_startup[idx])) {
+-			zone_stats_t zs = zalloc_percpu_permanent_type(struct zone_stats);
++			zone_stats_t zs = zalloc_percpu_permanent_type(struct zone_stats);
+-
++
+-			*zpercpu_get_cpu(zs, cpu) = *zpercpu_get_cpu(tz->z_stats, cpu);
++			*zpercpu_get_cpu(zs, cpu) = *zpercpu_get_cpu(tz->z_stats, cpu);
+-			tz->z_stats = zs;
++			tz->z_stats = zs;
+-		}
++		}
+-		if (tz->z_self == tz) {
++		if (tz->z_self == tz) {
+ #if ZALLOC_ENABLE_LOGGING
+-			zone_setup_logging(tz);
++			zone_setup_logging(tz);
+ #endif /* ZALLOC_ENABLE_LOGGING */
+ #if KASAN_TBI
+-			zone_setup_kasan_logging(tz);
++			zone_setup_kasan_logging(tz);
+ #endif /* KASAN_TBI */
+-		}
++		}
+-	}
++	}
++#if defined(MARBLE)
++	kprintf("MARBLE ZONE: zone_init complete #%u t=%llu\n",
++	    marble_zone_generation, (unsigned long long)getCpuDatap()->cpu_stat.timer_cnt);
++#endif
++#line 10251
+ }
+ STARTUP(ZALLOC, STARTUP_RANK_FIRST, zone_init);
+-
++
+ void
+ zalloc_iokit_lockdown(void)
+ {
+-	zone_share_always = false;
++	zone_share_always = false;
+ }
+-
++
+ void
+ zalloc_first_proc_made(void)
+ {
+-	zone_caching_disabled = 0;
++	zone_caching_disabled = 0;
+-	zone_early_thres_mul = 1;
++	zone_early_thres_mul = 1;
+ }
+-
++
+ __startup_func
+ vm_offset_t
+ zone_early_mem_init(vm_size_t size)
+ {
+-	vm_offset_t mem;
++	vm_offset_t mem;
+-
++
+-	assert3u(atop(size), <=, ZONE_EARLY_META_INLINE_COUNT);
++	assert3u(atop(size), <=, ZONE_EARLY_META_INLINE_COUNT);
+-
++
+-	/*
++	/*
+-	 * The zone that is used early to bring up the VM is stolen here.
++	 * The zone that is used early to bring up the VM is stolen here.
+-	 *
++	 *
+-	 * When the zone subsystem is actually initialized,
++	 * When the zone subsystem is actually initialized,
+-	 * zone_metadata_init() will be called, and those pages
++	 * zone_metadata_init() will be called, and those pages
+-	 * and the elements they contain, will be relocated into
++	 * and the elements they contain, will be relocated into
+-	 * the VM submap (even for architectures when those zones
++	 * the VM submap (even for architectures when those zones
+-	 * do not live there).
++	 * do not live there).
+-	 */
++	 */
+ #if __x86_64__
