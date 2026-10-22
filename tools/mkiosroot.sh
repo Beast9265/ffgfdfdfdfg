@@ -1,8 +1,9 @@
 #!/bin/bash
-# Build the SWEET iOS root: one case-sensitive HFS+ image holding an iOS OS
+# Build the SWEET/MARBLE iOS root: one case-sensitive HFS+ image holding an iOS OS
 # root filesystem plus its cryptexes, for the userdata partition (rd=ufsroot0).
 #
-#   mkiosroot.sh OS.dmg SYSTEMOS.dmg APPOS.dmg OUT.img [SIZE]     (SIZE default 16G)
+#   mkiosroot.sh [--board sweet|marble] OS.dmg SYSTEMOS.dmg APPOS.dmg OUT.img [SIZE]
+#   SIZE defaults to 16G; board defaults to sweet (historical behavior).
 #
 # The IPSW images are raw APFS with LZBITMAP-compressed files: they are read
 # through apfs-fuse (decompressing), so the HFS+ copy is uncompressed. On a
@@ -18,13 +19,26 @@
 # keybagd reads with /defaults/no-effaceable-storage (tools/mkadt.py).
 set -euo pipefail
 
+board=sweet
+if [[ ${1:-} == --board ]]; then
+	[[ $# -ge 2 ]] || { echo '--board needs a value' >&2; exit 2; }
+	board=$2
+	shift 2
+fi
+[[ $board == sweet || $board == marble ]] || { echo "unknown board: $board" >&2; exit 2; }
 [[ $# -ge 4 ]] || { sed -n '2,12p' "$0"; exit 2; }
 os=$(realpath "$1") sysos=$(realpath "$2") appos=$(realpath "$3") out=$4 size=${5:-16G}
 [[ ! -e $out ]] || { echo "refusing to overwrite $out" >&2; exit 1; }
+for source in "$os" "$sysos" "$appos"; do
+	[[ -r $source && -s $source ]] || { echo "unreadable/empty input: $source" >&2; exit 1; }
+done
+APFS_FUSE=${APFS_FUSE:-apfs-fuse}
+MKFS_HFSPLUS=${MKFS_HFSPLUS:-mkfs.hfsplus}
+FSCK_HFSPLUS=${FSCK_HFSPLUS:-fsck.hfsplus}
 
 # Pre-flight tool check
 missing_tools=()
-for tool in apfs-fuse mkfs.hfsplus rsync; do
+for tool in "$APFS_FUSE" "$MKFS_HFSPLUS" "$FSCK_HFSPLUS" rsync; do
 	command -v "$tool" >/dev/null 2>&1 || missing_tools+=("$tool")
 done
 
@@ -64,7 +78,7 @@ apfs_mount() {
 	ln -s "$1" "$work/$2.dmg"
 	mkdir "$work/$2"
 	# As root: a user's FUSE mount is unreadable to the root rsync below.
-	sudo "$(command -v apfs-fuse)" "$work/$2.dmg" "$work/$2"
+	sudo "$(command -v "$APFS_FUSE")" "$work/$2.dmg" "$work/$2"
 	mounts+=("$work/$2")
 }
 apfs_mount "$os" os
@@ -72,7 +86,7 @@ apfs_mount "$sysos" sysos
 apfs_mount "$appos" appos
 
 truncate -s "$size" "$out"
-mkfs.hfsplus -s -J -v iOSRoot "$out"
+"$MKFS_HFSPLUS" -s -J -v iOSRoot "$out"
 mkdir "$work/root"
 sudo mount -t hfsplus -o loop,force "$out" "$work/root"
 mounts=("$work/root" "${mounts[@]}")
@@ -128,8 +142,11 @@ printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
 	sudo install -m 0600 -o 0 -g 0 /dev/stdin "$work/root/private/var/keybags/systembag.kb"
 
 df -h "$work/root"
+if [[ $board == marble ]]; then
+	python3 "$(dirname "$(realpath "$0")")/verify-iosroot.py" "$work/root"
+fi
 sudo umount "$work/root"
 # Linux hfsplus decomposes some non-ASCII names (localized Shortcuts examples)
 # differently from Apple's tables; let fsck_hfs rewrite them, then verify.
-fsck.hfsplus -f -y "$out" | grep -v 'Illegal name' || true
-fsck.hfsplus -f -n "$out"
+"$FSCK_HFSPLUS" -f -y "$out" | grep -v 'Illegal name' || true
+"$FSCK_HFSPLUS" -f -n "$out"

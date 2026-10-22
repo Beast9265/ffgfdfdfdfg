@@ -4,24 +4,30 @@ MARBLE INTERNAL-UFS HFS PID1: PASS (user physical report, 2026-10-22).
 Internal UFS, GPT, userdata, BSD ufsroot0, HFS mount, exec and sustained
 EL0 PID1 are physically proven. This milestone used the test init.
 
-## Source audit: blocked
+## Verified local sources
 
-No DMG or IPSW was found under `/home`, `/tmp`, `/mnt`, `/media`, or
-`/run/media`. The historical external SSD directory is absent:
+User-owned inputs under `research/ios16-20H392/dmgs/` (git-ignored):
 
-`/run/media/dipa/android/ios-sweet-ipsw/iPhone10,3_16.7.16_20H392/`
+| Role | Filename | Bytes | Verified type |
+| --- | --- | --- | --- |
+| OS | 087-86698-044.dmg | 4730814044 | UDIF/APFS |
+| SystemOS | 087-86593-047.dmg | 2743074816 | Raw APFS |
+| AppOS | 087-86715-047.dmg | 10485760 | Raw APFS |
 
-Required user-provided iPhone X iOS 16.7.16 (20H392) files:
+Source SHA256 (OS, SystemOS, AppOS respectively):
 
-| Role | Historical filename | Expected format from SWEET notes |
-| --- | --- | --- |
-| OS.dmg | 087-86698-044.dmg | UDIF containing APFS, 4,730,814,044 bytes |
-| SystemOS.dmg | 087-86593-047.dmg | Raw APFS, 2,743,074,816 bytes |
-| AppOS.dmg | 087-86715-047.dmg | Raw APFS, approximately 10 MB |
+```text
+80f426d5b8fca8552f95be427434f1911dbb4c2c6d28aad94f2426ddd0c92483
+9cd738f3b0169055549df84ad6d8d13e50a2da39af618ce0522ca4e06df86849
+391f2df322c3172b021b2874f6da5c3e78b70b3df8f502e1a4af2b1d715c4608
+```
 
-These are historical expectations, not verification of available files.
-No Apple files downloaded. Work stops at the missing-source condition requested
-by the user. Readability, filesystem type and build identity remain unverified.
+Read-only APFS mounts confirm iPhone OS16.7.16, ProductBuildVersion20H392.
+Host initially had56GiB free (sandbox view41GiB); images remain git-ignored.
+No Apple downloads. Existing apfs-fuse source at
+`/tmp/marble-apfs-host-unused` was built with its LZBITMAP path unchanged;
+only its open-source LZFSE dependency was fetched. Host build requires
+`-DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_CXX_FLAGS='-include cstdint'`.
 
 ## Existing implementation audit
 
@@ -34,25 +40,35 @@ root paths (copies symlinks). It repairs HFS filename normalization then checks
 with fsck. Extended attribute/ACL preservation is not explicitly requested by
 its rsync flags; do not claim those are preserved without further verification.
 
-The builder's SWEET references are comments and its synthetic keybag payload.
+The optional `--board marble` interface keeps SWEET as default and adds
+`verify-iosroot.py` before unmount. Tool paths can be supplied through
+APFS_FUSE, MKFS_HFSPLUS and FSCK_HFSPLUS. Copy/link/keybag logic is unchanged.
 `tools/sweet-root-tweaks.py` is a separate, broader GUI/daemon preparation step;
-it edits launchd jobs, activation data, audio, migration and Setup preferences.
-It is not invoked by mkiosroot.sh. No builder/tweak behavior was changed in this
-blocked audit; board interface and minimum first-boot tweaks remain future work.
+it remains unchanged and is not applied for this minimal immutable-root attempt.
 
-Planned outputs, both confirmed git-ignored:
+Build command (local files only; host mount/copy commands require sudo):
 
-- `shim/out/marble-xnu/ios16-root-marble-20H392.img`
-- `shim/out/marble-xnu/ios16-root-marble-20H392.simg`
+```sh
+APFS_FUSE=/tmp/marble-apfs-host-unused/build/apfs-fuse \
+MKFS_HFSPLUS=/tmp/marble-hfsprogs/newfs_hfs.tproj/newfs_hfs \
+FSCK_HFSPLUS=/tmp/marble-hfsprogs/fsck_hfs.tproj/fsck_hfs \
+tools/mkiosroot.sh --board marble \
+  research/ios16-20H392/dmgs/087-86698-044.dmg \
+  research/ios16-20H392/dmgs/087-86593-047.dmg \
+  research/ios16-20H392/dmgs/087-86715-047.dmg \
+  shim/out/marble-xnu/ios16-root-marble-20H392.img
+bash tools/iosroot-sparse.sh \
+  shim/out/marble-xnu/ios16-root-marble-20H392.img \
+  shim/out/marble-xnu/ios16-root-marble-20H392.simg
+```
 
-Workspace free space at audit: 28 GiB. Raw16GiB plus historical ~12GB sparse
-output leaves little margin; a full round-trip expansion needs additional
-space or streaming comparison. Recheck before building. `/tmp` is tmpfs with
-13GiB free and cannot hold a full expanded image.
+The sparse helper runs img2simg, simg2img into a fresh temporary regular file,
+and cmp over the entire16GiB image before printing hashes. No block-device
+writes. It needs room for raw, sparse and temporary expansion together.
 
 ## First-boot configuration evidence
 
-Planned command line (not packaged by this audit):
+Required command line:
 
 ```text
 debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1
@@ -79,18 +95,26 @@ writable `/private/var` (SWEET encountered EROFS), plus unavailable platform
 services. This is a prediction, not a MARBLE observation. SWEET's historical
 post-cache SHA1 provider fault must not be assumed to recur on today's kernel.
 
-## Required work after sources are available
+## Local validation
 
-Verify source readability, image type and build identity; recheck space.
-Generalize the existing builder without changing SWEET defaults. Build the
-root and check fsck, arm64 Mach-O launchd, dyld, arm64 cache files, both cryptex
-trees, critical ownership/modes and links. Generate sparse with img2simg and
-verify its expansion against every byte of the source image. Record both hashes.
+Full0001..0081 patch replay plus strict0082 application PASS. MARBLE
+preprocessed UFS excludes WRITE10, sync-cache, persistent logger and ufsrw
+parser; exact Device-WLUN ACTIVE and cache maintenance retained. Existing6
+unit tests and actual initializing-sense ASan/UBSan regression PASS. Recovered
+CI flags compile bsd_init to arm64 successfully. No XNU units changed.
+SWEET copy/link/keybag logic byte-identical; SWEET tweaks and ADT unchanged.
 
-Complete full patch replay, strict0082, changed-unit compilation if needed,
-SWEET regression and exact MARBLE CI link. Package the exact new kernel with
-the above arguments, verify no RAMDisk/write arguments and record all hashes.
-None of these build validations has been completed in this blocked audit.
-The previous test-root kernel/payload/boot hashes are not real-iOS build results.
+16GiB case-sensitive journaled HFSX iOSRoot built successfully. fsck repair
+followed by `fsck_hfs -f -n` PASS. Post-fsck read-only remount verification PASS:
+launchd/dyld arm64 Mach-O, root:wheel0755; build20H392; both populated cryptex
+trees;44 arm64 cache files with root-directory hard links to OS cryptex.
+Sparse img2simg/simg2img expansion matches all17179869184 bytes via cmp.
+
+| Artifact | SHA256 |
+| --- | --- |
+| `shim/out/marble-xnu/ios16-root-marble-20H392.img` | `997010004d53fe9da60e966d0eb219fc9ba97977eee1f4bce3b060ee372498ae` |
+| `shim/out/marble-xnu/ios16-root-marble-20H392.simg` | `4a919839c873dd3fbf287442aeded96f8bcc1bdc1fd41373e6440100cc8643c2` |
+
+Exact MARBLE CI/package pending; no new boot-image hash claimed yet.
 
 No device commands executed. REAL IOS USERDATA FLASH NOT PERFORMED.

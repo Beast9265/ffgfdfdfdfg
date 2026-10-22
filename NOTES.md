@@ -1,6 +1,48 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
 
+## Active handoff: MARBLE real iOS root verified, CI/package next (2026-10-22)
+
+MARBLE INTERNAL-UFS HFS PID1: PASS (user physical evidence).
+Local source research/ios16-20H392/dmgs now present and readable:
+087-86698-044.dmg OS UDIF4730814044 bytes SHA256
+80f426d5b8fca8552f95be427434f1911dbb4c2c6d28aad94f2426ddd0c92483
+087-86593-047.dmg SystemOS APFS2743074816 bytes SHA256
+9cd738f3b0169055549df84ad6d8d13e50a2da39af618ce0522ca4e06df86849
+087-86715-047.dmg AppOS APFS10485760 bytes SHA256
+391f2df322c3172b021b2874f6da5c3e78b70b3df8f502e1a4af2b1d715c4608
+Host free56GiB; sandbox reports41GiB. Outputs/source ignored.
+Read-only user FUSE mounts /tmp/marble-ios-source-{os,system,app} verify
+OS SystemVersion iOS16.7.16/20H392, launchd/dyld arm64 root:wheel0755.
+Built existing /tmp/marble-apfs-host-unused/build/apfs-fuse with existing
+LZBITMAP support; fetched only open-source LZFSE submodule. Modern host build
+uses CMAKE_POLICY_VERSION_MINIMUM=3.5 and CXX_FLAGS=-include cstdint.
+HFS tools /tmp/marble-hfsprogs/{newfs_hfs.tproj/newfs_hfs,fsck_hfs.tproj/fsck_hfs}.
+
+Full patch reverse/replay0001..0081 + strict0082 PASS; preprocessed MARBLE
+no WRITE10/sync/persistent log/ufsrw parser PASS;6 existing tests and actual
+initializing-sense ASan/UBSan regression PASS. Recovered actual CI flags
+bsd_init real-header arm64 compile PASS. No XNU/policy/hardware changes.
+New --board marble builder option only adds mounted-root verification;
+SWEET default and copy/link/keybag/tweak behavior unchanged.
+
+Real16GiB HFSX iOSRoot build PASS using --board marble; sourceOS build
+20H392 verified. Mounted launchd/dyld arm64 root:wheel0755, populated OS/App
+cryptexes,44 arm64 cache files hard-linked into root cache path PASS.
+fsck repair and final -f -n PASS; post-fsck read-only remount verification PASS.
+Android sparse img2simg/simg2img full17179869184-byte cmp PASS.
+Raw shim/out/marble-xnu/ios16-root-marble-20H392.img SHA256
+997010004d53fe9da60e966d0eb219fc9ba97977eee1f4bce3b060ee372498ae
+Sparse shim/out/marble-xnu/ios16-root-marble-20H392.simg SHA256
+4a919839c873dd3fbf287442aeded96f8bcc1bdc1fd41373e6440100cc8643c2
+Source/read-only verification mounts unmounted. Broader SWEET GUI/daemon
+root-tweaks deliberately unapplied for minimal first immutable-root attempt.
+No XNU/policy/hardware change. UFS stays strictly read-only.
+Logs /tmp/marble-iosroot-{build,sparse}.log. Next exact CI/package with
+--cmdline-extra 'rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1',
+NO --ramdisk. Then linked kernel/payload/boot inspection, final hashes/docs.
+No device commands. REAL IOS USERDATA FLASH NOT PERFORMED.
+
 ## Active handoff: MARBLE real iOS root source audit blocked (2026-10-22)
 
 MARBLE INTERNAL-UFS HFS PID1: PASS.
