@@ -42,21 +42,53 @@ Existing initializing-sense regression and six unit tests PASS.
 Validation scripts/logs/objects: /tmp/writes-compile.py, /tmp/writes-objects,
 /tmp/writes-final-*.i. Full kernel link/CI/package pending below.
 
-JOURNALED ROOT: expected old raw/sparse images are absent (only checksum
-file remains). User restored all three20H392 DMGs at the documented paths;
-SHA256 independently matches80f426d5...c92483 /9cd738f3...86849 /
-391f2df3...715c4608. DEFAULT journaled --board marble rebuild is blocked by host sudo password
-(no terminal/askpass), including outside sandbox; user asked to enable sudo
-or build locally. Log /tmp/marble-journal-build.log. Journal bit/fsck/content/sparse validation
-and new hashes pending. Never reuse the old checksums as new verification.
-The journaled root MUST be reflashed before testing the writable kernel;
-NEVER boot current non-journaled physical root writable. No phone interaction.
+JOURNALED ROOT VERIFIED: old raw/sparse images were absent. User restored
+all three20H392 DMGs; independently verified original source SHA256s match.
+Rebuilt SAME default journaled --board marble recipe (no --no-journal), using
+restricted host sudo for local filesystem images. New raw16GiB HFSX and
+sparse12145180916 bytes at shim/out/marble-xnu/ios16-root-marble-20H392.{img,simg}.
+Primary header1024 and alternate17179868160 both HX0005 / attributes0x2100;
+JOURNAL BIT13 SET. fsck repair followed by -f -n: iOSRoot appears OK.
+Mounted verification before fsck and again READ-ONLY after fsck: launchd/dyld
+arm64 root:wheel0755; OS/App cryptex populated;44 arm64 shared-cache files,
+root cache hard links match cryptex. All mounts unmounted. Sparse expansion
+cmp PASS for all17179869184 bytes. New hashes (historical hashes superseded):
+raw 1858df50781370014d3245473248a279adcbbede5ad41dd132013d4c3967c43e
+sparse ba4b1dbceb3b2dba931320716601804bf5d7cccb9b2ab72268a4808023ffba76
+Logs /tmp/marble-journal-{build,sparse}.log. Updated local ignored
+.SHA256SUMS matches new artifacts. The journaled root MUST be reflashed
+before testing the writable kernel; NEVER boot the current non-journaled
+physical root writable. No phone interaction.
 
 Exact new diagnostic cmdline:
 debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1 ufsrw=1 rootrw=1
 Final intended path: shim/out/marble-xnu/latest-marble-xnu.img.
 Unrelated tools/iosroot-sparse.sh mode change and untracked
  docs/MARBLE_BOOTSTRAP_BREADCRUMBS.md preserved, not staged.
+
+Automated kernel build/package COMPLETE: source commit
+e5dc3809c29a20da5a816d91ce3ecb41a5cf4e36, exact Actions39764011216 SUCCESS;
+headSha independently matches. Inputs13.5/DEVELOPMENT/MARBLE/keep_going=true.
+CI confirms0082, sweet_ufs.c/vfs_subr.c compiles, full kernel link PASS.
+Fresh xnu/out-marble-ci-39764011216 artifact SHA256SUMS PASS; zero undefined
+symbols. Exact packaged cmdline above, all payload segments byte-match this
+kernel after fixups; no RAMDisk/extra root segment. Boot-manifest-hash48,
+asmb, UFS PA01d84000+3000 retained. Linked UFS submission checks0x2a/count
+limit256; host-to-device flags0x20/DD1 retained. Writable diagnostic linked;
+SWEET persistent logger absent. Sparse bootstrap160-page allocator,
+code/stacks/tables/aliases PASS. Four executable sections: zero physical
+CNTP instructions, one CNTV_CTL MSR. Shim build/repack/inspect and independent
+boot-v4 headers/bounds/padding/payload locator/no-trailing-bytes PASS.
+Kernel SHA256 52c8f900998f4788e9881c4e3d34a70b92182cb4f40837a93a99eb46cd615bfd
+Payload SHA256 57e891476b33148e150d61eaf310bbcb93d1fde9ac712a4ea11389f57a665988
+Boot SHA256 8c008908b4d8e9c3a994fb76615237dc38179a7b4e1fdfdd8c41d63b548948c2
+Final shim/out/marble-xnu/latest-marble-xnu.img17137664 bytes.
+Logs /tmp/marble-writes-{pipeline.log,ci.log,run.json,final-audit.txt,cntp.txt};
+linked strategy/submission/root mount disassembly /tmp/writes-linked-*.txt.
+Physical writable-root success remains PENDING user's later manual test.
+Manual commands ONLY; journaled root replacement MUST precede boot:
+fastboot -S 512M flash userdata ~/ios-marble/shim/out/marble-xnu/ios16-root-marble-20H392.simg
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
 
 
 ## Active handoff: MARBLE real Apple userspace / AMFI registration (2026-10-22)
