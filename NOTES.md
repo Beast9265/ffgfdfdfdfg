@@ -1,6 +1,42 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
 
+## Active handoff: MARBLE real iOS root source audit blocked (2026-10-22)
+
+MARBLE INTERNAL-UFS HFS PID1: PASS.
+User physically observed Device-WLUN ACTIVE, LUN0 ready, capacity4096,
+GPT/userdata, BSD ufsroot0 major1 minor0, HFS MarbleRoot mount, unsealed-root
+continuation, codesigning0 and sustained EL0 PID1 heartbeat. This supersedes
+all pending internal-HFS physical statements below. User evidence; no device
+commands executed by this agent.
+
+Next objective: real iPhone X iOS16.7.16/20H392 HFSX root using existing
+mkiosroot.sh apfs-fuse/LZBITMAP workflow. BLOCKED at task1: no DMG/IPSW files
+found under /home,/tmp,/mnt,/media,/run/media; historical external SSD path
+/run/media/dipa/android/ios-sweet-ipsw is absent. Required source directory:
+/run/media/dipa/android/ios-sweet-ipsw/iPhone10,3_16.7.16_20H392/
+OS=087-86698-044.dmg; SystemOS=087-86593-047.dmg;
+AppOS=087-86715-047.dmg. OS.dmg/SystemOS.dmg/AppOS.dmg are role aliases.
+No Apple downloads. User explicitly requires stopping if DMGs absent;
+no builder/kernel changes, patch replay, compilation, CI or new images done.
+See docs/MARBLE_IOS_ROOT.md for audit and remaining validation.
+
+Existing mkadt.py chosen/asmb is common to MARBLE/SWEET already:
+lp-sip0 u64(0x6f), lp-sip1 u32(1). No policy change needed or made.
+SWEET physical history supports ignition_level=1 (level0 skips cache stage;
+default tries unavailable Preboot; level1 uses root cache hardlinks).
+Planned, NOT yet packaged/verified real-iOS cmdline:
+debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1
+No RAMDisk, rd=md0, ufsrw/rootrw or UFS writes. Existing boot image is still
+prior test-root build2c1db665 / Actions39751769521; do not represent it as
+real-iOS payload. New artifact hashes/run unavailable.
+Destination shim/out/marble-xnu/ios16-root-marble-20H392.{img,simg} verified
+git-ignored. Workspace free28GiB: space for raw16GiB plus expected sparse
+~12GB is tight; reassess actual space before building. /tmp tmpfs13GiB free
+is unsuitable for full raw expansion. Source readability/type not verifiable.
+Preserve unrelated untracked docs/MARBLE_BOOTSTRAP_BREADCRUMBS.md.
+REAL IOS USERDATA FLASH NOT PERFORMED.
+
 ## Active handoff: MARBLE first internal HFS test root (2026-10-22)
 
 MARBLE INTERNAL UFS READ PATH: PASS (user physical observation).
