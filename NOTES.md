@@ -2,6 +2,34 @@
 
 
 
+## Active handoff: MARBLE CNTP trap (2026-10-22)
+
+User exact physical run39723141106 / commit27eba3872b069658c5e109a4d59790aea2725d03
+proves redistributor discovery, WAKER, IGROUPR0 skip, ISENABLER0 08000002,
+ICC_SRE, BPR1/PMR/CTLR, GICD_CTLR and ICC_IGRPEN1 all PASS. CNTV_CTL_EL0
+write PASS; CNTP_CTL_EL0 UNDEFINED/TRAPPED at PCfffffe000747b9e8,
+_fiq_context_init+0x14, instructiond51be228 msr CNTP_CTL_EL0,x8.
+This is user-provided physical evidence; EL2 trap policy remains unknown.
+
+0082 only machine_routines.c changes: MARBLE retains CNTV enable, skips
+precautionary CNTP mask and prints "MARBLE TIMER: CNTV enabled, CNTP skipped".
+Four blank lines removed to preserve exact SWEET preprocessing/line numbers.
+No other0082 section or ADT changed. Report docs/MARBLE_CNTP_TRAP.md.
+
+Local PASS: full81 reverse/replay; strict0082 application; real-header arm64
+machine_routines.c compile and disassembly (CNTV MSR present, CNTP absent);
+SWEET preprocessing byte-identical; source/encoding audit and relevant MARBLE
+preprocessing show no remaining physical timer instruction; cpu_timebase_init
+CNTPCT comment actually calls CNTV hwclock. GIC real-header compile/preprocess
+PASS: timer27/SGI1/Group1 unchanged, zero group/priority MMIO. Other sections
+identical, git diff --check PASS. Artifacts /tmp/cntp-* and /tmp/gic-*.
+
+Next: authorized tools/marble-ci-build.sh commit/push/CI/package after staging
+only0082, this handoff and report. Exact new run/link/hashes pending.
+Stop at verified latest-marble-xnu.img; user manually boots. No device command.
+
+Earlier handoffs below are historical.
+
 ## Active handoff: MARBLE GICR_IGROUPR0 SEA experiment (2026-10-22)
 
 User physical exact Actions39719201880 clears allocator/bzero crash and reaches

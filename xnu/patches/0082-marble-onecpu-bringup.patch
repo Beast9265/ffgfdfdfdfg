@@ -4977,15 +4977,487 @@ diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
 diff --git a/osfmk/arm64/machine_routines.c b/osfmk/arm64/machine_routines.c
 --- a/osfmk/arm64/machine_routines.c
 +++ b/osfmk/arm64/machine_routines.c
-@@ -2180,7 +2180,7 @@
- 	return dec;
+@@ -2083,295 +2083,295 @@
+ {
+-	uint64_t timebase = nonspeculative_timebase();
++	uint64_t timebase = nonspeculative_timebase();
+-	return timebase;
++	return timebase;
  }
- 
+-
++
+ uint64_t
+ ml_get_timebase()
+ {
+-	uint64_t clock, timebase;
++	uint64_t clock, timebase;
+-
++
+-	//the retry is for the case where S2R catches us in the middle of this. see rdar://77019633
++	//the retry is for the case where S2R catches us in the middle of this. see rdar://77019633
+-	do {
++	do {
+-		timebase = getCpuDatap()->cpu_base_timebase;
++		timebase = getCpuDatap()->cpu_base_timebase;
+-		os_compiler_barrier();
++		os_compiler_barrier();
+-		clock = ml_get_hwclock();
++		clock = ml_get_hwclock();
+-		os_compiler_barrier();
++		os_compiler_barrier();
+-	} while (getCpuDatap()->cpu_base_timebase != timebase);
++	} while (getCpuDatap()->cpu_base_timebase != timebase);
+-
++
+-	return clock + timebase;
++	return clock + timebase;
+ }
+-
++
+ /**
+  * Issue a barrier that guarantees all prior memory accesses will complete
+  * before any subsequent timebase reads.
+  */
+ void
+ ml_memory_to_timebase_fence(void)
+ {
+-	__builtin_arm_dmb(DMB_SY);
++	__builtin_arm_dmb(DMB_SY);
+-	const uint64_t take_backwards_branch = 0;
++	const uint64_t take_backwards_branch = 0;
+-	asm volatile (
++	asm volatile (
+         "1:"
+                 "ldr	x0, [%[take_backwards_branch]]" "\n"
+                 "cbnz	x0, 1b"                         "\n"
+                 :
+                 : [take_backwards_branch] "r"(&take_backwards_branch)
+                 : "x0"
+         );
+-
++
+-	/* throwaway read to prevent ml_get_speculative_timebase() reordering */
++	/* throwaway read to prevent ml_get_speculative_timebase() reordering */
+-	(void)ml_get_hwclock();
++	(void)ml_get_hwclock();
+ }
+-
++
+ /**
+  * Issue a barrier that guarantees all prior timebase reads will
+  * be ordered before any subsequent memory accesses.
+  */
+ void
+ ml_timebase_to_memory_fence(void)
+ {
+-	__builtin_arm_isb(ISB_SY);
++	__builtin_arm_isb(ISB_SY);
+ }
+-
++
+ /*
+  * Get the speculative timebase without an ISB.
+  */
+ uint64_t
+ ml_get_speculative_timebase(void)
+ {
+-	uint64_t clock, timebase;
++	uint64_t clock, timebase;
+-
++
+-	//the retry is for the case where S2R catches us in the middle of this. see rdar://77019633&77697482
++	//the retry is for the case where S2R catches us in the middle of this. see rdar://77019633&77697482
+-	do {
++	do {
+-		timebase = getCpuDatap()->cpu_base_timebase;
++		timebase = getCpuDatap()->cpu_base_timebase;
+-		os_compiler_barrier();
++		os_compiler_barrier();
+-		clock = __builtin_arm_rsr64("CNTVCT_EL0");
++		clock = __builtin_arm_rsr64("CNTVCT_EL0");
+-
++
+-		os_compiler_barrier();
++		os_compiler_barrier();
+-	} while (getCpuDatap()->cpu_base_timebase != timebase);
++	} while (getCpuDatap()->cpu_base_timebase != timebase);
+-
++
+-	return clock + timebase;
++	return clock + timebase;
+ }
+-
++
+ uint64_t
+ ml_get_timebase_entropy(void)
+ {
+-	return ml_get_speculative_timebase();
++	return ml_get_speculative_timebase();
+ }
+-
++
+ uint32_t
+ ml_get_decrementer(void)
+ {
+-	cpu_data_t *cdp = getCpuDatap();
++	cpu_data_t *cdp = getCpuDatap();
+-	uint32_t dec;
++	uint32_t dec;
+-
++
+-	assert(ml_get_interrupts_enabled() == FALSE);
++	assert(ml_get_interrupts_enabled() == FALSE);
+-
++
+-	if (cdp->cpu_get_decrementer_func) {
++	if (cdp->cpu_get_decrementer_func) {
+-		dec = cdp->cpu_get_decrementer_func();
++		dec = cdp->cpu_get_decrementer_func();
+-	} else {
++	} else {
+-		uint64_t wide_val;
++		uint64_t wide_val;
+-
++
+-		wide_val = __builtin_arm_rsr64("CNTV_TVAL_EL0");
++		wide_val = __builtin_arm_rsr64("CNTV_TVAL_EL0");
+-		dec = (uint32_t)wide_val;
++		dec = (uint32_t)wide_val;
+-		assert(wide_val == (uint64_t)dec);
++		assert(wide_val == (uint64_t)dec);
+-	}
++	}
+-
++
+-	return dec;
++	return dec;
+ }
+-
++
 -#if defined(SWEET)
 +#if defined(SWEET) || defined(MARBLE)
  /*
   * sweet: arm_vm_init() calls this unconditionally; Apple's definition (it
   * enters the PPL/monitor) ships only in the closed per-SoC library. There is
+  * no monitor on SWEET.
+  */
+ void
+ ml_enable_monitor(void)
+ {
+ }
+ #endif /* SWEET */
+-
++
+ boolean_t
+ ml_get_timer_pending(void)
+ {
+-	uint64_t cntv_ctl = __builtin_arm_rsr64("CNTV_CTL_EL0");
++	uint64_t cntv_ctl = __builtin_arm_rsr64("CNTV_CTL_EL0");
+-	return ((cntv_ctl & CNTV_CTL_EL0_ISTATUS) != 0) ? TRUE : FALSE;
++	return ((cntv_ctl & CNTV_CTL_EL0_ISTATUS) != 0) ? TRUE : FALSE;
+ }
+-
++
+ __attribute__((noreturn))
+ void
+ platform_syscall(arm_saved_state_t *state)
+ {
+-	uint32_t code;
++	uint32_t code;
+-
++
+ #define platform_syscall_kprintf(x...) /* kprintf("platform_syscall: " x) */
+-
++
+-	code = (uint32_t)get_saved_state_reg(state, 3);
++	code = (uint32_t)get_saved_state_reg(state, 3);
+-
++
+-	KDBG(MACHDBG_CODE(DBG_MACH_MACHDEP_EXCP_SC_ARM, code) | DBG_FUNC_START,
++	KDBG(MACHDBG_CODE(DBG_MACH_MACHDEP_EXCP_SC_ARM, code) | DBG_FUNC_START,
+-	    get_saved_state_reg(state, 0),
++	    get_saved_state_reg(state, 0),
+-	    get_saved_state_reg(state, 1),
++	    get_saved_state_reg(state, 1),
+-	    get_saved_state_reg(state, 2));
++	    get_saved_state_reg(state, 2));
+-
++
+-	switch (code) {
++	switch (code) {
+-	case 2:
++	case 2:
+-		/* set cthread */
++		/* set cthread */
+-		platform_syscall_kprintf("set cthread self.\n");
++		platform_syscall_kprintf("set cthread self.\n");
+-		thread_set_cthread_self(get_saved_state_reg(state, 0));
++		thread_set_cthread_self(get_saved_state_reg(state, 0));
+-		break;
++		break;
+-	case 3:
++	case 3:
+-		/* get cthread */
++		/* get cthread */
+-		platform_syscall_kprintf("get cthread self.\n");
++		platform_syscall_kprintf("get cthread self.\n");
+-		set_saved_state_reg(state, 0, thread_get_cthread_self());
++		set_saved_state_reg(state, 0, thread_get_cthread_self());
+-		break;
++		break;
+-	case 0: /* I-Cache flush (removed) */
++	case 0: /* I-Cache flush (removed) */
+-	case 1: /* D-Cache flush (removed) */
++	case 1: /* D-Cache flush (removed) */
+-	default:
++	default:
+-		platform_syscall_kprintf("unknown: %d\n", code);
++		platform_syscall_kprintf("unknown: %d\n", code);
+-		break;
++		break;
+-	}
++	}
+-
++
+-	KDBG(MACHDBG_CODE(DBG_MACH_MACHDEP_EXCP_SC_ARM, code) | DBG_FUNC_END,
++	KDBG(MACHDBG_CODE(DBG_MACH_MACHDEP_EXCP_SC_ARM, code) | DBG_FUNC_END,
+-	    get_saved_state_reg(state, 0));
++	    get_saved_state_reg(state, 0));
+-
++
+-	thread_exception_return();
++	thread_exception_return();
+ }
+-
++
+ static void
+ _enable_timebase_event_stream(uint32_t bit_index)
+ {
+-	uint64_t cntkctl; /* One wants to use 32 bits, but "mrs" prefers it this way */
++	uint64_t cntkctl; /* One wants to use 32 bits, but "mrs" prefers it this way */
+-
++
+-	if (bit_index >= 64) {
++	if (bit_index >= 64) {
+-		panic("%s: invalid bit index (%u)", __FUNCTION__, bit_index);
++		panic("%s: invalid bit index (%u)", __FUNCTION__, bit_index);
+-	}
++	}
+-
++
+-	__asm__ volatile ("mrs	%0, CNTKCTL_EL1" : "=r"(cntkctl));
++	__asm__ volatile ("mrs	%0, CNTKCTL_EL1" : "=r"(cntkctl));
+-
+-	cntkctl |= (bit_index << CNTKCTL_EL1_EVENTI_SHIFT);
++	cntkctl |= (bit_index << CNTKCTL_EL1_EVENTI_SHIFT);
+-	cntkctl |= CNTKCTL_EL1_EVNTEN;
++	cntkctl |= CNTKCTL_EL1_EVNTEN;
+-	cntkctl |= CNTKCTL_EL1_EVENTDIR; /* 1->0; why not? */
++	cntkctl |= CNTKCTL_EL1_EVENTDIR; /* 1->0; why not? */
+-
+-	/*
++	/*
+-	 * If the SOC supports it (and it isn't broken), enable
++	 * If the SOC supports it (and it isn't broken), enable
+-	 * EL0 access to the timebase registers.
++	 * EL0 access to the timebase registers.
+-	 */
++	 */
+-	if (user_timebase_type() != USER_TIMEBASE_NONE) {
++	if (user_timebase_type() != USER_TIMEBASE_NONE) {
+-		cntkctl |= (CNTKCTL_EL1_PL0PCTEN | CNTKCTL_EL1_PL0VCTEN);
++		cntkctl |= (CNTKCTL_EL1_PL0PCTEN | CNTKCTL_EL1_PL0VCTEN);
+-	}
++	}
+-
+-	__builtin_arm_wsr64("CNTKCTL_EL1", cntkctl);
++	__builtin_arm_wsr64("CNTKCTL_EL1", cntkctl);
+ }
+-
+ /*
+  * Turn timer on, unmask that interrupt.
+  */
+ static void
+ _enable_virtual_timer(void)
+ {
+-	uint64_t cntvctl = CNTV_CTL_EL0_ENABLE; /* One wants to use 32 bits, but "mrs" prefers it this way */
++	uint64_t cntvctl = CNTV_CTL_EL0_ENABLE; /* One wants to use 32 bits, but "mrs" prefers it this way */
+-
++
+-	__builtin_arm_wsr64("CNTV_CTL_EL0", cntvctl);
++	__builtin_arm_wsr64("CNTV_CTL_EL0", cntvctl);
++#if defined(MARBLE)
++	kprintf("MARBLE TIMER: CNTV enabled, CNTP skipped\n");
++#else
+-	/* disable the physical timer as a precaution, as its registers reset to architecturally unknown values */
++	/* disable the physical timer as a precaution, as its registers reset to architecturally unknown values */
+-	__builtin_arm_wsr64("CNTP_CTL_EL0", CNTP_CTL_EL0_IMASKED);
++	__builtin_arm_wsr64("CNTP_CTL_EL0", CNTP_CTL_EL0_IMASKED);
++#endif
+ }
+-
++
+ void
+ fiq_context_init(boolean_t enable_fiq __unused)
+ {
+-	/* Interrupts still disabled. */
++	/* Interrupts still disabled. */
+-	assert(ml_get_interrupts_enabled() == FALSE);
++	assert(ml_get_interrupts_enabled() == FALSE);
+-	_enable_virtual_timer();
++	_enable_virtual_timer();
+ }
+-
++
+ void
+ wfe_timeout_init(void)
+ {
+-	_enable_timebase_event_stream(arm64_eventi);
++	_enable_timebase_event_stream(arm64_eventi);
+ }
+-
++
+ /**
+  * Configures, but does not enable, the WFE event stream. The event stream
+  * generates an event at a set interval to act as a timeout for WFEs.
+  *
+  * This function sets the static global variable arm64_eventi to be the proper
+  * bit index for the CNTKCTL_EL1.EVENTI field to generate events at the correct
+  * period (1us unless specified by the "wfe_events_sec" boot-arg). arm64_eventi
+  * is used by wfe_timeout_init to actually poke the registers and enable the
+  * event stream.
+  *
+  * The CNTKCTL_EL1.EVENTI field contains the index of the bit of CNTVCT_EL0 that
+  * is the trigger for the system to generate an event. The trigger can occur on
+  * either the rising or falling edge of the bit depending on the value of
+  * CNTKCTL_EL1.EVNTDIR. This is arbitrary for our purposes, so we use the
+  * falling edge (1->0) transition to generate events.
+  */
+ void
+ wfe_timeout_configure(void)
+ {
+-	/* Could fill in our own ops here, if we needed them */
++	/* Could fill in our own ops here, if we needed them */
+-	uint64_t        ticks_per_sec, ticks_per_event, events_per_sec = 0;
++	uint64_t        ticks_per_sec, ticks_per_event, events_per_sec = 0;
+-	uint32_t        bit_index;
++	uint32_t        bit_index;
+-
++
+-	if (PE_parse_boot_argn("wfe_events_sec", &events_per_sec, sizeof(events_per_sec))) {
++	if (PE_parse_boot_argn("wfe_events_sec", &events_per_sec, sizeof(events_per_sec))) {
+-		if (events_per_sec <= 0) {
++		if (events_per_sec <= 0) {
+-			events_per_sec = 1;
++			events_per_sec = 1;
+-		} else if (events_per_sec > USEC_PER_SEC) {
++		} else if (events_per_sec > USEC_PER_SEC) {
+-			events_per_sec = USEC_PER_SEC;
++			events_per_sec = USEC_PER_SEC;
+-		}
++		}
+-	} else {
++	} else {
+-		events_per_sec = USEC_PER_SEC;
++		events_per_sec = USEC_PER_SEC;
+-	}
++	}
+-	ticks_per_sec = gPEClockFrequencyInfo.timebase_frequency_hz;
++	ticks_per_sec = gPEClockFrequencyInfo.timebase_frequency_hz;
+-	ticks_per_event = ticks_per_sec / events_per_sec;
++	ticks_per_event = ticks_per_sec / events_per_sec;
+-
++
+-	/* Bit index of next power of two greater than ticks_per_event */
++	/* Bit index of next power of two greater than ticks_per_event */
+-	bit_index = flsll(ticks_per_event) - 1;
++	bit_index = flsll(ticks_per_event) - 1;
+-	/* Round up to next power of two if ticks_per_event is initially power of two */
++	/* Round up to next power of two if ticks_per_event is initially power of two */
+-	if ((ticks_per_event & ((1 << bit_index) - 1)) != 0) {
++	if ((ticks_per_event & ((1 << bit_index) - 1)) != 0) {
+-		bit_index++;
++		bit_index++;
+-	}
++	}
+-
++
+-	/*
++	/*
+-	 * The timer can only trigger on rising or falling edge, not both; we don't
++	 * The timer can only trigger on rising or falling edge, not both; we don't
+-	 * care which we trigger on, but we do need to adjust which bit we are
++	 * care which we trigger on, but we do need to adjust which bit we are
+-	 * interested in to account for this.
++	 * interested in to account for this.
+-	 *
++	 *
+-	 * In particular, we set CNTKCTL_EL1.EVENTDIR to trigger events on the
++	 * In particular, we set CNTKCTL_EL1.EVENTDIR to trigger events on the
+-	 * falling edge of the given bit. Therefore, we must decrement the bit index
++	 * falling edge of the given bit. Therefore, we must decrement the bit index
+-	 * by one as when the bit before the one we care about makes a 1 -> 0
++	 * by one as when the bit before the one we care about makes a 1 -> 0
+-	 * transition, the bit we care about makes a 0 -> 1 transition.
++	 * transition, the bit we care about makes a 0 -> 1 transition.
+-	 *
++	 *
+-	 * For example if we want an event generated every 8 ticks (if we calculated
++	 * For example if we want an event generated every 8 ticks (if we calculated
+-	 * a bit_index of 3), we would want the event to be generated whenever the
++	 * a bit_index of 3), we would want the event to be generated whenever the
+-	 * lower four bits of the counter transition from 0b0111 -> 0b1000. We can
++	 * lower four bits of the counter transition from 0b0111 -> 0b1000. We can
+-	 * see that the bit at index 2 makes a falling transition in this scenario,
++	 * see that the bit at index 2 makes a falling transition in this scenario,
+-	 * so we would want EVENTI to be 2 instead of 3.
++	 * so we would want EVENTI to be 2 instead of 3.
+-	 */
++	 */
+-	if (bit_index != 0) {
++	if (bit_index != 0) {
+-		bit_index--;
++		bit_index--;
+-	}
++	}
+-
++
+-	arm64_eventi = bit_index;
++	arm64_eventi = bit_index;
+ }
+-
++
+ boolean_t
+ ml_delay_should_spin(uint64_t interval)
+ {
+-	cpu_data_t     *cdp = getCpuDatap();
++	cpu_data_t     *cdp = getCpuDatap();
+-
++
+-	if (cdp->cpu_idle_latency) {
++	if (cdp->cpu_idle_latency) {
+-		return (interval < cdp->cpu_idle_latency) ? TRUE : FALSE;
++		return (interval < cdp->cpu_idle_latency) ? TRUE : FALSE;
+-	} else {
++	} else {
+-		/*
++		/*
+-		 * Early boot, latency is unknown. Err on the side of blocking,
++		 * Early boot, latency is unknown. Err on the side of blocking,
+-		 * which should always be safe, even if slow
++		 * which should always be safe, even if slow
+-		 */
++		 */
+-		return FALSE;
++		return FALSE;
+-	}
++	}
+ }
+-
++
+ boolean_t
+ ml_thread_is64bit(thread_t thread)
+ {
 diff --git a/osfmk/arm64/proc_reg.h b/osfmk/arm64/proc_reg.h
 --- a/osfmk/arm64/proc_reg.h
 +++ b/osfmk/arm64/proc_reg.h
