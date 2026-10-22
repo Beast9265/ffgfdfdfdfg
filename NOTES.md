@@ -2,6 +2,33 @@
 
 
 
+## Active handoff: MARBLE early allocator arena (2026-10-22)
+
+User physical run39717047014 reaches MMU-on arm_vm_init; exact original
+abort bzero+0x1c first store, LR arm_vm_init+0x1b4, FAR=x0
+fffffe00080b4000 ESR96000047. Exact local safe kernel symbols agree.
+Root cause confirmed: initial avail_start/topOfKernelData PA8420b4000
+translates to that FAR, precisely the exclusive sparse WB endpoint.
+
+0082 adds bounded160-page/0x280000 early allocator capacity in BOTH aliases
+as WB/RW/AF/PXN/UXN L3s, replacing Device identity pages. Existing layout
+arena[8420b4000,842334000); future link reads actual T. Bound:2 roots+2 L2+
+16 kernel L3+138 conservative physmap L3+low globals1+framebuffer1.
+Pool/aperture/L1 limits checked after extension. Three MARBLE-only stage7
+labels surround invalid_tte/cpu_tte. All other assembly/patch sections
+unchanged. Full reasoning/validation: docs/MARBLE_EARLY_ALLOCATOR.md.
+
+Observed PASS:81 replay, strict0082 application, diff check; full real-header
+start.s preprocessing/arm64 assembly, arm_vm_init.c Mach-O compile; actual
+constructor QEMU8192 descriptors/all160 arena pages; linked-layout policy
+audit; SWEET preprocessing identical (__LINE__ normalized); zero MARBLE
+GICR_IPRIORITYR. Audit tool defaults160 pages; option0 reproduces old map.
+Safe for Actions BUILD. No full kernel link, new physical boot or CI run.
+No commit/push per explicit user request; no device/storage operation.
+Next: separately build, audit new link with actual ADT size, temporary boot
+and observe invalid_tte/cpu_tte zeroed labels and subsequent progress.
+Artifacts /tmp/arena-* and /tmp/mmu-start.{s,o}. Earlier handoffs historical.
+
 ## Active handoff: MARBLE original early-abort capture (2026-10-22)
 
 User reports real POCO F5 sparse-map boot reaches SWEET EARLY 1..7,
