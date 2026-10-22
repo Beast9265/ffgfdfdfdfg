@@ -70,7 +70,53 @@ Raw shim/out/marble-xnu/ios16-root-marble-20H392-gui-clean.img SHA256
 Sparse shim/out/marble-xnu/ios16-root-marble-20H392-gui-clean.simg SHA256
 cf5d9c434166aefb99f0d4d2d951c1cee4a16fbd911adb74010557b0915e75cd
 Validation /tmp/gui-clean-sparse-audit.txt, gui-sparse-check.py; all mounts closed.
-CI/package pending below. Unrelated sparse helper mode/breadcrumb doc preserved.
+Automated CI/package COMPLETE: source commit
+4aa216d1bf59fe69992ec151f24324a1fdae47bb, exact Actions39780521219 SUCCESS;
+headSha independently matches;13.5/DEVELOPMENT/MARBLE/keep_going=true.
+Fresh xnu/out-marble-ci-39780521219 artifact SHA256SUMS PASS; full MARBLE
+link PASS, zero undefined symbols. Linked crash hook compares32, null tee
+compares256 and caps each chunk256B; IOUserClient open trace compares400.
+Opt-in PE_parse_boot_argn and both name comparisons confirmed in disassembly.
+No SWEET stack/heap/sample helpers linked. SWEET/generic source paths retained.
+Exact old0082 remains byte-identical prefix; only three diagnostic files appended.
+
+Full linked/payload/boot audit PASS: all payload segments match this exact
+CI kernel after fixups, no RAMDisk/extra root segment, exact cmdline above.
+Boot BOARD=marble-xnu, clean stock boot_a repack/inspect, independent header/
+bounds/padding/locator and content proof PASS. Sparse bootstrap160-page arena/
+aliases/stacks/tables PASS. Four executable sections: zero physical CNTP
+instructions, one CNTV_CTL MSR. Existing UFS/HFS/rootrw, AMFI/platform policy,
+AKS/keybag and IOWatchdog linked proofs PASS. Graphics linked starts:
+IOCoreSurfaceRoot0xfffffe0007a62788; AppleCLCD0xfffffe0007a64d84.
+IOSurfaceRootUserClient::externalMethod0xfffffe0007a63cbc;
+IOMobileFramebufferUserClient::externalMethod0xfffffe0007a659a0.
+Both personalities and registration diagnostics retained. Packaged ADT exact
+framebuffer/canvas/scale and gic+disp0 only PASS; short exec and console retained.
+Kernel SHA256155b8f9e321aefe018d3aaf5f20dc745ec55bd1e32069ed35b6b9f466b9498b6
+Payload SHA256ab096607c92857b8583b2b190f5b22b25525ebbeaac4c71643bb215b132cc487
+Boot SHA2569f8791a65c9ae94a51abcb995f4b0d1175718446185e99902c798c06e1a8c0fc
+Final shim/out/marble-xnu/latest-marble-xnu.img17244160 bytes.
+Previous graphics boot preserved privately as marble-graphics-e32e5d7.img
+in same directory, independently rehashed f11a1225...ec8387 (full hash above).
+
+Standard simg2img expansion + cmp ALSO PASS for all17179869184 bytes; temporary
+expanded image removed. All local image mounts unmounted. Root input/debug
+images preserved. No full-tree Unicode traversal or unrelated root job changes.
+Logs /tmp/marble-gui-clean-{pipeline.log,ci.log,final-audit.txt,cntp.txt}; audit
+script /tmp/marble-gui-clean-final-audit.py; bounded linked hooks /tmp/gui-linked-*.
+Interpretation and limits: docs/MARBLE_GUI_DIAGNOSTICS.md. git diff --check,
+staged whitespace/stat review PASS. Unrelated sparse helper mode/breadcrumb doc
+preserved. No fastboot/adb or physical-phone interaction performed.
+
+NEXT PHYSICAL RESULT PENDING: user manually installs clean sparse then boots
+new diagnostic image. Capture early SURF/FB registration, exec backboardd,
+IOK matching/open lines, |backboardd|/|SpringBoard| exception text and CRASH
+reason namespace/code. Limits apply per boot, so record early output. Do not
+assume missing display or ABI mismatch until those observations establish it.
+Manual commands ONLY (userdata replacement, no GPT changes):
+fastboot -S 512M flash userdata ~/ios-marble/shim/out/marble-xnu/ios16-root-marble-20H392-gui-clean.simg
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
+
 
 
 ## Active handoff: MARBLE IOSurface / framebuffer (2026-10-22)
