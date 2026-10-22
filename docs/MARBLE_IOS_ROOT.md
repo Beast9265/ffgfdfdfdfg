@@ -39,6 +39,36 @@ Full kernel link/exact CI/artifact/package validation pending below.
 Unrelated iosroot-sparse.sh mode change and bootstrap breadcrumbs preserved.
 No fastboot/adb, root rebuild, userdata flash, or phone interaction.
 
+Automated build/package COMPLETE: source commit
+c1116d6c987f1df1442aebe7a7843e59358cd244, exact Actions39766822009 SUCCESS;
+headSha independently matches. Inputs13.5/DEVELOPMENT/MARBLE/keep_going=true.
+CI confirms0082 and SweetKeyStore/KernelConfigTables compiles; full link PASS.
+Fresh xnu/out-marble-ci-39766822009 artifact SHA256SUMS PASS; no undefined symbols.
+Linked AppleKeyStore::start at0xfffffe0007a585d8 and
+AppleKeyStoreUserClient::externalMethod at0xfffffe0007a58860; both metaclasses
+present. Linked personality IOClass=AppleKeyStore / IOProviderClass=IOResources
+verified; MARBLE AKS diagnostic linked. Source enum/dispatch byte-identical;
+extracted actual dispatch ASan/UBSan checks0/14 success, handle0, invalid output
+and unsupported selector PASS (LeakSanitizer disabled for sandbox ptrace).
+Packaged ADT /defaults/no-effaceable-storage u32(1) PASS. Existing builder
+systembag recipe already satisfied, not rebuilt or mounted in this experiment.
+All payload segments byte-match exact CI kernel after fixups; full cmdline
+above verified; no RAMDisk property or extra root segment. BOARD=marble-xnu,
+stock boot_a repack/inspect and independent boot-v4 bounds/padding/content/
+locator checks PASS. Sparse bootstrap mappings/allocator/stacks/tables PASS.
+Four executable sections: zero physical CNTP instructions, one CNTV_CTL MSR.
+Linked built-in AMFI signed/platform policy, unsealed-root exception, writable
+UFS/HFS diagnostics and boot-manifest-hash48 retained; persistent logger absent.
+Kernel SHA256 073343099a5f3adb0bd6cc25150aca49ce6fb676413494b1fcb0a3c6c294205d
+Payload SHA256 bd761b7d1f80aeb5d8244a77e91169645e87574c36ad99eea1fa6890304967a1
+Boot SHA256 01f8e52e1fb809ac80251ab7470be591e6f1e3c128ab7f22cd23e4ef04bd408b
+Final shim/out/marble-xnu/latest-marble-xnu.img (17145856 bytes).
+Logs /tmp/marble-aks-{pipeline.log,ci.log,run.json,final-audit.txt,cntp.txt};
+linked methods /tmp/aks-linked-methods.txt. Physical AKS/keybag/cache transition
+PENDING user's manual boot. No phone operation or userdata rebuild performed.
+Manual command:
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
+
 
 ## Active handoff: MARBLE guarded writable root (2026-10-22)
 
