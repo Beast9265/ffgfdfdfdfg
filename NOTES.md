@@ -1,6 +1,51 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
 
+## Active handoff: MARBLE real Apple userspace / AMFI registration (2026-10-22)
+
+User physical evidence on the existing NON-JOURNALED iOS16.7.16/20H392
+userdata root (supersedes earlier journal-failure handoff):
+- REAL APPLE DYLD: PASS
+- REAL APPLE LAUNCHD: PASS (Darwin Bootstrapper Version 7.0.0)
+- launchd ondemand mode: PASS
+- first boot task fsck spawned: PASS
+- fsck platform-binary policy: FAIL (boot task is not a platform binary)
+
+Root cause confirmed by full reverse/replay0001..0082 of pinned
+xnu-8796.141.3; strict0082 application PASS. Final sweet_amfi.c and
+SweetEntitlements.cpp compile for MARBLE. Existing signature MAC hook sets
+CS_SIGNED unconditionally and CS_PLATFORM_BINARY for MNT_ROOTFS and attaches
+entitlements only to a writable blob lacking them. However bsd_init.c called
+sweet_amfi_policy_register() under a SWEET-only guard.0082 now extends only
+that registration guard to SWEET || MARBLE; existing provider reused.
+MARBLE-only registration diagnostic uses MARBLE AMFI prefix and prints status
+and error (success: MARBLE AMFI: platform binary policy registered (0)).
+No per-exec logging; existing SWEET Sandbox registration behavior retained.
+
+Local real-header arm64 object compiles PASS: bsd_init.c, sweet_amfi.c,
+SweetEntitlements.cpp. Final MARBLE preprocessing proves call, CS_SIGNED
+0x20000000, rootfs CS_PLATFORM_BINARY0x04000000 and conditional entitlement
+attachment. SWEET and generic BCM2837 before/after preprocessed tokens match
+(normalized source line numbers). Hook body unchanged; code-directory/page-hash
+validation and trust-cache policy unchanged. Logs/objects/source proofs:
+/tmp/amfi-validate.py, /tmp/amfi-objects, /tmp/amfi-final-*.i.
+
+Next SWEET blocker audit: config/MASTER.arm64.marble already includes bindfs;
+tools/mkadt.py already emits /chosen/boot-manifest-hash (48-byte fixed SHA384
+stand-in, not an authenticated manifest). No change required. Historical SWEET
+mount -P 1 then remounted / via mount_hfs and failed EROFS on read-only root;
+this is a prediction for MARBLE, not yet physically observed. No rootrw or UFS
+write support added. Shared-cache trust-cache warnings remain untouched.
+
+Existing physical userdata root is GOOD and preserved: no root rebuild, flash,
+filesystem edits or phone interaction. MMU/GIC/timer/SGI/UFS/GPT/HFS/root-auth/
+framebuffer/shared-cache ADT policy unchanged. Exact planned payload cmdline:
+debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1
+NO RAMDisk, ufsrw or rootrw. Expected manual next result: registration success,
+Doing boot task, fsck progression without boot task is not a platform binary.
+Physical success remains pending. Full link/exact CI/package results follow.
+Unrelated tools/iosroot-sparse.sh and docs/MARBLE_BOOTSTRAP_BREADCRUMBS.md preserved.
+
 ## Active handoff: MARBLE fresh journal blocks real root (2026-10-22)
 
 User physical report:

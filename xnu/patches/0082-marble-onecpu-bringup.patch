@@ -12601,3 +12601,80 @@ diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
 -	}
 +	}
  #endif
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -684,21 +684,21 @@
+-	/*
++	/*
+-	 * Initialize the calendar.
++	 * Initialize the calendar.
+-	 */
++	 */
+-	bsd_init_kprintf("calling IOKitInitializeTime\n");
++	bsd_init_kprintf("calling IOKitInitializeTime\n");
+-	IOKitInitializeTime();
++	IOKitInitializeTime();
+-
++
+-	/* Initialize the file systems. */
++	/* Initialize the file systems. */
+-	bsd_init_kprintf("calling vfsinit\n");
++	bsd_init_kprintf("calling vfsinit\n");
+-	vfsinit();
++	vfsinit();
+-
++
+-#if defined(ARM64_BOARD_CONFIG_SWEET)
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_MARBLE)
+-	/* AMFI's MAC policy is built in on SWEET (bsd/kern/sweet_amfi.c). */
++	/* AMFI's MAC policy is built in on SWEET (bsd/kern/sweet_amfi.c). */
+-	extern void sweet_amfi_policy_register(void);
++	extern void sweet_amfi_policy_register(void);
+-	sweet_amfi_policy_register();
++	sweet_amfi_policy_register();
+ #endif
+-
++
+ #if SWEET_HFS
+-	/* HFS is built in on SWEET: register it like its kext would, before mounting root. */
++	/* HFS is built in on SWEET: register it like its kext would, before mounting root. */
+-	extern void sweet_hfs_register(void);
++	extern void sweet_hfs_register(void);
+-	sweet_hfs_register();
++	sweet_hfs_register();
+ #endif
+diff --git a/bsd/kern/sweet_amfi.c b/bsd/kern/sweet_amfi.c
+--- a/bsd/kern/sweet_amfi.c
++++ b/bsd/kern/sweet_amfi.c
+@@ -367,17 +367,21 @@
+-
++
+ static mac_policy_handle_t sweet_amfi_mac_handle;
+-
++
+ /* Called from bsd_init once MAC policies can register, before any exec. */
+ void sweet_amfi_policy_register(void);
+-
++
+ void
+ sweet_amfi_policy_register(void)
+ {
+-	int error = mac_policy_register(&sweet_amfi_mac_conf, &sweet_amfi_mac_handle, NULL);
++	int error = mac_policy_register(&sweet_amfi_mac_conf, &sweet_amfi_mac_handle, NULL);
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++	printf("MARBLE AMFI: platform binary policy %s (%d)\n",
++#else
+-	printf("SWEET AMFI: platform binary policy %s (%d)\n",
++	printf("SWEET AMFI: platform binary policy %s (%d)\n",
++#endif
+-	    error ? "NOT registered" : "registered", error);
++	    error ? "NOT registered" : "registered", error);
+-	error = mac_policy_register(&sweet_sandbox_mac_conf, &sweet_sandbox_mac_handle, NULL);
++	error = mac_policy_register(&sweet_sandbox_mac_conf, &sweet_sandbox_mac_handle, NULL);
+-	printf("SWEET Sandbox: permissive policy %s (%d)\n",
++	printf("SWEET Sandbox: permissive policy %s (%d)\n",
+-	    error ? "NOT registered" : "registered", error);
++	    error ? "NOT registered" : "registered", error);
+ }
+ #endif /* ARM64_BOARD_CONFIG_SWEET */
