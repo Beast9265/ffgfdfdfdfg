@@ -115,6 +115,43 @@ Sparse img2simg/simg2img expansion matches all17179869184 bytes via cmp.
 | `shim/out/marble-xnu/ios16-root-marble-20H392.img` | `997010004d53fe9da60e966d0eb219fc9ba97977eee1f4bce3b060ee372498ae` |
 | `shim/out/marble-xnu/ios16-root-marble-20H392.simg` | `4a919839c873dd3fbf287442aeded96f8bcc1bdc1fd41373e6440100cc8643c2` |
 
-Exact MARBLE CI/package pending; no new boot-image hash claimed yet.
+## Exact CI and packaged boot result
+
+Build commit `3858504a05d377b1cd4c5df9e9487429524c8db9`;
+[Actions39756141953](https://github.com/Beast9265/ios-marble/actions/runs/39756141953)
+SUCCESS, headSha independently verified. Inputs13.5/DEVELOPMENT/MARBLE,
+keep_going=true. Fresh exact artifact `xnu/out-marble-ci-39756141953`;
+artifact SHA256SUMS PASS. Pinned HFS staging and0082 confirmed in CI log.
+
+| Artifact | SHA256 |
+| --- | --- |
+| `xnu/out-marble-ci-39756141953/kernel.development.marble` | `abe7215eb0365976f32e4fafcb17792438fad16637d50bdbe6c977a8265de2f6` |
+| `shim/out/marble-xnu/marble-xnu.payload` | `bec23d79a321d871f8e43e9bfe24abb80d20d1fd9e6ca2a94067566eaca38137` |
+| `shim/out/marble-xnu/latest-marble-xnu.img` | `fa05a9ea0e3a2e3ba96604a536862f5c9d70ae9431ce816c3b9c73165df6eeb4` |
+
+Exact payload cmdline matches the required line above; all segments match the
+exact linked kernel. No RAMDisk node/extra segment, no rd=md0, ufsrw or rootrw.
+Inherited asmb values verified, UFS PA0x01d84000,size0x3000.
+Linked kernel has zero undefined symbols, HFS/UFS retained, no UFS write,
+sync-cache or persistent logger symbols. Four executable sections contain
+zero physical CNTP instructions and one CNTV_CTL MSR. Bootstrap code/stacks/
+tables/aliases, sparse map and160-page allocator capacity PASS.
+Stock boot_a repack, inspect and independent header/bounds/padding/content/
+locator verification PASS; final image17137664 bytes, no trailing bytes.
+
+Logs: `/tmp/marble-iosroot-{build,sparse}.log` and
+`/tmp/marble-real-ios-{pipeline.log,ci.log,final-audit.txt,cntp.txt}`.
+Documentation-only follow-up does not change the build provenance above.
 
 No device commands executed. REAL IOS USERDATA FLASH NOT PERFORMED.
+
+## Manual device commands (not executed)
+
+The userdata command replaces its contents with the prepared iOS root; it
+must be performed manually by the user. No GPT/bootloader/recovery/modem/
+persist writes are part of this workflow.
+
+```sh
+fastboot -S 512M flash userdata ~/ios-marble/shim/out/marble-xnu/ios16-root-marble-20H392.simg
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
+```

@@ -1,7 +1,7 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
 
-## Active handoff: MARBLE real iOS root verified, CI/package next (2026-10-22)
+## Active handoff: MARBLE real iOS root and boot image verified (2026-10-22)
 
 MARBLE INTERNAL-UFS HFS PID1: PASS (user physical evidence).
 Local source research/ios16-20H392/dmgs now present and readable:
@@ -38,10 +38,34 @@ Sparse shim/out/marble-xnu/ios16-root-marble-20H392.simg SHA256
 Source/read-only verification mounts unmounted. Broader SWEET GUI/daemon
 root-tweaks deliberately unapplied for minimal first immutable-root attempt.
 No XNU/policy/hardware change. UFS stays strictly read-only.
-Logs /tmp/marble-iosroot-{build,sparse}.log. Next exact CI/package with
---cmdline-extra 'rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1',
-NO --ramdisk. Then linked kernel/payload/boot inspection, final hashes/docs.
+Logs /tmp/marble-iosroot-{build,sparse}.log. Build commit
+3858504a05d377b1cd4c5df9e9487429524c8db9 pushed origin marble;
+exact Actions39756141953 SUCCESS, independently verified headSha matches.
+Inputs13.5/DEVELOPMENT/MARBLE/keep_going=true; full link PASS. Fresh artifact
+xnu/out-marble-ci-39756141953, SHA256SUMS PASS. CI log confirms pinned
+hfs-627.100.6 staging31d5ec238dfab485e78a9a30b8b92d13e8914f03 and0082.
+Kernel SHA256 abe7215eb0365976f32e4fafcb17792438fad16637d50bdbe6c977a8265de2f6
+Payload SHA256 bec23d79a321d871f8e43e9bfe24abb80d20d1fd9e6ca2a94067566eaca38137
+Boot SHA256 fa05a9ea0e3a2e3ba96604a536862f5c9d70ae9431ce816c3b9c73165df6eeb4
+Final shim/out/marble-xnu/latest-marble-xnu.img17137664 bytes.
+Exact cmdline:
+debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1
+All payload segments match exact linked kernel; no extra root segment or
+RAMDisk property; inherited asmb0x6f/u32(1) verified; UFS PA01d84000+3000.
+No rd=md0, ufsrw/rootrw. Link zero undefined symbols; HFS/UFS retained;
+write/sync/persistent logger symbols absent.4 executable sections zero physical
+CNTP instructions and1 CNTV_CTL MSR. Sparse mappings,160-page allocator,
+code/stacks/tables/aliases/capacity PASS. Boot-v4 stock-boot repack/inspect,
+independent header/bounds/padding/content/locator PASS; no trailing bytes.
+Logs /tmp/marble-real-ios-{pipeline.log,ci.log,final-audit.txt,cntp.txt}.
+Expected next blocker class (prediction): launchd/daemon writable /private/var
+state (SWEET saw EROFS) or absent platform services; no MARBLE Apple userspace
+physical result yet. SWEET ignition-level1 evidence documented in guide.
 No device commands. REAL IOS USERDATA FLASH NOT PERFORMED.
+Manual commands only (userdata replaced; no GPT changes):
+fastboot -S 512M flash userdata ~/ios-marble/shim/out/marble-xnu/ios16-root-marble-20H392.simg
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
+Documentation follow-up does not change above build/kernel provenance.
 
 ## Active handoff: MARBLE real iOS root source audit blocked (2026-10-22)
 
