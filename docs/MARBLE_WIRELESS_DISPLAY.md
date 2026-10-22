@@ -39,7 +39,8 @@ FigInstallBlock}.dis. No Apple binary or extracted cache is committed.
   other types use the native service path (0x1af229fd4..0x1af22a314).
 * CAWindowServer _detectDisplays (0x1884e3150) visits CLCD, RGBOut, Wireless
   in order. The first added server gets the main flag (0x1884e31dc..1ec).
-  Display construction assigns the incrementing display id (0x18841c728).
+  Display construction assigns the incrementing display id (0x18841c728);
+  its generator at0x1dcdf81a8 is initially zero in this cache.
   FBS immutable-display initialization tests displayId==1 (0x19b921bf0),
   independently copies isExternal (0x19b921ca0), and its identity description
   adds -External (0x19b924898). CA isExternal treats type1..3 as external
@@ -104,10 +105,30 @@ selectors8/18/28, and one provider-publication note. Existing bounded IOKit and
 crash diagnostics remain. All graphics operations, selector return values,
 surface/swap/copy/vsync/geometry/scale remain unchanged.
 
+The virtual GetDisplaySize implementation (0x1af22bddc) independently defaults
+to1080x1920 (constant pair at0x1af22d830). Its dimension state and digital
+mode state are distinct; the physical zero FBS mode is not evidence of a zero
+AppleCLCD selector8. The old NOTES statement that the main display must come
+from a kernel service was too broad: type2 is installed in userspace.
+
 ## Validation
 
 Complete0001..0082 patch replay and strict0082 application PASS. Both changed
 C++ units compile with matching CI headers/arm64 flags. Normalized preprocessing
 is unchanged for SWEET, BCM2837 and T8103. Source audit confirms the other0082
-sections are unchanged. Full MARBLE CI/link/package results are recorded in
-NOTES.md after completion. No phone command was executed.
+sections are unchanged. Source commit `0eb04bb90ed1fa36be6270aee38209ae4b362dd0`, exact Actions
+`39796176138` SUCCESS. Both changed units compile remotely; full link has zero
+undefined symbols. Fresh artifact SHA256SUMS verified. Linked PE has the disp0
+lookup/create/attach/register path; linked AppleCLCD still sets external=false,
+and personality has no classification overrides. Linked bounded diagnostic
+and unchanged timer audits PASS. Independent packaging audit verifies all kernel
+segments, ADT scale3/canvas1125x2436/physical1080x2400,stride4320 and existing
+boot args. Kernel/payload/boot hashes and manual command are in NOTES.md.
+Framebuffer minus diagnostic additions and all unrelated0082 sections are
+byte-identical to the preceding source. No root changes or phone commands.
+
+Next physical test must establish actual selector outputs and native display
+ordering. Expected service note: name/class AppleCLCD, external=false,
+AppleTV/dfr absent, iomfb-type0, provider disp0, canvas1125x2436; selector8
+1125,2436, selector18 1, selector28 458. These remain predictions until the
+user's manual boot. Visible GUI and stable SpringBoard are not claimed.

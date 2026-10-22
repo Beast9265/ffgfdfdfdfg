@@ -26,8 +26,43 @@ adds32 actual service-property/provider/canvas notes and96 copied selector8/18/2
 notes for backboardd/SpringBoard/MobileGestaltHelper, plus one nub note.
 Source expected1125x2436,1,458; actual physical outputs still UNMEASURED.
 Full replay/strict0082 PASS, both changedunit arm64 compiles PASS; SWEET/BCM2837/
-T8103 normalized preprocessing unchanged. CI/link/package pending.
+T8103 normalized preprocessing unchanged. Source audit confirms framebuffer
+minus diagnostics byte-identical; all other0082 sections byte-identical.
+Source commit0eb04bb90ed1fa36be6270aee38209ae4b362dd0 pushed; exact Actions
+39796176138 SUCCESS, headSha independently matches,13.5/DEVELOPMENT/MARBLE/
+keep_going=true. Exact fresh artifact checksum PASS, full link zero undefined.
+Actual CI log applies0082 and compiles both changed C++ units. Full package
+and independent audit PASS (all exact kernel segments after fixups, boot-v4
+header/bounds/padding, ADT, boot args, bootstrap aliases/stacks160-page arena).
+Linked PE atfffffe0007a71dd4: path literal arm-io/disp0 atfffffe00071417c3;
+createNub/attach/register vtable calls at1ecc/1ee4/1f00 after childFromPath1eb0
+(all addresses prefixedfffffe0007a7). Linked AppleCLCD external property at
+fffffe0007058265, Boolean false atfffffe0007a650f8. Personality no overrides.
+Linked value-note budget96 (cmp95) and service budget32, process allowlist,
+boot-arg gate present. Existing UFS/HFS/AKS/WDT/AMFI/IOSurface/IOKit/crash/
+personas/swap compatibility preserved. PhysicalCNTP scan zero, CNTV_CTL1.
+Logs /tmp/marble-display-{pipeline.log,ci.log,run.json,final-audit.log,cntp-audit.log};
+source/compile/linked evidence scripts in /tmp/marble-display-re/.
+Counter at0x1dcdf81a8 starts0;
+first CA display gets id1. Type2 virtual GetDisplaySize has its own1080x1920
+fallback; physical zero CADisplay mode is not native selector8 output.
 Existing containers root remains the manual test root; no root rebuild needed.
+Kernel xnu/out-marble-ci-39796176138/kernel.development.marble SHA256
+ eda492ac958e06bfd47c539cb139e4211636fdba3a125b6d8699379d7b8edf6f
+Payload shim/out/marble-xnu/marble-xnu.payload SHA256
+ 1dad6cd9c96b55b2d08cbbb07840141012914f942a8dc76bfaec861d95add4c4
+Boot shim/out/marble-xnu/latest-marble-xnu.img SHA256
+ 7163db2431e89a3af433996b504f3b91597b3d5db5d3efddefc62c8b218793ce
+ADT048e2e41...b3145175; shim586713d3...1715ee05 unchanged.
+Exact existing real-iOS args preserved including marbleguidiag=1.
+Manual next command (keep existing containers root):
+ fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
+Expected new proof: MARBLE DISPLAY disp0 published; registered AppleCLCD,
+external=false AppleTV/dfr absent,iomfb-type0,provider disp0 canvas1125x2436;
+IOK backboardd matching IOMobileFramebuffer/open AppleCLCD/IOCoreSurfaceRoot;
+actual sel8=1125,2436,sel18=1,sel28=458 from named callers. These are expected,
+NOT physical observations. Check whether native primary displaces Wireless as
+main and whether SpringBoard stays alive; GUI remains UNTESTED for this build.
 No fastboot/adb or other phone commands executed.
 
 ## Previous handoff: MARBLE container prerequisites (2026-10-23)
