@@ -119,11 +119,13 @@ equivalence; MARBLE preprocessing excludes all write/sync/log paths and ufsrw;
 actual read/GPT host functions pass ASan/UBSan bounds/overflow/CRC/malformed-GPT
 cases; actual readiness host function passes exact ACTIVE CDB/LUN, initial-ready
 skip, unexpected-error stop, one activation only and five-second timeout.
+The actual submission guard also passes 262,144 opcode/LUN/gate/direction
+cases and rejects mutated ACTIVE CDBs and all WRITE10/SYNC requests.
 Leak checking disabled because sandbox ptrace prevents LeakSanitizer; address
 and undefined-behavior sanitizers remain enabled. Existing six MARBLE tests
 pass including added UFS ADT assertions. git diff --check passes.
 Local audit scripts/results: /tmp/ufs-{validate.py,static.py,host-check.py,
-readiness-check.py,marble.i,preflight-map.txt}; compile objects/logs
+readiness-check.py,opcode-check.py,marble.i,preflight-map.txt}; compile objects/logs
 /tmp/ufs-sweet_ufs.c.{o,log}, /tmp/ufs-IOKitBSDInit.cpp.{o,log}.
 
 A full linked kernel cannot be built locally with the available Linux SDK;
@@ -150,3 +152,34 @@ HFS filesystem or userspace execution is required. Do not format/flash to fix it
 
 Automation stops after image verification. It never invokes fastboot or adb,
 and never boots/reboots/writes the phone. The user manually boots the image.
+
+## Verified diagnostic artifact
+
+Build commit: `2ef4386a869373468ad31ac614206e7fb5367ecb`.
+[Actions 39733746933](https://github.com/Beast9265/ios-marble/actions/runs/39733746933)
+succeeded; exact head SHA and artifact checksum verified. Full linked kernel
+has no undefined symbols, retains UFS/HFS, excludes write/sync/log functions.
+Four executable sections contain zero CNTP instructions and one CNTV_CTL MSR.
+Final payload segment-by-segment comparison, ADT UFS PA/no-RAMDisk checks,
+160-page sparse-map audit and independent boot-v4 post-write checks all pass.
+XNU UFS physical boot remains pending; stage-0 and HFS RAMDisk successes above
+are user observations. No physical phone commands were run.
+
+SHA256:
+
+```text
+kernel   46316df9660a03575cf70b71395ce7b830cf9ea012c8deefb19dc6b25f032912
+payload  642f1064efbc302121fc2cfe907239116f8e050ea629c2f23e3bde92670efedf
+boot     a94b786b5ecf634971697a47edb762672883cee75714e77903d19c06eee9b2bd
+```
+
+Final image: `shim/out/marble-xnu/latest-marble-xnu.img`.
+The Android boot-v4 generic-ramdisk field transports only the kernel/ADT payload
+and locator footer; it contains no XNU root RAMDisk or userspace image.
+Documentation-only follow-up commits do not change this kernel provenance.
+
+Manual command:
+
+```sh
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
+```

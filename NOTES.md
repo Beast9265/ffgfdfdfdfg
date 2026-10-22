@@ -29,10 +29,39 @@ constructors/parser/log thread; host actual read/GPT and readiness functions
 ASan/UBSan PASS incl CRC/overflow/bounds/gate/single ACTIVE/timeout;6 existing
 MARBLE tests PASS incl ADT UFS assertions; old-kernel sparse map preflight PASS
 (reference only); diff check PASS. /tmp/ufs-* holds scripts/objects/audits.
-Full link must be validated in exact Actions run (Linux has no full XNU SDK).
-Details docs/MARBLE_UFS_ROOT.md. Pipeline next: commit/push/Actions/package with
+Full link validated in exact Actions run below (Linux has no full XNU SDK).
+Details docs/MARBLE_UFS_ROOT.md. Pipeline completed with
 --cmdline-extra rd=ufsroot0, NO --ramdisk. No rootrw/ufsrw. No phone commands.
 Do not modify userdata; mount failure after ufsroot0 discovery is expected.
+
+Exact build2ef4386a869373468ad31ac614206e7fb5367ecb / Actions39733746933
+SUCCESS (4m1s); headSha independently verified. Fresh exact artifact directory
+xnu/out-marble-ci-39733746933; kernel SHA256SUMS independently matches.
+CI logs verify pinned hfs-627.100.6 staging31d5ec238dfab485e78a9a30b8b92d13e8914f03
+and both changed units compiled. Full link zero undefined symbols; UFS root and
+HFS registration/mount symbols present; UFS write/sync/persistent-log symbols absent.
+Linked4 executable sections: zero physical CNTP instructions,1 CNTV_CTL MSR.
+Additional actual submission-guard ASan/UBSan test passes262144 opcode/LUN/gate/
+direction cases and mutated ACTIVE rejection. No change after build to source.
+Exact payload has command line debug=0xc serial=3 cpus=1 keepsyms=1
+-enable_kprintf_spam rd=ufsroot0; ramdisk None, no RAMDisk ADT property, no extra
+root segment, every segment byte matches exact CI kernel. ADT UFS PA01d84000.
+ADT842128000 size3956, boot_args84212c000, top842130000;160-page allocator
+ends8423b0000. Exact sparse loaded-segment/stack/table/alias/arena/capacity PASS.
+BOARD=marble-xnu build/stock boot_a repack/inspect and independent post-write
+header/bounds/padding/shim/payload/MRBLXNU1 locator checks PASS, no trailing bytes.
+Kernel SHA256 46316df9660a03575cf70b71395ce7b830cf9ea012c8deefb19dc6b25f032912
+Payload SHA256 642f1064efbc302121fc2cfe907239116f8e050ea629c2f23e3bde92670efedf
+Boot SHA256 a94b786b5ecf634971697a47edb762672883cee75714e77903d19c06eee9b2bd
+Final image shim/out/marble-xnu/latest-marble-xnu.img; hashes independently reread.
+Logs /tmp/marble-ufs-{pipeline,ci}.log, /tmp/ufs-{final-audit,linked-cntp,
+static-audit,host-audit,readiness-audit,opcode-audit}.txt. Documentation-only
+follow-up records results without changing kernel provenance. No phone commands.
+Physical XNU UFS test pending. Success boundary: userdata discovery + BSD root
+ufsroot0; existing Android/encrypted/non-HFS mount failure is expected.
+Next user manual command:
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
+Do not write/format/flash userdata. Preserve untracked breadcrumb doc.
 
 Earlier handoffs below are historical.
 
