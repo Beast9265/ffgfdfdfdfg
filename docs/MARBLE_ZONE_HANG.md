@@ -242,3 +242,13 @@ Automated exact-commit CI and packaging results are recorded in NOTES.md after
 completion. No phone command is executed. The next physical result must identify
 the new image's provenance and generation/boundary marker. A successful build
 alone does not establish that the physical hang is fixed.
+
+Exact source commit b3008501e9a78e92c2d2005cfd0cb59ac190f1a8 built successfully
+in Actions [39726707388](https://github.com/Beast9265/ios-marble/actions/runs/39726707388)
+(build 3m14s). Independent run metadata confirms that head SHA. The downloaded
+linked kernel passes the physical-timer encoding scan (four executable sections,
+zero physical-timer instructions, one CNTV_CTL MSR), sparse mapping audit with
+actual 3760-byte ADT/160-page arena, and diagnostic-call disassembly inspection.
+The helper completed payload/shim generation, stock boot_a repacking, boot-v4
+inspection and independent post-write verification. Final hashes and manual
+boot command are in the active NOTES handoff. Physical diagnostic result pending.

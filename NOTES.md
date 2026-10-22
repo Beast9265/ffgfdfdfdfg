@@ -35,8 +35,30 @@ Mach-O compile; SWEET full preprocessing byte-identical including __LINE__;
 all old0082 sections identical; physical timer absent in relevant preprocessing/
 object; timer27/SGI1/Group1 unchanged and zero GICR group/priority MMIO;
 zalloc object inspection; diff check. /tmp/zone-* contains validation artifacts.
-Next: stage intentional patch/report/NOTES only, run automated exact-commit
-MARBLE helper, verify linked kernel/packaging/hashes, record results here.
+Milestone: diagnostic source/report committed and pushed as
+b3008501e9a78e92c2d2005cfd0cb59ac190f1a8. Exact Actions39726707388 running
+with13.5/DEVELOPMENT/MARBLE/keep_going=true. Helper passed commit/push/dispatch;
+Run39726707388 SUCCESS (build3m14s), headSha independently confirmed.
+Exact xnu-kernel downloaded to xnu/out-marble-ci-39726707388. Linked executable
+scan: four code sections, zero physical timer instructions, one CNTV_CTL MSR.
+Linked zalloc disassembly confirms all requested bracketing calls. Sparse linked
+map audit PASS with actual3760-byte ADT:160-page arena, owned tail/stacks/tables,
+alias attributes/framebuffer/capacity. No forbidden MMU/GIC/timer/ADT change.
+Helper regenerated ADT/payload with debug=0xc serial=3 cpus=1 keepsyms=1
+-enable_kprintf_spam; BOARD=marble-xnu build, stock boot_a repack, boot-v4 inspect
+and independent post-write boundary/padding/content verification all PASS.
+Final image16637952 bytes: shim/out/marble-xnu/latest-marble-xnu.img.
+SHA256 kernel c400971ea61ba2ddaf85a41555dbf38f8fa7934e2b8ab0513767c35b0c308ecd
+payload f217a87648ab904fa3c98b165a3ad5591048dbc4f40e83d905b01e165332fded
+boot 241d78fd768336db70e13e9be50a9ae6cdc5674287a5cdc474ed3bb86f1f87bd
+ADT 2f324b0344746d2eb9beb6fbf5725d0506135e6fc291bd1d9359b4e2d5e408e9
+shim 586713d3b4c5862f73443cb1e5f555e465a9ffa5f3e2662672d41fff1715ee05
+Hashes independently re-read. /tmp/zone-new-linked.txt, zone-linked-map.txt and
+zone-linked-disassembly.txt record final audits. Physical boot pending; no claim
+that this diagnostic fixes the hang. Next user manual command:
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
+Collect generation and newest boundary beside blank cursor rows. No automatic
+phone interaction. Follow-up documentation commit does not alter kernel provenance.
 No physical-device interaction; final image must be booted manually by user.
 
 Earlier handoffs below are historical.
