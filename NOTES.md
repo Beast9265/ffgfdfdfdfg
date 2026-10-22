@@ -2,6 +2,8 @@
 
 ## Active handoff: MARBLE GUI diagnostic root (2026-10-22, COMPLETE)
 
+Helper/test/artifact handoff commit397686b (root-only; no new CI).
+
 User reports latest physical watchdog kernel alive for 15+ minutes, repeatedly
 spawning bluetoothd through xpcproxy while other services occasionally progress.
 No XNU/graphics change requested. Existing d73336bb / Actions39768601240 kernel,
