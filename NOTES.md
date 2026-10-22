@@ -1,7 +1,36 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
 
-## Active handoff: MARBLE container prerequisites (2026-10-23)
+## Active handoff: MARBLE missing native display provider (2026-10-23)
+
+LATEST USER PHYSICAL RESULT: SpringBoard throws NSInternalInconsistencyException,
+"We expect a valid bounds for configuration:" for Wireless / wireless0,
+Main-External, bounds/pixelSize0x0, currentMode0x0@0Hz, preferredScale1.
+Containers hierarchy PASS; pre-display container wall PASSED; SpringBoard FBS
+path PASS; configuration constructed PASS; Wireless INVALID; SpringBoard
+stable FAIL; visible GUI FAIL. Swap compatibility installed/validated; no direct
+physical VNOP_EXCHANGE invocation inferred from this exception alone.
+
+Source-backed diagnosis: 20H392 IOMFB installs userspace virtual type2 wireless0
+through MediaToolbox/FigInstallVirtualDisplay. QuartzCore names it Wireless;
+first display can receive FBS Main identity independently of external status.
+It is NOT an AppleCLCD property classification. AppleCLCD explicitly external=false,
+no AppleTV/dfr properties or personality overrides -> native type0.
+CRITICAL missing prerequisite: MARBLE platform expert never publishes arm-io/disp0.
+Working SWEET0046 publishes arm-io children; MARBLE only CPU/root children.
+Detailed addresses, source/linked evidence and limits: docs/MARBLE_WIRELESS_DISPLAY.md.
+
+Minimal fix in0082: publish ONLY disp0 nub under MarblePlatformExpert. No mode
+ABI/root/AirPlay/scale/surface/swap/copy/vsync changes. MARBLE marbleguidiag
+adds32 actual service-property/provider/canvas notes and96 copied selector8/18/28
+notes for backboardd/SpringBoard/MobileGestaltHelper, plus one nub note.
+Source expected1125x2436,1,458; actual physical outputs still UNMEASURED.
+Full replay/strict0082 PASS, both changedunit arm64 compiles PASS; SWEET/BCM2837/
+T8103 normalized preprocessing unchanged. CI/link/package pending.
+Existing containers root remains the manual test root; no root rebuild needed.
+No fastboot/adb or other phone commands executed.
+
+## Previous handoff: MARBLE container prerequisites (2026-10-23)
 
 LATEST USER PHYSICAL RESULT: clean GUI root + bounded diagnostic kernel reaches
 backboardd, AppleKeyStore open success and HID/accessory lookups, but NO lookup

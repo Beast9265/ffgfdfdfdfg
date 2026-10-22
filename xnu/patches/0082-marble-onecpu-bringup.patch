@@ -439,7 +439,7 @@ diff --git a/iokit/Kernel/arm/MarblePlatformExpert.cpp b/iokit/Kernel/arm/Marble
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/MarblePlatformExpert.cpp
-@@ -0,0 +1,86 @@
+@@ -0,0 +1,109 @@
 +/*
 + * Minimal device-tree platform expert for POCO F5 / Redmi Note 12 Turbo (marble).
 + * Uses XNU's normal platform, power-domain and nub initialization. Hardware
@@ -451,6 +451,7 @@ new file mode 100644
 +#include <IOKit/IOPlatformExpert.h>
 +#include <IOKit/IODeviceTreeSupport.h>
 +#include <IOKit/IOLib.h>
++#include <pexpert/pexpert.h>
 +
 +class MarblePlatformExpert : public IODTPlatformExpert {
 +	OSDeclareDefaultStructors(MarblePlatformExpert);
@@ -504,6 +505,28 @@ new file mode 100644
 +		cpus->release();
 +	}
 +	createNubs(this, IODTFindMatchingEntries(root, kIODTExclusive, excludeList()));
++
++	/* No AppleARMIO publishes disp0. Match its nub under the platform expert,
++	 * as on SWEET: IOPlatformDevice::compareName asks its provider. */
++	IORegistryEntry *display = root->childFromPath("arm-io/disp0", gIODTPlane);
++	bool published = false;
++	if (display != NULL) {
++		IOService *nub = createNub(display);
++		if (nub != NULL) {
++			if (nub->attach(this)) {
++				nub->registerService();
++				published = true;
++			}
++			nub->release();
++		}
++		display->release();
++	}
++	int diagnostic = 0;
++	if (PE_parse_boot_argn("marbleguidiag", &diagnostic, sizeof(diagnostic)) && diagnostic) {
++		IOLog("MARBLE DISPLAY: /arm-io/disp0 nub %s under MarblePlatformExpert\n",
++		    published ? "published" : "MISSING");
++	}
++
 +}
 +
 +bool
@@ -13220,7 +13243,78 @@ diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFrame
  #include <IOKit/IOService.h>
  #include <IOKit/IOUserClient.h>
  #include <IOKit/IOKitKeys.h>
-@@ -163,7 +168,7 @@
+@@ -149,6 +154,70 @@
+ 
+ OSDefineMetaClassAndStructors(IOMobileFramebufferUserClient, IOUserClient);
+ 
++#if defined(MARBLE)
++/* Diagnostics only; neither properties nor selector results are changed. */
++static bool
++marble_fb_diagnostic(void)
++{
++	int enabled = 0;
++	return PE_parse_boot_argn("marbleguidiag", &enabled, sizeof(enabled)) && enabled;
++}
++
++static const char *
++marble_fb_boolean(IORegistryEntry *entry, const char *key, bool *value)
++{
++	OSObject *object = entry->copyProperty(key);
++	OSBoolean *boolean = OSDynamicCast(OSBoolean, object);
++	*value = boolean != NULL && boolean->isTrue();
++	const char *text = object == NULL ? "absent" :
++	    (boolean == NULL ? "non-boolean" : (*value ? "true" : "false"));
++	OSSafeReleaseNULL(object);
++	return text;
++}
++
++static uint32_t
++marble_fb_u32(IORegistryEntry *entry, const char *key)
++{
++	if (entry == NULL) {
++		return 0;
++	}
++	OSObject *object = entry->copyProperty(key);
++	OSData *data = OSDynamicCast(OSData, object);
++	OSNumber *number = OSDynamicCast(OSNumber, object);
++	uint32_t value = 0;
++	if (data != NULL && data->getLength() == sizeof(value)) {
++		memcpy(&value, data->getBytesNoCopy(), sizeof(value));
++	} else if (number != NULL) {
++		value = number->unsigned32BitValue();
++	}
++	OSSafeReleaseNULL(object);
++	return value;
++}
++
++static void
++marble_fb_service_note(IOService *service, const char *event)
++{
++	static unsigned int notes;
++	if (notes >= 32 || !marble_fb_diagnostic()) {
++		return;
++	}
++	notes++;
++	bool external, appletv, dfr;
++	const char *ext = marble_fb_boolean(service, "external", &external);
++	const char *tv = marble_fb_boolean(service, "AppleTV", &appletv);
++	const char *df = marble_fb_boolean(service, "dfr", &dfr);
++	/* Exact 20H392 iomfb_match_callback Boolean classification. Type 2 is
++	 * a userspace virtual display, never selected by these properties. */
++	unsigned int type = dfr ? 3 : ((external || appletv) ? 1 : 0);
++	IOService *provider = service->getProvider();
++	IOLog("MARBLE DISPLAY: %s name=%s class=%s external=%s AppleTV=%s dfr=%s iomfb-type=%u provider=%s canvas=%ux%u\n",
++	    event, service->getName(), service->getMetaClass()->getClassName(),
++	    ext, tv, df, type, provider != NULL ? provider->getName() : "none",
++	    marble_fb_u32(provider, "canvas-width"), marble_fb_u32(provider, "canvas-height"));
++}
++#endif
++
++
+ bool
+ AppleCLCD::start(IOService *provider)
+ {
+@@ -163,7 +232,7 @@
  	fHeight = (uint32_t)video.v_height;
  	fRowBytes = (uint32_t)video.v_rowBytes;
  	if (fPhys == 0 || fWidth == 0 || fHeight == 0 || fRowBytes < fWidth * 4) {
@@ -13229,7 +13323,7 @@ diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFrame
  		return false;
  	}
  	int native = 0;
-@@ -182,14 +187,14 @@
+@@ -182,14 +251,14 @@
  	fPixels = fSurface != NULL ? fSurface->kernelAddress() : 0;
  	fWorkLoop = IOWorkLoop::workLoop();
  	if (fLock == NULL || fClients == NULL || fPixels == 0 || fWorkLoop == NULL) {
@@ -13246,16 +13340,19 @@ diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFrame
  		return false;
  	}
  	uint32_t hz = 10;
-@@ -201,7 +206,7 @@
+@@ -201,7 +270,10 @@
  	setProperty("external", false);
  	setProperty("DisplayPipePlaneBaseAlignment", 64ULL, 32);
  	registerService();
 -	IOLog("SWEET FB: AppleCLCD %ux%u stride %u at 0x%llx, default surface %u, presented as %ux%u\n",
++#if defined(MARBLE)
++	marble_fb_service_note(this, "registered");
++#endif
 +	IOLog(SWEET_FB_PREFIX "AppleCLCD %ux%u stride %u at 0x%llx, default surface %u, presented as %ux%u\n",
  	    fWidth, fHeight, fRowBytes, fPhys, fSurface->id, fLogicalW, fLogicalH);
  	return true;
  }
-@@ -304,7 +309,7 @@
+@@ -304,7 +376,7 @@
  	fDirty = true;
  	IOLockUnlock(fLock);
  	if ((++sweet_fb_swap_count % 1000) == 0) {
@@ -13264,7 +13361,7 @@ diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFrame
  	}
  }
  
-@@ -320,7 +325,10 @@
+@@ -320,7 +392,10 @@
  		if (PE_parse_boot_argn("sweetfb_noconsole", &quiet, sizeof(quiet)) && quiet != 0) {
  			/* Not PE_initialize_console(kPEDisableScreen): its console switch
  			 * writes the read-only-late cons_ops_index and panics. */
@@ -13275,7 +13372,7 @@ diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFrame
  		}
  	}
  
-@@ -338,7 +346,7 @@
+@@ -338,7 +413,7 @@
  		SweetSurface *s = sweet_surface_copy(id);
  		if (sweet_fb_swaps_logged < 16) {
  			sweet_fb_swaps_logged++;
@@ -13284,7 +13381,17 @@ diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFrame
  			    get32(rec, 0x50), layer, id, s ? s->width : 0, s ? s->height : 0,
  			    s ? s->pixelFormat : 0, s ? s->bytesPerRow : 0, sx, sy, get32(a, 8),
  			    get32(a, 12), dx, dy, w, h);
-@@ -528,7 +536,7 @@
+@@ -419,6 +494,9 @@
+ 		return false;
+ 	}
+ 	fFB->addClient(this);
++#if defined(MARBLE)
++	marble_fb_service_note(fFB, "client-open");
++#endif
+ 	return true;
+ }
+ 
+@@ -528,7 +606,7 @@
  			IOLockUnlock(fFB->fLock);
  			char name[32];
  			proc_selfname(name, sizeof(name));
@@ -13293,7 +13400,7 @@ diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFrame
  			    args->scalarInput[0] ? "on" : "off");
  		}
  		break;
-@@ -542,7 +550,7 @@
+@@ -542,7 +620,7 @@
  				fFB->fDirty = true;     /* on: redraw the latest frame */
  			}
  			IOLockUnlock(fFB->fLock);
@@ -13302,7 +13409,7 @@ diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFrame
  		}
  		break;
  	case kSweetFBSwapWait:
-@@ -562,10 +570,10 @@
+@@ -562,10 +640,29 @@
  		}
  		char name[32];
  		proc_selfname(name, sizeof(name));
@@ -13311,6 +13418,25 @@ diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFrame
  		    args->scalarInputCount, args->structureInputSize,
  		    args->scalarOutputCount, args->structureOutputSize, ret);
  	}
++
++#if defined(MARBLE)
++	/* Independent budget: generic once-per-selector logging may already
++	 * have been consumed by another process. Log the values actually copied. */
++	static unsigned int value_notes;
++	if (value_notes < 96 && (selector == 8 || selector == 18 || selector == 28) &&
++	    marble_fb_diagnostic()) {
++		char name[32];
++		proc_selfname(name, sizeof(name));
++		if (!strcmp(name, "backboardd") || !strcmp(name, "SpringBoard") ||
++		    !strcmp(name, "MobileGestaltHelper")) {
++			value_notes++;
++			uint64_t first = args->scalarOutputCount > 0 ? args->scalarOutput[0] : 0;
++			uint64_t second = args->scalarOutputCount > 1 ? args->scalarOutput[1] : 0;
++			IOLog("MARBLE DISPLAY: %s AppleCLCD sel=%u ret=0x%x scalar-count=%u values=%llu,%llu\n",
++			    name, selector, ret, args->scalarOutputCount, first, second);
++		}
++	}
++#endif
  	return ret;
  }
 -#endif /* SWEET */
