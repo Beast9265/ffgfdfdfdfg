@@ -39,9 +39,41 @@ strict git apply --whitespace=error independently checks added source.
 Exact boot args retained (NO RAMDisk):
 debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1 ufsrw=1 rootrw=1 launchd_unsecure_cache=1
 No userdata/root rebuild or phone operation. Unrelated iosroot-sparse.sh mode
-and bootstrap breadcrumbs preserved. Full CI link/package/linked proofs pending.
+and bootstrap breadcrumbs preserved. Full CI link/package/linked proofs completed below.
 Next physical test: observe MARBLE SURF registration, MARBLE FB AppleCLCD geometry,
 backboardd/SpringBoard selectors; stable SpringBoard/UI remains unproven.
+
+
+Automated CI/package COMPLETE: source commit
+e32e5d7235950c356c7742ef3ae3794b41dac844, exact Actions39777337402 SUCCESS;
+headSha independently matches.13.5/DEVELOPMENT/MARBLE/keep_going=true.
+Full kernel link PASS; fresh exact artifact SHA256SUMS PASS; zero undefined symbols.
+Linked IOCoreSurfaceRoot::start0xfffffe0007a61df4;
+IOSurfaceRootUserClient::externalMethod0xfffffe0007a63328;
+AppleCLCD::start0xfffffe0007a643f0;
+IOMobileFramebufferUserClient::externalMethod0xfffffe0007a6500c.
+Both graphics personalities and MARBLE SURF/FB diagnostics present in binary.
+Unrelated SWEET HID personalities absent; historical unguarded HID class symbols
+already exist in files.arm64 builds, unchanged by this port.
+Packaged ADT confirms only gic/disp0, PA0xb8000000,1080x2400,stride4320,
+visible0x009e3400, canvas1125x2436, display-scale3. Shim Boot_Video uses these
+same MARBLE constants; AppleCLCD reads PE_current_console. No SWEET PA constant
+in shared graphics sources. Console-mute symbol absent from linked MARBLE kernel;
+short exec string present and old entitlement/boot-arg verbose string absent.
+All payload segments match exact CI kernel after fixups; no extra root segment,
+no RAMDisk property; exact requested cmdline verified. BOARD=marble-xnu build,
+stock boot_a repack, inspect, independent boot-v4 byte/header/bounds/padding/
+locator checks and sparse bootstrap audit PASS. Existing UFS/HFS, AMFI platform
+policy/entitlement attachment, AKS/WDT, boot-manifest-hash48 proofs PASS.
+Kernel SHA256 bae253009a0d9eb4b2b84b9b9a589ec357312ddf9805b84b0c8421396264ba6e
+Payload SHA256 fa62c211686cc6caaf02a36d88926c9cb0a5e7f097f5a6b5771777fa4975cbb6
+Boot SHA256 f11a12254baa43dcce58d9ab9bef8c8fd2ef361d2fbe9e239421784e41ec8387
+Final shim/out/marble-xnu/latest-marble-xnu.img.
+Logs /tmp/marble-graphics-{pipeline.log,ci.log,run.json,final-audit.py,final-audit.txt}.
+Physical graphics registration, client activity, stable SpringBoard/UI PENDING.
+No root/userdata change or fastboot/adb/phone operation performed.
+Manual command:
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
 
 
 ## Active handoff: MARBLE watchdog discovery (2026-10-22)
