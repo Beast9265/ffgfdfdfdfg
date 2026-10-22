@@ -1,7 +1,77 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
 
-## Active handoff: MARBLE missing native display provider (2026-10-23)
+## Active handoff: MARBLE root-only migration experiment (2026-10-23)
+
+USER PHYSICAL MILESTONE: FIRST REAL iOS PIXELS ON MARBLE PASS; IOSurface CPU
+rendering/IOMobileFramebuffer presentation/AppleCLCD panel copy/data migration
+UI PASS. Apple logo + progress bar rendered. After >TWO HOURS, alive/no panic,
+fairplayd.H2/xpcproxy respawn flood; migration completion FAIL/stalled, Setup
+transition NOT observed. This is no longer useful forward progress.
+
+Exact local known-good root base from preceding manual test handoff:
+shim/out/marble-xnu/ios16-root-marble-20H392-containers.img, independently
+rehashed e37661d455f97abd29c392c7cd41894d4aa70c8d49ff4872a630ab26426927bb.
+Read-only HFS mount confirms all four containers, no migration plain/ByHost
+preferences, no datamigrator/migrate sentinel. Exact executable-discovered job:
+key /System/Library/LaunchDaemons/com.apple.fairplayd.H2.plist,
+Label com.apple.fairplayd.H2, Program /usr/sbin/fairplayd.H2,
+ProgramArguments absent. Printed full job before any edits.
+
+Current packaged boot SHA7163db2431e89a3af433996b504f3b91597b3d5db5d3efddefc62c8b218793ce
+contains raw chosen ECID0100454c4252414d/chip15800000, scale3 and cpus=1.
+Pinned XNU8796.141.3 generatePlatformUUID SHA1(namespace A6DD4CCBB5E84AF5ACDDB6DC6A0542B8
++raw8-byte ECID+raw4-byte chip),version5/variant bits yields
+MARBLE_IOPLATFORMUUID=54D1C396-5FC8-5946-BBD5-9A3600F4085D.
+Repro tools/ioplatform-uuid.py checks exact pinned source and SWEET known UUID.
+Source/linked0056 throttle PASS: swap stores latest1132-byte pending record,
+vsyncFired dirty+modulo fFlushTicks -> present, default60/10=6 ticks,16667us
+vsync (~10Hz copy); sweetfb_hz remains. No kernel/ADT rebuild or CI required.
+
+Historical correction: v10 com.apple.DataMigration.plist FAILED. v11 stable
+IOPlatformUUID+ByHost com.apple.migration still migrated. Working SWEET v12
+ALSO merged LastSystemVersion=20H392 into plain com.apple.migration.plist,
+preserving DMUserDataDisposition. It reached Setup Hello despite FairPlay/
+Bluetooth loops. MARBLE local base plain plist is ABSENT, so before keys=[];
+no existing DMUserDataDisposition to replace/manufacture.
+
+Next: separate setup-fast raw/sparse clone, remove ONLY exact H2 job, add plain
+migration LastSystemVersion and both UUID case ByHost variants501:5010600;
+ByHost501:5010755. Preserve bluetooth suppression, gui-clean/container/keybag
+state. Focused mounted audits BEFORE unmount and AFTER fsck/read-only remount PASS.
+fsck_hfs -f -n exit0 "iOSRoot appears OK"; both HX0005 headers attr0x2100,
+journal bit13 SET. Entire launchd plist semantically equals source minus ONLY
+identified H2 entry; no ambiguity. SpringBoard/backboardd/watchdogd/runningboardd/
+securityd/chronod retained; no GUI stdout/stderr /dev/console. Bluetoothd still
+absent intentionally; xpcproxy binary retained. Containers exact owners/modes
+and unchanged systembag SHA b04160a5...931604d verified; source hash unchanged.
+launchd/dyld/xpcproxy bytes and metadata unchanged. Plain migration keys before
+[] (absent) -> [LastSystemVersion], value20H392; no prior state discarded.
+ByHost upper/lower UUID variants and plain file501:5010600; directory501:5010755.
+Sentinel absent in both source/destination; no datamigrator deletion. No new
+com.apple.DataMigration.plist or unrelated daemon/audio/activation edits.
+img2simg PASS; independent RAW/FILL/DONTCARE decoder compared ALL17179869184
+expanded bytes directly against raw (no extra16GiB materialized image), PASS.
+Raw shim/out/marble-xnu/ios16-root-marble-20H392-setup-fast.img SHA256
+ 7ca8c990f98875d892ffa38f769f4a8bb5af23bdbabb4ee50d69d2df13822798
+Sparse shim/out/marble-xnu/ios16-root-marble-20H392-setup-fast.simg SHA256
+ cec3daf08e3236065d14c3939c48051430c7737f798c2b7d8affb475c3f4aa01
+Existing boot shim/out/marble-xnu/latest-marble-xnu.img rehashed unchanged:
+ 7163db2431e89a3af433996b504f3b91597b3d5db5d3efddefc62c8b218793ce
+No XNU/ADT/shim build, CI, boot-arg/SMP change. All HFS mounts closed.
+Evidence /tmp/setup-fast-{source.log,root.py,root.log,root-report.json,sparse.py,
+sparse.log,linked-throttle.txt,linked-uuid.txt}; docs/MARBLE_SETUP_FAST.md.
+Linked UUID namespace and SHA1/order/length/version/variant matched pinned
+source; existing kernel SHAeda492ac...b8edf6f unchanged. Throttle start default10
+atfffffe0007a6506c,60/hz at50a8; timer dirty/modulo at65308..31c -> present653a4;
+swap pending1132 bytes at65c7c..90 (all fffffe0007a prefixes where shortened).
+Next MANUAL experiment only: flash setup-fast sparse then boot existing image.
+Expected no H2 flood and migration skipped toward Setup; NOT physically tested.
+fastboot -S 512M flash userdata ~/ios-marble/shim/out/marble-xnu/ios16-root-marble-20H392-setup-fast.simg
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
+No phone commands, SMP, activation/audio/installcoordination changes.
+
+## Previous handoff: MARBLE missing native display provider (2026-10-23)
 
 LATEST USER PHYSICAL RESULT: SpringBoard throws NSInternalInconsistencyException,
 "We expect a valid bounds for configuration:" for Wireless / wireless0,
@@ -2246,7 +2316,7 @@ What it took today (in order): 0058 HID services (Apple IOHIDFamily-1915 user cl
 - **mediaserverd SIGSEGV loop explained (Codex report `/run/media/dipa/android/ios-sweet-work/codex/mediaserverd-report.md`):** the fault (FAR 0x390) is in the HAL plug-in `/Library/Audio/Plug-Ins/HAL/VirtualAudio.plugin/VirtualAudio` (ApplyBeamFormerPreference <- VirtualAudio_PlugIn::SetPropertyData <- HALS_AHPPlugIn::ObjectSetPropertyData <- AudioObjectSetPropertyData <- MediaExperience vaemVADSerializationListener): the default virtual audio device ('vdef', VirtualAudioDevice_Default) does not exist (no audio hardware/driver, no /product/audio). Proposed workaround for GUI bring-up: move VirtualAudio.plugin out of /Library/Audio/Plug-Ins/HAL/ in the next root image (untested). v11 reflashed OK after an interrupted flash (USB unplugged at chunk 25/25). Codex task 2: installcoordinationd crash loop.
 - **ROOT CAUSE of the endless migration: no IOPlatformUUID (2026-10-17).** datamigrator's `-[DMMigrator isMigrationNeededWithBuildVersion:lastBuildVersion:clientPID:]` gets lastBuildVersion from `-[DMEnvironment lastBuildVersionPref]` = `CFPreferencesCopyValue("LastSystemVersion", "com.apple.migration", kCFPreferencesCurrentUser, kCFPreferencesCurrentHost)` -> a ByHost file. The phone had `/var/mobile/Library/Preferences/com.apple.migration.plist` (only DMUserDataDisposition) and NO `Preferences/ByHost` directory at all. On arm XNU publishes IOPlatformUUID (gethostuuid) only from `/chosen/unique-chip-id` (8 bytes) + `/chosen/chip-id` (4 bytes) (IOPlatformExpertDevice::generatePlatformUUID, called from IOPlatformExpert::start); the SWEET ADT had neither, so every CurrentHost preference write failed. Fix: mkadt adds `unique-chip-id` = 0x5357454554000001 (synthetic) and `chip-id` = 0x8015 -> UUID `A9683613-3704-53F2-95D0-98A8FB574E78` (same SHA1 namespace computation as the kernel). ADT `shim/out/sweet-0057hi.adt`, boot image `shim/out/shim-boot-0056u.img` (0056 kernel + 0057hi ADT, QEMU OK). **Image v11** = v10 + `Preferences/ByHost/com.apple.migration.<UUID upper and lower>.plist` {LastSystemVersion: 20H392} (501:501, dir 0755 files 0600). Flashing v11 2026-10-17 ~20:10 UTC. Codex (gpt-6.1-sol high) analysing the mediaserverd SIGSEGV loop in `/run/media/dipa/android/ios-sweet-work/codex/` (report `mediaserverd-report.md`).
 - **v10 did NOT stop the migration (boot 0056n on v10, 19:18 UTC, `logs/boot-0056n-v10.txt`):** datamigrator + migrationpluginwrapper ran again, backboardd drew the progress UI (13000+ swaps in ~5 min). So `com.apple.DataMigration.plist`/LastSystemVersion is not the deciding input. What is known about the decision (datamigrator XPC service `DataMigration.framework/XPCServices/com.apple.datamigrator.xpc/com.apple.datamigrator`, strings): `Migration sentinel present. Migration necessary.` (sentinel `/private/var/datamigrator/migrate`, created and removed by datamigrator itself; absent in v10), `System build version changed from %@ to %@. Migration necessary.` / `...unchanged... not necessary`, `Disposition dictionary with build version %@ is out of date relative to current build version %@`, `SyntheticDidUpgrade`, DMUserDataDispositionManager; previous build source not found yet (not in the binary's plain strings; likely in DataMigration.framework's DMUserDataDispositionManager / preferences domain `com.apple.migration`). backboardd calls `DMPerformMigrationIfNeeded` and holds SpringBoard in `checkInAndWaitForDataMigration` until it returns. NEXT: find where the previous build version / disposition dictionary is stored (disassemble DataMigration.framework DMUserDataDispositionManager + datamigrator's isMigrationNeeded path), write it into the image; or get datamigrator's os_log out (OS_ACTIVITY_DT_MODE needs a launchd env change).
-- **Data migration never records completion -> skip it (image v10, 2026-10-17).** Boot 0056n (18:16 UTC, `logs/boot-0056n.txt`, 30 min): 10 Hz panel copies, backboardd still presents at ~60 Hz (107k swaps), SpringBoard still in `BKSSystemShellService _checkIn` at sample 14. Every migration run takes 1+ hour on cpus=1 and repeats each boot. DataMigration decides from `/var/mobile/Library/Preferences/com.apple.DataMigration.plist` key `LastSystemVersion` (vs ProductBuildVersion 20H392); the pulled phone root (21:01 local) had NO such file. **v10** = that pulled phone state + fsck.hfsplus -fy (volume was marked not cleanly unmounted -> Linux mounts it read-only even with -o force; fsck found only hard-link counts + minor volume header, repaired) + `com.apple.DataMigration.plist` {LastSystemVersion: 20H392} (501:501 0600). `/run/media/dipa/android/ios-sweet-ipsw/ios16-root-20H392-v10.img` (+ .sha256, .simg); v8 files deleted, v9 kept as fallback.
+- **Historical failed v10 hypothesis (image v10, 2026-10-17; disproved by the later v10 test).** Boot 0056n (18:16 UTC, `logs/boot-0056n.txt`, 30 min): 10 Hz panel copies, backboardd still presents at ~60 Hz (107k swaps), SpringBoard still in `BKSSystemShellService _checkIn` at sample 14. Every migration run takes 1+ hour on cpus=1 and repeats each boot. The then-unverified hypothesis used `/var/mobile/Library/Preferences/com.apple.DataMigration.plist` key `LastSystemVersion` (vs ProductBuildVersion 20H392); v10 disproved it, and v12 instead used the migration domain as documented above; the pulled phone root (21:01 local) had NO such file. **v10** = that pulled phone state + fsck.hfsplus -fy (volume was marked not cleanly unmounted -> Linux mounts it read-only even with -o force; fsck found only hard-link counts + minor volume header, repaired) + `com.apple.DataMigration.plist` {LastSystemVersion: 20H392} (501:501 0600). `/run/media/dipa/android/ios-sweet-ipsw/ios16-root-20H392-v10.img` (+ .sha256, .simg); v8 files deleted, v9 kept as fallback.
 - **Repo made PUBLIC (2026-10-17, user request) so GitHub-hosted macOS runners are free:** the 0056 CI run was refused ("recent account payments have failed or your spending limit needs to be increased"). Checked before: no device dumps, serials, IMEI or Apple binaries in the history (.gitignore keeps backup/, dtb/, recovery/, research/ out); commit author emails are public now. 0056 rerun `39056660104` passed -> `xnu/out-0056`, QEMU OK, image `shim/out/shim-boot-0056n.img` booted 18:16 UTC.
 - **Boot 0055n (17:16 UTC, ~65 min, `logs/boot-0055n.txt`): migration bar reached 99% in ~30 min (was ~60), then crawled.** Root cause of the slowness: backboardd presents the progress UI at ~58 Hz (**167,000 swaps in ~48 min**) and AppleCLCD copied the full 10 MB frame into the panel on every swap -> ~600 MB/s memcpy on the single CPU (cpus=1), starving everything (polled UFS I/O too). Sampler (16 frames): **SpringBoard waits in `-[BKSSystemShellService _checkIn]`** (synchronous BSXPC call to backboardd, from FBSystemShellInitialize <- SBSystemAppMain) - backboardd holds the system shell check-in until the data migration ends, so the migration is the gate to SpringBoard UI. **Patch 0056**: swap only records the latest swap record; the vsync timer copies it to the panel every 60/sweetfb_hz ticks (default 10 Hz); `SWEET FB: N swaps` every 1000.
 - **Boot 0054n (16:53 UTC, ~12 min, `logs/boot-0054n.txt`, patch 0054 sampler):** the data migration runs AGAIN on every boot (it completed once in the 0053s run) - completion is not being recorded. backboardd keeps swapping the progress UI (3700+ swaps in ~10 min, `SWEET FB: N swaps`). Sample during migration: SpringBoard main thread blocked in a synchronous XPC call (`mach_msg2_trap <- dispatch_mach_send_and_wait_for_reply <- xpc_connection_send_message_with_reply_sync <- -[BSXPCServiceConnectionMessage _sendSynchronously:] <- BSXPCServiceConnectionProxy ...`). Unsupported AKS selectors seen: 101 `aks_assert_consume`, 93 `aks_get_internal_info`, 34 `_aks_stash_load` (datamigrator), **35 `aks_get_extended_device_state`** (SpringBoard, chronod, remindd, searchd, symptomsd...). **Patch 0055**: AKS 35 answered like 17 (same DER device state), 101 succeeds; sampler backtraces 16 frames, 40 samples (~80 min).
