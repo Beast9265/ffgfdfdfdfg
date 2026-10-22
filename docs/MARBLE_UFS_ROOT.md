@@ -198,3 +198,27 @@ Manual command:
 ```sh
 fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
 ```
+
+## Corrected readiness diagnostic artifact
+
+Exact build 8ffd2c8f1be4f60557c6ceb178a1c794758b8ac0 / Actions39749948026
+SUCCESS, exact headSha independently verified; fresh xnu/out-marble-ci-39749948026.
+Artifact SHA256SUMS PASS. Actual ACTIVE construction host test PASS: TT01 flags00,
+LUNd0, expected length0, CDB1b0000001000, no data, no PRDT. Full linked kernel
+zero undefined symbols, HFS/UFS retained, write/sync/logger symbols absent.
+Four executable sections: zero physical CNTP instructions, one CNTV_CTL MSR.
+Independent payload exact-segment/no-RAMDisk/rd=ufsroot0, sparse-map/160-page
+allocator/aliases/stacks/tables and boot-v4 header/padding/content audits PASS.
+BOARD=marble-xnu + stock boot_a repack/inspect PASS. No rootrw/ufsrw.
+SHA256 independently reread:
+Kernel  2ab790b36885bb2d52b0813133d3ea8fcafcf271d5b4904a7dcd55fbb353eff6
+Payload e62944520fe5093e870b9c443ec9232189bd2a9bf56dcb2a04c3707ef53da336
+Boot    16c78dd824e69cabd8580a77133c99f27e855c0a2b8625dbe241c245cd0b9761
+Final image: shim/out/marble-xnu/latest-marble-xnu.img.
+Logs /tmp/marble-ready-pipeline.log, /tmp/ready-final-audit.txt,
+/tmp/ready-linked-cntp.txt. Corrected XNU physical result pending user's test.
+Expected next: TUR sense02/04/02 failure, device-WLUN ACTIVE LUN d0
+CDB1b0000001000, request/completion/result, then TUR polling if ACTIVE succeeds.
+ACTIVE success remains stage-0 evidence only. No phone commands executed.
+Documentation follow-up does not change kernel provenance.
+Manual: fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
