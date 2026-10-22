@@ -25,8 +25,34 @@ timer27/SGI1/Group1 and zero GICR group/priority MMIO. Original0082 prefix
 byte-identical. Prior linked kernel has zero physical timer instructions; exact
 new kernel scan pending CI. Shell syntax, existing MARBLE tests and diff check
 PASS. /tmp/ramdisk-* contains compile/comparison/audit artifacts. No device
-interaction. Next: commit/push exact MARBLE CI, package exact artifact
-with root and report hashes. Physical PID1 remains unproven until manual boot.
+interaction. Build commit899bfb1f59c66e9091d5bd16376899ac66aec219 pushed;
+exact Actions39728864936 SUCCESS, headSha independently verified. Exact
+xnu-kernel downloaded fresh to xnu/out-marble-ci-39728864936. Init rebuilt
+again after CI success, same hash; all ad-hoc CodeDirectory page hashes checked.
+Helper generated MARBLE ADT, payload WITH root + rd=md0, BOARD=marble-xnu
+shim, stock boot_a repack and boot-v4 inspect. Independent post-write boot
+header/bounds/padding/shim/payload+MRBLXNU1 locator comparison PASS.
+New linked scan:4 executable sections, zero physical timer instructions,
+1 CNTV_CTL MSR. Exact payload/map audit PASS: RAMDisk[8420ac000,8420b4000),
+ADT8420b4000, boot_args8420b8000, top8420bc000;160-page allocator ends84233c000.
+RAMDisk does not overlap kernel/stacks/tables/ADT/boot_args/allocator.
+Final image16654336 bytes: shim/out/marble-xnu/latest-marble-xnu.img.
+SHA256 kernel55f32622881732e32aa488283930d3c678425d1c005df25f5a1d974535f22026
+init/root f39a3fad30988599af8ed3c2d4d882d21f59f6478113bff8edef458d1476b40b
+payload fa98545b33b3ec474aeba86e51c06a416160039a584309c81d0973d017bf5d45
+boot54f4375a0e0d83eb48ccdd4e736e5b977e670c34e92e95b78cae4d8e0b88a277
+ADT008deddef65f712e00536a03b66208143b957cf0d21a483200c181a91c15ffa3
+shim586713d3b4c5862f73443cb1e5f555e465a9ffa5f3e2662672d41fff1715ee05
+Hashes independently re-read. /tmp/ramdisk-pipeline.log, final-map.txt,
+final-cntp.txt preserve packaging and linked validation output. This follow-up
+handoff is documentation only; kernel provenance remains899bfb1/39728864936.
+No physical-device commands run. New physical PID1 behavior remains unproven.
+Next user manual command:
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
+Observe RAMDisk/property, Added memory device md0, BSD root md0, setRootMedia,
+mockfs, exec/signature boundaries, then MARBLE USERSPACE banner and heartbeat.
+No UFS work or storage writes. Preserve unrelated untracked breadcrumb doc.
+
 
 Earlier handoffs below are historical.
 
