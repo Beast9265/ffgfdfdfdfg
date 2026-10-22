@@ -554,7 +554,7 @@ diff --git a/iokit/KernelConfigTables.cpp b/iokit/KernelConfigTables.cpp
  #if defined(ARM64_BOARD_CONFIG_SWEET)
      "   {"
      "     'IOClass'         = SweetPlatformExpert;"
-@@ -47,11 +53,15 @@
+@@ -47,6 +53,8 @@
      "     'IONameMatch'     = 'qcom,kryo470';"
      "     'IOProbeScore'    = 10000:32;"
      "   },"
@@ -563,12 +563,14 @@ diff --git a/iokit/KernelConfigTables.cpp b/iokit/KernelConfigTables.cpp
      "   {"
      "     'IOClass'         = AppleKeyStore;"
      "     'IOProviderClass' = IOResources;"
-     "     'IOMatchCategory' = AppleKeyStore;"
+@@ -57,6 +65,8 @@
+     "     'IOProviderClass' = IOResources;"
+     "     'IOMatchCategory' = IOWatchdog;"
      "   },"
 +#endif
 +#if defined(ARM64_BOARD_CONFIG_SWEET)
      "   {"
-     "     'IOClass'         = IOWatchdog;"
+     "     'IOClass'         = IOCoreSurfaceRoot;"
      "     'IOProviderClass' = IOResources;"
 diff --git a/iokit/conf/files.arm64 b/iokit/conf/files.arm64
 --- a/iokit/conf/files.arm64
@@ -13169,3 +13171,61 @@ diff --git a/bsd/kern/kern_core.c b/bsd/kern/kern_core.c
  /*
   * SWEET: off by default (sysctl kern.coredump=1 enables it). A crashing iOS
   * daemon maps the whole shared region, so one core is gigabytes on the root
+diff --git a/iokit/Kernel/arm/SweetWatchdog.cpp b/iokit/Kernel/arm/SweetWatchdog.cpp
+--- a/iokit/Kernel/arm/SweetWatchdog.cpp
++++ b/iokit/Kernel/arm/SweetWatchdog.cpp
+@@ -16,13 +16,19 @@
+  */
+ #include <pexpert/arm64/board_config.h>
+ 
+-#if defined(SWEET)
++#if defined(SWEET) || defined(MARBLE)
+ #include <IOKit/IOService.h>
+ #include <IOKit/IOUserClient.h>
+ #include <IOKit/IOKitKeys.h>
+ #include <IOKit/IOLib.h>
+ #include <IOKit/IOMemoryDescriptor.h>
+ #include <sys/proc.h>
++
++#if defined(MARBLE)
++#define SWEET_WDT_PREFIX "MARBLE WDT: "
++#else
++#define SWEET_WDT_PREFIX "SWEET WDT: "
++#endif
+ 
+ class IOWatchdog : public IOService {
+ 	OSDeclareDefaultStructors(IOWatchdog);
+@@ -49,7 +55,7 @@
+ 	setProperty(kIOUserClientClassKey, "IOWatchdogUserClient");
+ 	setProperty("IOPMUPrimary", 1ULL, 32);
+ 	registerService();
+-	IOLog("SWEET WDT: IOWatchdog registered (accepts check-ins, never fires)\n");
++	IOLog(SWEET_WDT_PREFIX "IOWatchdog registered (accepts check-ins, never fires)\n");
+ 	return true;
+ }
+ 
+@@ -98,10 +104,10 @@
+ 		}
+ 		char name[32];
+ 		proc_selfname(name, sizeof(name));
+-		IOLog("SWEET WDT: %s sel %u in %u/%u out %u/%u -> ok\n", name, selector,
++		IOLog(SWEET_WDT_PREFIX "%s sel %u in %u/%u out %u/%u -> ok\n", name, selector,
+ 		    args->scalarInputCount, args->structureInputSize,
+ 		    args->scalarOutputCount, args->structureOutputSize);
+ 	}
+ 	return kIOReturnSuccess;
+ }
+-#endif /* SWEET */
++#endif /* SWEET || MARBLE */
+diff --git a/bsd/sweet_hfs/core/hfs_catalog.c b/bsd/sweet_hfs/core/hfs_catalog.c
+--- a/bsd/sweet_hfs/core/hfs_catalog.c
++++ b/bsd/sweet_hfs/core/hfs_catalog.c
+@@ -757,7 +757,7 @@
+ }
+ 
+ 
+-#if defined(ARM64_BOARD_CONFIG_SWEET)
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_MARBLE)
+ /*
+  * SWEET: hard links made by Linux tools lack kHFSHasLinkChainBit and every
+  * lookup of them repairs (in memory) and reports it again; the console

@@ -1,5 +1,39 @@
 # MARBLE first real iOS root
 
+## Active handoff: MARBLE watchdog discovery (2026-10-22)
+
+Physical milestone reported by user on previous AKS kernel:
+AppleKeyStore PASS; keybag PASS; launchd cache PASS; LaunchDaemons PASS;
+watchdogd started PASS; IOWatchdog discovery FAIL. watchdogd pid140 exits
+namespace2/subcode0x5 after missing watchdog KEXT service, triggering panic.
+Current journaled writable 20H392 userdata root preserved; kernel-only test.
+
+Replayed0001..0081 and strict0082 PASS. Final mature SweetWatchdog.cpp has
+IOWatchdog/IOWatchdogUserClient, user-client property, IOPMUPrimary u32(1),
+setProperties success, scalar/direct/descriptor output zeroing and success
+for all selectors. Historical0/1/2/3/4/5/9 log once each (selectors>=64 retain
+historical per-call logging). No hardware MMIO, timers, timeout or reset path.
+0082 alone extends watchdog implementation/personality to MARBLE, retaining
+SWEET-only unrelated services; board-specific MARBLE WDT prefix, shared code.
+HFS limiter guard extended only: OSIncrementAtomic returns original value,
+so notes0..7 print; subsequent notes suppressed; all attribute repairs remain
+outside logging conditions. UFS write safety and all other source unchanged.
+Real CI-header arm64 compiles PASS: SweetWatchdog.cpp, KernelConfigTables.cpp,
+hfs_catalog.c. SWEET/BCM2837/T8103 normalized preprocessed tokens unchanged.
+Actual externalMethod ASan/UBSan harness PASS: listed selectors success,
+scalar/direct/descriptor zeroing including partial8-byte writes; once logs.
+Logs/scripts /tmp/wdt-{replay.log,compile.py,compile.log,abi.py,abi.cpp}.
+Patch context whitespace checked with patch-aware git whitespace settings;
+strict git apply --whitespace=error independently validates added source.
+
+Exact unchanged cmdline (NO RAMDisk):
+debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1 ufsrw=1 rootrw=1 launchd_unsecure_cache=1
+No root rebuild, userdata write, fastboot, adb or physical-phone operation.
+Full CI kernel link/package and linked proofs pending. Physical watchdog
+success remains pending manual boot; no display/GPU/IOSurface port attempted.
+Unrelated iosroot-sparse.sh mode and bootstrap breadcrumbs preserved.
+
+
 ## Active handoff: MARBLE AppleKeyStore / launchd cache transition (2026-10-22)
 
 User physical milestone on e5dc3809 / Actions39764011216:
