@@ -4,6 +4,44 @@ MARBLE INTERNAL-UFS HFS PID1: PASS (user physical report, 2026-10-22).
 Internal UFS, GPT, userdata, BSD ufsroot0, HFS mount, exec and sustained
 EL0 PID1 are physically proven. This milestone used the test init.
 
+## Physical result and next build: MARBLE fresh journal blocks real root (2026-10-22)
+
+User physical report:
+- REAL IOS ROOT UFS READ: PASS
+- HFS filesystem detected: PASS
+- HFS mount: blocked only by fresh journal initialization
+- journal write: EROFS as designed (strategy error 0x1e, errno 30)
+- Apple launchd: NOT REACHED YET
+
+BSD root ufsroot0 major1/minor0 and setRootMedia complete; mockfs declines
+non-Mach-O root with22. HFS detects journal offset0x82000/size0x800000,
+but journal_create cannot write its initial header; late journal init returns22,
+mountroot ultimately reports19 and retries. This is expected for fresh journaled
+HFS over deliberately read-only UFS, not evidence of a UFS read, HFS parser,
+or Apple userspace failure. SWEET initially used non-journaled HFS over read-only
+UFS; journaling followed writable-root support. Next experiment keeps UFS
+strictly read-only and disables filesystem journaling.
+
+Builder now accepts --no-journal in either order with --board marble; default
+SWEET invocation still supplies -J. Copy/link/keybag recipe unchanged; no
+sweet-root-tweaks.py. bash syntax PASS. Actual parser/mkfs invocation exercised
+on disposable32MiB volumes: default attributes0x2100; both no-journal option
+orders attributes0x100, journal bit13 clear in matching primary/alternate volume
+headers; fsck -f -n says iOSRoot appears OK for all three. These are builder
+checks, NOT verification of a new real iOS root image.
+
+Real16GiB rebuild attempted but BLOCKED by this execution sandbox: sudo reports
+no-new-privileges and cannot become root for APFS/HFS mounts or metadata copies.
+Log /tmp/marble-nojournal-build.log. No nojournal.img or nojournal.simg produced;
+no real-root fsck/content checks, sparse round-trip or new hashes available.
+Resume exact --board marble --no-journal command in docs/MARBLE_IOS_ROOT.md
+from a host session with working sudo. Do not flash an unbuilt image.
+Existing boot shim/out/marble-xnu/latest-marble-xnu.img rehashed unchanged:
+fa05a9ea0e3a2e3ba96604a536862f5c9d70ae9431ce816c3b9c73165df6eeb4
+No kernel/UFS/HFS/policy changes, no CI, no device commands. Unrelated untracked
+docs/MARBLE_BOOTSTRAP_BREADCRUMBS.md preserved. Changes committed locally;
+push origin marble failed: sandbox cannot resolve github.com. Push still pending.
+
 ## Verified local sources
 
 User-owned inputs under `research/ios16-20H392/dmgs/` (git-ignored):
@@ -52,14 +90,14 @@ Build command (local files only; host mount/copy commands require sudo):
 APFS_FUSE=/tmp/marble-apfs-host-unused/build/apfs-fuse \
 MKFS_HFSPLUS=/tmp/marble-hfsprogs/newfs_hfs.tproj/newfs_hfs \
 FSCK_HFSPLUS=/tmp/marble-hfsprogs/fsck_hfs.tproj/fsck_hfs \
-tools/mkiosroot.sh --board marble \
+tools/mkiosroot.sh --board marble --no-journal \
   research/ios16-20H392/dmgs/087-86698-044.dmg \
   research/ios16-20H392/dmgs/087-86593-047.dmg \
   research/ios16-20H392/dmgs/087-86715-047.dmg \
-  shim/out/marble-xnu/ios16-root-marble-20H392.img
+  shim/out/marble-xnu/ios16-root-marble-20H392-nojournal.img
 bash tools/iosroot-sparse.sh \
-  shim/out/marble-xnu/ios16-root-marble-20H392.img \
-  shim/out/marble-xnu/ios16-root-marble-20H392.simg
+  shim/out/marble-xnu/ios16-root-marble-20H392-nojournal.img \
+  shim/out/marble-xnu/ios16-root-marble-20H392-nojournal.simg
 ```
 
 The sparse helper runs img2simg, simg2img into a fresh temporary regular file,
@@ -143,15 +181,16 @@ Logs: `/tmp/marble-iosroot-{build,sparse}.log` and
 `/tmp/marble-real-ios-{pipeline.log,ci.log,final-audit.txt,cntp.txt}`.
 Documentation-only follow-up does not change the build provenance above.
 
-No device commands executed. REAL IOS USERDATA FLASH NOT PERFORMED.
+No device commands executed by the agent. The user subsequently reported the
+physical real-root boot above; earlier validation and hashes describe the journaled image.
 
-## Manual device commands (not executed)
+## Manual device commands (not executed; pending successful new image verification)
 
 The userdata command replaces its contents with the prepared iOS root; it
 must be performed manually by the user. No GPT/bootloader/recovery/modem/
 persist writes are part of this workflow.
 
 ```sh
-fastboot -S 512M flash userdata ~/ios-marble/shim/out/marble-xnu/ios16-root-marble-20H392.simg
+fastboot -S 512M flash userdata ~/ios-marble/shim/out/marble-xnu/ios16-root-marble-20H392-nojournal.simg
 fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
 ```

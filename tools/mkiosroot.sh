@@ -2,7 +2,7 @@
 # Build the SWEET/MARBLE iOS root: one case-sensitive HFS+ image holding an iOS OS
 # root filesystem plus its cryptexes, for the userdata partition (rd=ufsroot0).
 #
-#   mkiosroot.sh [--board sweet|marble] OS.dmg SYSTEMOS.dmg APPOS.dmg OUT.img [SIZE]
+#   mkiosroot.sh [--board sweet|marble] [--no-journal] OS.dmg SYSTEMOS.dmg APPOS.dmg OUT.img [SIZE]
 #   SIZE defaults to 16G; board defaults to sweet (historical behavior).
 #
 # The IPSW images are raw APFS with LZBITMAP-compressed files: they are read
@@ -11,8 +11,9 @@
 # /System/Cryptexes/{OS,App} link to; here they live inside the one volume.
 # Owners, modes, symlinks and hard links are preserved (rsync -aH as root).
 #
-# The volume is journaled (XNU replays the journal after a panic; Linux only
-# mounts it read-write with -o force and leaves the journal empty). SWEET
+# The volume is journaled by default (XNU replays it after a panic; Linux
+# mounts it read-write with -o force and leaves the journal empty). Use
+# --no-journal for a root on deliberately read-only UFS. SWEET
 # additions: /System/Library/Caches/com.apple.dyld hard-links the SystemOS
 # cryptex shared cache (ignition_level=1 looks there), and
 # /private/var/keybags/systembag.kb is the plain-plist system keybag that
@@ -20,13 +21,23 @@
 set -euo pipefail
 
 board=sweet
-if [[ ${1:-} == --board ]]; then
-	[[ $# -ge 2 ]] || { echo '--board needs a value' >&2; exit 2; }
-	board=$2
-	shift 2
-fi
+journal_args=(-J)
+while [[ ${1:-} == --* ]]; do
+	case $1 in
+		--board)
+			[[ $# -ge 2 ]] || { echo '--board needs a value' >&2; exit 2; }
+			board=$2
+			shift 2
+			;;
+		--no-journal)
+			journal_args=()
+			shift
+			;;
+		*) echo "unknown option: $1" >&2; exit 2 ;;
+	esac
+done
 [[ $board == sweet || $board == marble ]] || { echo "unknown board: $board" >&2; exit 2; }
-[[ $# -ge 4 ]] || { sed -n '2,12p' "$0"; exit 2; }
+[[ $# -ge 4 && $# -le 5 ]] || { sed -n '2,12p' "$0"; exit 2; }
 os=$(realpath "$1") sysos=$(realpath "$2") appos=$(realpath "$3") out=$4 size=${5:-16G}
 [[ ! -e $out ]] || { echo "refusing to overwrite $out" >&2; exit 1; }
 for source in "$os" "$sysos" "$appos"; do
@@ -86,7 +97,7 @@ apfs_mount "$sysos" sysos
 apfs_mount "$appos" appos
 
 truncate -s "$size" "$out"
-"$MKFS_HFSPLUS" -s -J -v iOSRoot "$out"
+"$MKFS_HFSPLUS" -s "${journal_args[@]}" -v iOSRoot "$out"
 mkdir "$work/root"
 sudo mount -t hfsplus -o loop,force "$out" "$work/root"
 mounts=("$work/root" "${mounts[@]}")

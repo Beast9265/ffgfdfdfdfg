@@ -1,6 +1,44 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
 
+## Active handoff: MARBLE fresh journal blocks real root (2026-10-22)
+
+User physical report:
+- REAL IOS ROOT UFS READ: PASS
+- HFS filesystem detected: PASS
+- HFS mount: blocked only by fresh journal initialization
+- journal write: EROFS as designed (strategy error 0x1e, errno 30)
+- Apple launchd: NOT REACHED YET
+
+BSD root ufsroot0 major1/minor0 and setRootMedia complete; mockfs declines
+non-Mach-O root with22. HFS detects journal offset0x82000/size0x800000,
+but journal_create cannot write its initial header; late journal init returns22,
+mountroot ultimately reports19 and retries. This is expected for fresh journaled
+HFS over deliberately read-only UFS, not evidence of a UFS read, HFS parser,
+or Apple userspace failure. SWEET initially used non-journaled HFS over read-only
+UFS; journaling followed writable-root support. Next experiment keeps UFS
+strictly read-only and disables filesystem journaling.
+
+Builder now accepts --no-journal in either order with --board marble; default
+SWEET invocation still supplies -J. Copy/link/keybag recipe unchanged; no
+sweet-root-tweaks.py. bash syntax PASS. Actual parser/mkfs invocation exercised
+on disposable32MiB volumes: default attributes0x2100; both no-journal option
+orders attributes0x100, journal bit13 clear in matching primary/alternate volume
+headers; fsck -f -n says iOSRoot appears OK for all three. These are builder
+checks, NOT verification of a new real iOS root image.
+
+Real16GiB rebuild attempted but BLOCKED by this execution sandbox: sudo reports
+no-new-privileges and cannot become root for APFS/HFS mounts or metadata copies.
+Log /tmp/marble-nojournal-build.log. No nojournal.img or nojournal.simg produced;
+no real-root fsck/content checks, sparse round-trip or new hashes available.
+Resume exact --board marble --no-journal command in docs/MARBLE_IOS_ROOT.md
+from a host session with working sudo. Do not flash an unbuilt image.
+Existing boot shim/out/marble-xnu/latest-marble-xnu.img rehashed unchanged:
+fa05a9ea0e3a2e3ba96604a536862f5c9d70ae9431ce816c3b9c73165df6eeb4
+No kernel/UFS/HFS/policy changes, no CI, no device commands. Unrelated untracked
+docs/MARBLE_BOOTSTRAP_BREADCRUMBS.md preserved. Changes committed locally;
+push origin marble failed: sandbox cannot resolve github.com. Push still pending.
+
 ## Active handoff: MARBLE real iOS root and boot image verified (2026-10-22)
 
 MARBLE INTERNAL-UFS HFS PID1: PASS (user physical evidence).
