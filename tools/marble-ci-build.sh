@@ -1,0 +1,270 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO="Beast9265/ios-marble"
+BRANCH="marble"
+WORKFLOW="xnu.yml"
+
+if [[ $# -lt 1 ]]; then
+    echo "Usage: $0 \"commit message\""
+    exit 1
+fi
+
+COMMIT_MSG="$1"
+
+cd "$(git rev-parse --show-toplevel)"
+
+echo "========================================"
+echo "MARBLE XNU CI + LOCAL PACKAGING"
+echo "========================================"
+
+# ------------------------------------------------------------------
+# Safety / prerequisites
+# ------------------------------------------------------------------
+
+if [[ "$(git branch --show-current)" != "$BRANCH" ]]; then
+    echo "ERROR: must be on branch '$BRANCH'"
+    exit 1
+fi
+
+command -v git >/dev/null
+command -v gh >/dev/null
+command -v python3 >/dev/null
+
+gh auth status >/dev/null
+
+if [[ ! -f marble-boot-backup-clean/boot_a.img ]]; then
+    echo "ERROR: missing marble-boot-backup-clean/boot_a.img"
+    exit 1
+fi
+
+echo
+echo "== Repository validation =="
+
+git diff --check
+git diff --cached --check
+
+if git diff --cached --quiet; then
+    echo "ERROR: nothing is staged."
+    echo "Codex must stage only the intended source/docs changes first."
+    exit 1
+fi
+
+echo
+git diff --cached --stat
+
+# Never allow common generated/private artifacts into the commit.
+BAD_STAGED="$(
+    git diff --cached --name-only |
+    grep -E '(^|/)(boot_a\.img|.*\.ipsw|.*\.img|.*\.payload|kernel\.development\.marble|ramdisk\.bin)$' \
+    || true
+)"
+
+if [[ -n "$BAD_STAGED" ]]; then
+    echo
+    echo "ERROR: generated/private artifacts are staged:"
+    echo "$BAD_STAGED"
+    exit 1
+fi
+
+# ------------------------------------------------------------------
+# Commit + push
+# ------------------------------------------------------------------
+
+echo
+echo "== Commit =="
+
+git commit -m "$COMMIT_MSG"
+
+COMMIT_SHA="$(git rev-parse HEAD)"
+SHORT_SHA="$(git rev-parse --short HEAD)"
+
+echo "Commit: $COMMIT_SHA"
+
+echo
+echo "== Push =="
+
+git push origin "$BRANCH"
+
+# ------------------------------------------------------------------
+# GitHub Actions
+# ------------------------------------------------------------------
+
+echo
+echo "== Trigger GitHub Actions =="
+
+gh workflow run "$WORKFLOW" \
+    -R "$REPO" \
+    --ref "$BRANCH" \
+    -f macos_version=13.5 \
+    -f kernel_config=DEVELOPMENT \
+    -f machine_config=MARBLE \
+    -f keep_going=true
+
+echo
+echo "Waiting for workflow run to appear..."
+
+RUN_ID=""
+
+for _ in $(seq 1 30); do
+    RUN_ID="$(
+        gh run list \
+            -R "$REPO" \
+            --workflow "$WORKFLOW" \
+            --branch "$BRANCH" \
+            --limit 20 \
+            --json databaseId,headSha,event \
+            --jq ".[] | select(.headSha == \"$COMMIT_SHA\" and .event == \"workflow_dispatch\") | .databaseId" \
+            | head -1
+    )"
+
+    if [[ -n "$RUN_ID" ]]; then
+        break
+    fi
+
+    sleep 2
+done
+
+if [[ -z "$RUN_ID" ]]; then
+    echo "ERROR: could not find workflow run for $COMMIT_SHA"
+    exit 1
+fi
+
+echo "Actions run: $RUN_ID"
+
+echo
+echo "== Watch build =="
+
+gh run watch "$RUN_ID" \
+    -R "$REPO" \
+    --exit-status
+
+# ------------------------------------------------------------------
+# Download exact artifact
+# ------------------------------------------------------------------
+
+echo
+echo "== Download exact XNU artifact =="
+
+ARTIFACT_DIR="xnu/out-marble-ci-${RUN_ID}"
+
+rm -rf "$ARTIFACT_DIR"
+mkdir -p "$ARTIFACT_DIR"
+
+gh run download "$RUN_ID" \
+    -R "$REPO" \
+    -n xnu-kernel \
+    -D "$ARTIFACT_DIR"
+
+KERNEL="$(
+    find "$ARTIFACT_DIR" \
+        -type f \
+        -name 'kernel.development.marble' \
+        -print \
+        -quit
+)"
+
+if [[ -z "$KERNEL" || ! -f "$KERNEL" ]]; then
+    echo "ERROR: kernel.development.marble not found in Actions artifact"
+    exit 1
+fi
+
+echo "Kernel: $KERNEL"
+file "$KERNEL"
+
+# ------------------------------------------------------------------
+# ADT + XNU payload
+# ------------------------------------------------------------------
+
+echo
+echo "== Generate MARBLE ADT =="
+
+mkdir -p shim/out/marble-xnu
+
+python3 tools/mkadt.py \
+    shim/out/marble-xnu/marble.adt \
+    --marble \
+    --dump
+
+echo
+echo "== Build XNU payload =="
+
+python3 tools/mkpayload.py \
+    "$KERNEL" \
+    shim/out/marble-xnu/marble.adt \
+    shim/out/marble-xnu/marble-xnu.payload \
+    --cmdline "debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam"
+
+# ------------------------------------------------------------------
+# Shim
+# ------------------------------------------------------------------
+
+echo
+echo "== Build MARBLE XNU shim =="
+
+BOARD=marble-xnu shim/build.sh
+
+# ------------------------------------------------------------------
+# Android boot v4 package
+# ------------------------------------------------------------------
+
+FINAL_IMAGE="shim/out/marble-xnu/latest-marble-xnu.img"
+
+rm -f "$FINAL_IMAGE"
+
+echo
+echo "== Repack boot image =="
+
+python3 tools/mkbootv4_marble.py repack \
+    marble-boot-backup-clean/boot_a.img \
+    shim/out/marble-xnu/Image \
+    "$FINAL_IMAGE" \
+    --xnu-payload shim/out/marble-xnu/marble-xnu.payload
+
+echo
+echo "== Verify boot image =="
+
+python3 tools/mkbootv4_marble.py inspect \
+    "$FINAL_IMAGE"
+
+# ------------------------------------------------------------------
+# Final hashes
+# ------------------------------------------------------------------
+
+echo
+echo "== SHA256 =="
+
+KERNEL_SHA="$(sha256sum "$KERNEL" | awk '{print $1}')"
+ADT_SHA="$(sha256sum shim/out/marble-xnu/marble.adt | awk '{print $1}')"
+PAYLOAD_SHA="$(sha256sum shim/out/marble-xnu/marble-xnu.payload | awk '{print $1}')"
+SHIM_SHA="$(sha256sum shim/out/marble-xnu/Image | awk '{print $1}')"
+BOOT_SHA="$(sha256sum "$FINAL_IMAGE" | awk '{print $1}')"
+
+echo "Kernel : $KERNEL_SHA"
+echo "ADT    : $ADT_SHA"
+echo "Payload: $PAYLOAD_SHA"
+echo "Shim   : $SHIM_SHA"
+echo "Boot   : $BOOT_SHA"
+
+# ------------------------------------------------------------------
+# Final answer
+# ------------------------------------------------------------------
+
+ABS_IMAGE="$(realpath "$FINAL_IMAGE")"
+
+echo
+echo "========================================"
+echo "MARBLE XNU READY"
+echo "========================================"
+echo "Commit      : $SHORT_SHA"
+echo "Actions run : $RUN_ID"
+echo "Boot SHA256 : $BOOT_SHA"
+echo "Image       : $ABS_IMAGE"
+echo
+echo "NO DEVICE OPERATION WAS PERFORMED."
+echo
+echo "BOOT MANUALLY:"
+echo
+echo "fastboot boot \"$ABS_IMAGE\""
+echo
+echo "========================================"
