@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the exact MARBLE mockfs payload and its sparse-map/allocator contract."""
+"""Validate the exact MARBLE RAMDisk payload and its sparse-map/allocator contract."""
 import importlib.util
 import struct
 import sys
@@ -11,16 +11,21 @@ from mkpayload import parse_macho, PAGE, SEG_TABLE
 
 def audit(kernel, payload, init):
     image = Path(init).read_bytes()
-    m = parse_macho(image)
-    assert m['cputype'] == 0x100000c and m['cpusub'] == 0 and m['entry']
-    commands, offset = [], 32
-    for _ in range(struct.unpack_from('<I', image, 16)[0]):
-        cmd, size = struct.unpack_from('<II', image, offset)
-        commands.append(cmd)
-        offset += size
-    assert set(commands) == {0x19, 0x5, 0x1d}, commands
-    assert b'*** MARBLE USERSPACE: PID 1 RUNNING ***' in image
-    print('PASS: static arm64 LC_UNIXTHREAD, ad-hoc signature, no dylib/dyld commands')
+    if image[1024:1028] == b'HX\x00\x05':
+        # Root builder independently checks catalog, ownership, modes and init bytes.
+        assert image[:4] == b'\0' * 4
+        print('PASS: HFSX RAMDisk; mockfs rejects non-Mach-O boot blocks')
+    else:
+        m = parse_macho(image)
+        assert m['cputype'] == 0x100000c and m['cpusub'] == 0 and m['entry']
+        commands, offset = [], 32
+        for _ in range(struct.unpack_from('<I', image, 16)[0]):
+            cmd, size = struct.unpack_from('<II', image, offset)
+            commands.append(cmd)
+            offset += size
+        assert set(commands) == {0x19, 0x5, 0x1d}, commands
+        assert b'*** MARBLE USERSPACE: PID 1 RUNNING ***' in image
+        print('PASS: static arm64 LC_UNIXTHREAD, ad-hoc signature, no dylib/dyld commands')
     blob = Path(payload).read_bytes()
     magic, version, nsegs = struct.unpack_from('<8sII', blob)
     assert magic == b'SWEETXNU' and version == 1
@@ -48,7 +53,7 @@ def audit(kernel, payload, init):
     top = bootargs + PAGE
     assert pa + size == adtpa <= bootargs < top <= phys + memsize
     print(f'PASS: RAMDisk [{pa:#x}, {pa+size:#x}); ADT={adtpa:#x}; boot_args={bootargs:#x}; top={top:#x}')
-    print(f'PASS: root bytes match init; kernel segments/stacks/tables precede RAMDisk; cmdline={cmdline}')
+    print(f'PASS: RAMDisk bytes match source image; kernel segments/stacks/tables precede RAMDisk; cmdline={cmdline}')
     spec = importlib.util.spec_from_file_location('bootstrap', Path(__file__).with_name('marble-bootstrap-audit.py'))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

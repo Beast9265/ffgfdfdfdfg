@@ -2,6 +2,36 @@
 
 
 
+## Active handoff: MARBLE HFS RAMDisk root (2026-10-22)
+
+**MARBLE PHYSICAL PID1 SUCCESS**: user reports physical latest mockfs boot:
+mockfs mount result 0; codesigning result 0; PID 1 heartbeat sustained
+indefinitely. RAMDisk/md0/BSD root/missing-IOMedia/exec/EL0/liveness PASS.
+This supersedes the pending physical results below. No independent device test.
+
+Port shared SWEET HFS to MARBLE with smallest config delta in0082:
+FILESYS_BASE adds sweet_hfs; MARBLE registration/decline diagnostics only.
+0026 staging already accepts MARBLE and retains pinned hfs-627.100.6 commit
+31d5ec238dfab485e78a9a30b8b92d13e8914f03; only comments/status clarified.
+0082 already shares Makefile flags and portable MD5. No new crypto or UFS work.
+New deterministic tools/mkmarble-test-root.py builds16MiB HFSX MarbleRoot,
+root:wheel0755 /sbin/launchd and /dev; init byte-identical to proven mockfs.
+Pipeline regenerates init/HFS after exact CI artifact download, rd=md0.
+Details docs/MARBLE_HFS_RAMDISK_ROOT.md.
+
+Local PASS: full replay0001..0081 + strict0082;40 HFS units and4 MD5 objects
+compile with real headers; SWEET preprocessing byte-identical; hardware/timer/
+MMU/GIC/crypto source unchanged. fsck.hfsplus -fn PASS twice per image;
+independent extraction exact; two builds byte-identical; mode/owner verified.
+Init f39a3fad30988599af8ed3c2d4d882d21f59f6478113bff8edef458d1476b40b
+HFS467df791de4da04e157ac074852d82371d158d95ba45977b4bea9ede75feab7a
+Preflight old-kernel HFS payload sparse-map/160-page arena/ADT/rd=md0 PASS.
+Existing6 tests PASS; shell syntax/diff checks PASS. /tmp/hfs-* holds audits.
+Next: commit/push exact MARBLE CI, full link and final image audits/hashes.
+No phone commands. HFS physical boot remains pending user's manual test.
+
+Earlier handoffs below are historical.
+
 ## Active handoff: MARBLE missing IOMedia correction (2026-10-22)
 
 User physical run899bfb1f59c66e9091d5bd16376899ac66aec219 / Actions39728864936:

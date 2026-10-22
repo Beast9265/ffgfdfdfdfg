@@ -145,7 +145,7 @@ new file mode 100644
 +++ b/config/MASTER.arm64.marble
 @@ -0,0 +1,115 @@
 +#
-+# MARBLE one-CPU diagnostic kernel (no HFS/root/storage drivers): MASTER.arm64.MacOSX plus the open-source
++# MARBLE one-CPU diagnostic kernel (RAMDisk HFS root, no storage drivers): MASTER.arm64.MacOSX plus the open-source
 +# arm64 assembly and pmap (nos_arm_asm, nos_arm_pmap). Apple's own SoC configs
 +# link those from the KDK's closed lib<SOC>.os.<CONFIG>.a instead, which is
 +# arm64e and Apple-silicon specific. kperf/kpc stay (xnu does not build without
@@ -177,7 +177,7 @@ new file mode 100644
 +#  BSD_RELEASE =    [ BSD_BASE ]
 +#  BSD_DEV =        [ BSD_BASE config_vnguard ]
 +#  BSD_DEBUG =      [ BSD_BASE config_vnguard ]
-+#  FILESYS_BASE =   [ devfs fdesc fifo mockfs fs_compression config_protect config_mnt_rootsnap config_rosv_startup config_mount_vm config_mount_prebootrecovery config_basesystemroot config_fse quota namedstreams config_imgsrc_access config_triggers config_searchfs config_volfs config_appledouble nullfs bindfs config_mnt_suid config_firmlinks config_dataless_files config_union_mounts config_file_leases ]
++#  FILESYS_BASE =   [ devfs fdesc fifo mockfs sweet_hfs fs_compression config_protect config_mnt_rootsnap config_rosv_startup config_mount_vm config_mount_prebootrecovery config_basesystemroot config_fse quota namedstreams config_imgsrc_access config_triggers config_searchfs config_volfs config_appledouble nullfs bindfs config_mnt_suid config_firmlinks config_dataless_files config_union_mounts config_file_leases ]
 +#  FILESYS_RELEASE= [ FILESYS_BASE ]
 +#  FILESYS_DEV =    [ FILESYS_BASE config_iocount_trace ]
 +#  FILESYS_DEBUG =  [ FILESYS_BASE config_iocount_trace ]
@@ -10983,7 +10983,7 @@ diff --git a/bsd/miscfs/mockfs/mockfs_vfsops.c b/bsd/miscfs/mockfs/mockfs_vfsops
 -	if ((rvalue = mockfs_check_macho(rvp))) {
 +	if ((rvalue = mockfs_check_macho(rvp))) {
 +#if defined(ARM64_BOARD_CONFIG_MARBLE)
-+		printf("MARBLE ROOT: mockfs Mach-O check failed: %d\n", rvalue);
++		printf("MARBLE ROOT: mockfs declined non-Mach-O root: %d\n", rvalue);
 +#endif
 -		return rvalue;
 +		return rvalue;
@@ -11259,3 +11259,23 @@ diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
 -	return error;
 +	return error;
  }
+diff --git a/bsd/sweet_hfs/sweet_hfs_iokit.c b/bsd/sweet_hfs/sweet_hfs_iokit.c
+--- a/bsd/sweet_hfs/sweet_hfs_iokit.c
++++ b/bsd/sweet_hfs/sweet_hfs_iokit.c
+@@ -98,7 +98,11 @@
+-		}
++		}
+-	}
++	}
+-
++
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++	printf("MARBLE HFS: registered (hfs-627.100.6)\n");
++#else
+-	printf("SWEET HFS: hfs-627.100.6 registered\n");
++	printf("SWEET HFS: hfs-627.100.6 registered\n");
++#endif
+ }
+-
++
+ /* Built in, not a loadable kext: there is no kext to retain per mount. */

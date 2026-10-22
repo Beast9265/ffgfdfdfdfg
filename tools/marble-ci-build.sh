@@ -213,6 +213,19 @@ if [[ "$RAMDISK" == "$(pwd)/shim/out/marble-xnu/marble-init" ]]; then
     python3 tools/mkinit.py shim/out/marble-xnu/marble-init.o "$RAMDISK"
 fi
 
+# HFS diagnostic root: rebuild init and filesystem after the exact CI download.
+if [[ "$RAMDISK" == "$(pwd)/shim/out/marble-xnu/MarbleRoot.img" ]]; then
+    clang -target arm64-apple-ios16.0 -DMARBLE_INIT -c tools/sweet-init.S \
+        -o shim/out/marble-xnu/marble-init.o
+    python3 tools/mkinit.py shim/out/marble-xnu/marble-init.o \
+        shim/out/marble-xnu/marble-init
+    ROOT_TMP="$(mktemp -d shim/out/marble-xnu/hfs-build-XXXXXX)"
+    python3 tools/mkmarble-test-root.py shim/out/marble-xnu/marble-init "$ROOT_TMP/MarbleRoot.img"
+    mv "$ROOT_TMP/MarbleRoot.img" "$RAMDISK"
+    rmdir "$ROOT_TMP"
+    sha256sum shim/out/marble-xnu/marble-init
+fi
+
 python3 tools/mkpayload.py \
     "$KERNEL" \
     shim/out/marble-xnu/marble.adt \
