@@ -29,9 +29,37 @@ strict git apply --whitespace=error independently validates added source.
 Exact unchanged cmdline (NO RAMDisk):
 debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1 ufsrw=1 rootrw=1 launchd_unsecure_cache=1
 No root rebuild, userdata write, fastboot, adb or physical-phone operation.
-Full CI kernel link/package and linked proofs pending. Physical watchdog
+Full CI kernel link/package and linked proofs completed below. Physical watchdog
 success remains pending manual boot; no display/GPU/IOSurface port attempted.
 Unrelated iosroot-sparse.sh mode and bootstrap breadcrumbs preserved.
+
+Automated build/package COMPLETE: kernel source commit
+ d73336bbe09abbcd7f71cef07304201cc5716ab4; exact Actions39768601240 SUCCESS,
+headSha independently matches;13.5/DEVELOPMENT/MARBLE/keep_going=true.
+Exact fresh artifact SHA256SUMS PASS; full kernel link, zero undefined symbols.
+Linked IOWatchdog::start0xfffffe0007a5ce58, setProperties0xfffffe0007a5ce50
+(mov w0,0; ret), IOWatchdogUserClient::externalMethod0xfffffe0007a5d100.
+IOClass=IOWatchdog / IOProviderClass=IOResources personality verified in kernel.
+start disassembly passes IOPMUPrimary string, value1, width32; user-client
+class property retained. Mature zeroing/selector implementation retained;
+source contains no real watchdog/PMU MMIO, timer or reset operation.
+Linked HFS cat_lookupbykey contains OSIncrementAtomic and compare8 (inlined
+sweet_hfs_link_note); attribute repair remains unconditional after log guard.
+All payload segments match exact CI kernel after fixups; no RAMDisk or extra
+root segment; exact cmdline above verified. ADT, sparse bootstrap mappings,
+shim BOARD=marble-xnu, stock boot_a repack/inspect and independent boot-v4
+bounds/header/padding/payload-locator checks PASS. UFS write guards unchanged.
+Kernel SHA256 44c14838a2badba184f0f6c918d68f24ff69cc1b2a6f18fe932f0d551bf91ea1
+Payload SHA256 936b21f5928f33cb8b85eb37a3249ca2b041a0bb17d152ab6042424ebce3bbed
+Boot SHA256 e9fd2e541aabbd0f48d186b3b448587913a8bf1b7881aac2f25b3702e0dec196
+Final shim/out/marble-xnu/latest-marble-xnu.img.
+Logs /tmp/marble-wdt-{pipeline.log,ci.log,run.json,final-audit.txt};
+proofs /tmp/wdt-{source-proof.py,linked-methods.txt,linked-hfs.txt}.
+No phone operation or root/userdata rebuild. Next: user manual boot, observe
+MARBLE WDT registration/selectors and actual next wall; physical discovery
+success NOT claimed. No preemptive display/GPU/IOSurface changes.
+Manual command:
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
 
 
 ## Active handoff: MARBLE AppleKeyStore / launchd cache transition (2026-10-22)
