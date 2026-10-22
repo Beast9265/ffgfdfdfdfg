@@ -1,5 +1,45 @@
 # MARBLE first real iOS root
 
+## Active handoff: MARBLE AppleKeyStore / launchd cache transition (2026-10-22)
+
+User physical milestone on e5dc3809 / Actions39764011216:
+writable internal UFS PASS; journaled HFS PASS; rootrw PASS; fsck PASS;
+mount-phase-1/2 PASS; CoreCrypto userspace FIPS POST all tests PASSED;
+keybag task entered PASS; AppleKeyStore MISSING; system bag load FAIL.
+keybagd reported missing options entry and recovery reboot; HFS synced/unmounted.
+This supersedes prior pending writable-root statements. User reports latest
+journaled root freshly flashed; no root rebuild or device interaction needed.
+
+Full reverse/replay0001..0081 and strict0082 PASS. Final SweetKeyStore.cpp
+exists, files.arm64 includes it optional iokitcpp, but SWEET guard excluded
+MARBLE; AppleKeyStore personality was also inside SWEET-only guard.
+Later0043/0055 additions retained.0082 alone now extends the implementation
+and ONLY its personality to SWEET || MARBLE; no watchdog or other service port.
+Class names AppleKeyStore/AppleKeyStoreUserClient retained; shared implementation
+uses board-specific diagnostic prefix. All enum selectors retained:
+0,2,3,4,5,6,7,9,10,11,12,13,14,17,26,27,35,55,101,102,103.
+Implemented selector cases unchanged:0 succeeds;14 with >=1 output scalar
+returns system handle0 and success; unknown/unimplemented cases unsupported.
+0039 default-off coredump guard extended only to MARBLE; sysctl retained.
+MARBLE actual CI-header arm64 compiles PASS: SweetKeyStore.cpp,
+KernelConfigTables.cpp, kern_core.c. SWEET/BCM2837/T8103 preprocessed tokens
+unchanged (adjacent string literals normalized). Logs/objects /tmp/aks-*.
+Generated /tmp/aks-marble.adt confirms /defaults/no-effaceable-storage u32(1).
+mkiosroot.sh149..153 already installs root:root keybags directory0700 and
+systembag.kb0600 with KeyBagKeys plist. Builder unchanged; root NOT rebuilt.
+UFS/write safety/HFS/AMFI/hardware code unchanged by this experiment.
+
+Final cmdline (NO RAMDisk):
+debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1 ufsrw=1 rootrw=1 launchd_unsecure_cache=1
+The last arg skips cache-loader dependency on missing AppleMobileFileIntegrity
+IOService; built-in AMFI MAC policy retained. Expected, not physically proven:
+AKS registration, keybagd selectors0/14, System Keybag loaded, cache loader
+proceeds to LaunchDaemons. Watchdog remains a possible later wall.
+Full kernel link/exact CI/artifact/package validation pending below.
+Unrelated iosroot-sparse.sh mode change and bootstrap breadcrumbs preserved.
+No fastboot/adb, root rebuild, userdata flash, or phone interaction.
+
+
 ## Active handoff: MARBLE guarded writable root (2026-10-22)
 
 User's physical result on previous e541dfdc / Actions39761856910:
