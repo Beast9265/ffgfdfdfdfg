@@ -1,6 +1,44 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
 
+## Active handoff: MARBLE first internal HFS test root (2026-10-22)
+
+MARBLE INTERNAL UFS READ PATH: PASS (user physical observation).
+ACTIVE PASS; LUN0 READY; capacity PASS (4096-byte blocks); READ10 PASS;
+GPT PASS; userdata PASS (LUN0 first block0x2f6a00,229581MiB);
+ufsroot0 PASS (BSD root major1 minor0). Controller PA01d84000,size3000,
+CAP1587031f,VER300,HCE1,HCS10f; DMA843f44000,size104000.
+No RAMDisk; initial sense02/04/02 then exact d0 ACTIVE succeeded.
+HFS failure on current Android userdata is expected (signature81c3,
+mountfs22,cannot mount root19). NO STORAGE SECTOR WRITES OCCURRED.
+This supersedes prior pending physical-readiness statements below.
+
+0029 now shares ONLY mount-time unsealed-root compatibility with MARBLE;
+MARBLE ROOT log; SWEET log/behavior unchanged; generic panic and pivot_root
+semantics unchanged.0082 and UFS/HFS/hardware source patches unchanged.
+Full replay0001..0081 + strict0082 PASS. MARBLE bsd_init real-header arm64
+object compile PASS (local reused flags need DRIVER_PRIVATE; modern host
+clang pointer diagnostic downgraded for existing mbuf_t header mismatch).
+SWEET/BCM2837 preprocessed behavior identical before/after; generic panic
+retained. MARBLE adds only intended log/continue. UFS preprocessed read-only
+exclusions PASS; no WRITE10/sync/parser enabled. Exact CI compile pending.
+
+Local16MiB HFSX built twice deterministically using existing mkmarble-test-root.py;
+MarbleRoot root:wheel0755 /sbin/launchd and /dev; static arm64 NOUNDEFS init
+f39a3fad30988599af8ed3c2d4d882d21f59f6478113bff8edef458d1476b40b matches
+proven init. Raw hash467df791de4da04e157ac074852d82371d158d95ba45977b4bea9ede75feab7a
+matches proven RAMDisk HFS. fsck -fn PASS (both builds twice and sparse expansion).
+HX0005 signature; extracted launchd exact. img2simg + simg2img roundtrip
+byte-identical (all16MiB); sparse SHA256
+697789be8b0aaaa27dbaa6e85d282a2ca5d9aa9d379a3606e55b0351161f0e6a.
+Artifacts shim/out/marble-xnu/marble-internal-root.{img,simg}; untracked/ignored.
+Validation /tmp/internal-validate.py, internal-compile.log, internal-bsd_init.o,
+internal-second.img, internal-roundtrip.img, internal-launchd.
+Automated pipeline next: NO RAMDisk, rd=ufsroot0, no ufsrw/rootrw.
+No phone commands; destructive userdata flash requires user's later manual
+approval/action. DESTRUCTIVE USERDATA FLASH NOT PERFORMED.
+Preserve unrelated untracked docs/MARBLE_BOOTSTRAP_BREADCRUMBS.md.
+
 ## Active handoff: MARBLE UFS readiness classifier correction (2026-10-22)
 
 User-reported first physical XNU UFS boot (2026-10-22): no RAMDisk;

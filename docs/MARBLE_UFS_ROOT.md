@@ -1,5 +1,61 @@
 # MARBLE read-only internal UFS root
 
+## Latest physical milestone and first internal HFS test
+
+MARBLE INTERNAL UFS READ PATH: PASS (user observation on POCO F5).
+ACTIVE PASS; LUN0 READY; capacity PASS; READ10 PASS; GPT PASS;
+userdata PASS; ufsroot0 PASS. Device blocks4096; userdata first block0x2f6a00,
+229581MiB; BSD root ufsroot0 major1 minor0. No storage sector writes occurred.
+HFS failure on current Android userdata is expected (signature81c3).
+This supersedes the older pending physical results retained below.
+
+0029 permits only SWEET/MARBLE initial-root authentication failure to log and
+continue unsealed. MARBLE uses `MARBLE ROOT: root volume is not authenticated
+(error %d); continuing unsealed`. SWEET and generic Apple behavior remain
+unchanged; generic builds panic. Pivot-root authentication is unchanged.
+Pinned hfs-627.100.6 and all0082 UFS/hardware/HFS fixes remain unchanged.
+
+Prepared regular local files (no phone access):
+
+- `shim/out/marble-xnu/marble-internal-root.img`:16MiB HFSX MarbleRoot.
+- `shim/out/marble-xnu/marble-internal-root.simg`:Android sparse,4096-byte blocks.
+
+Raw SHA256 `467df791de4da04e157ac074852d82371d158d95ba45977b4bea9ede75feab7a`.
+Sparse SHA256 `697789be8b0aaaa27dbaa6e85d282a2ca5d9aa9d379a3606e55b0351161f0e6a`.
+Both deterministic builds match the physically proven RAMDisk HFS bytes.
+Only directories /,/sbin,/dev and root:wheel0755 /sbin/launchd; init is static
+arm64 Mach-O NOUNDEFS, exact proven init SHA256
+`f39a3fad30988599af8ed3c2d4d882d21f59f6478113bff8edef458d1476b40b`.
+fsck.hfsplus -fn passes; HX0005 signature verified. Sparse expansion compares
+identical over all16MiB; expanded filesystem passes fsck and extracted launchd
+compares identical. Tools are hfsprogs and libdmg-hfsplus (paths in NOTES history).
+
+Rebuild into a fresh regular-file path with tools/mkmarble-test-root.py using
+shim/out/marble-xnu/marble-init; convert with img2simg; expand with simg2img
+into a temporary file and cmp against raw image. No mounting is needed.
+
+Kernel packaging uses no RAMDisk and exactly rd=ufsroot0, no rootrw/ufsrw.
+The UFS driver remains strictly read-only; external placement of HFS on
+userdata is a later destructive user action. No WRITE10 or synchronization
+write implementation was added. Full patch replay, strict0082, MARBLE real-header
+bsd_init compile, SWEET/generic preprocessing equivalence, and existing UFS
+read-only preprocessor audit pass. CI results follow in the active handoff.
+
+After the user later approves and places this root on userdata, expected:
+
+```text
+MARBLE UFS: "userdata" ...
+BSD root: ufsroot0, major 1, minor 0
+hfs: mounted MarbleRoot on device b(1, 0)
+MARBLE ROOT: root volume is not authenticated (...); continuing unsealed
+load_init_program: attempting to load /sbin/launchd
+*** MARBLE USERSPACE: PID 1 RUNNING ***
+MARBLE init: still alive
+```
+
+This internal HFS boot has not yet been physically tested.
+DESTRUCTIVE USERDATA FLASH NOT PERFORMED.
+
 ## Physical baseline
 
 The user reports the complete HFS RAMDisk userspace milestone on POCO F5:
