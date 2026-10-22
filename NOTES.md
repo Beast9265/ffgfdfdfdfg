@@ -1,6 +1,49 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
 
+
+## Active handoff: MARBLE SCTLR transition diagnostic (2026-10-22)
+
+User physical observation supersedes prior handoff: initial cyan/green/white and
+A/B/C/D/E visible; F absent. Failure boundary is SCTLR/translation activation,
+not table-construction return. No new physical boot performed here.
+
+0082 changes only start.s behavior: existing markers through E unchanged;
+MARBLE cold pre-MMU TCR/TG/IPS/hardware PARange/full TCR, TTBR0/1 and MAIR
+readback tiles; independent exact descriptor chains for V=P post-ISB code,
+KVA alias, framebuffer first PTE, low vectors. Pink E2 between SCTLR MSR and
+ISB. No translation values repaired. Low synchronous vectors draw red/spin;
+cold low VBAR retained across transition, normal KVA VBAR restored after F.
+All new checks/markers use x9-x13/NZCV only, except dead x0 for pre-SCTLR VBAR;
+no stack, x20-x26/lr/SP changes. Warm path skips bootstrap checks.
+
+Actual preprocessing: TCR=0x226511a511, TG0=2/TG1=1/IPS=2/T0SZ=T1SZ=17;
+SCTLR=0x3454593d unchanged, no PAC/Apple monitor/KTRR/CTRR selection. Immediate
+post-ISB PC uses TTBR0 V=P, not KVA. Both aliases independently checked.
+Complete exact source excerpt, tile coordinates, manual page walks, register
+safety and architectural limitations: docs/MARBLE_MMU_DIAGNOSTIC.md.
+
+Observed validation: downloaded existing successful run 39613073847 buildtree
+and log read-only; no new CI run. Full reverse/replay 0001..0081, final strict
+0082 check/application, full start.s MARBLE preprocessing/arm64 Mach-O assembly
+with real generated headers, actual constant evaluation and object disassembly
+pass. SWEET complete start.s preprocessing byte-identical. Other 0082 sections
+byte-identical. MARBLE pe_fiq.c preprocess passes with zero priority-window
+references; OSLAR exclusion and tile bounds pass. git diff --check passes.
+Local clang differs from Apple CI clang; full new kernel link not performed.
+Safe for a diagnostic Actions build; final linked label/table absolute PAs must
+be resolved from that build, not guessed from historical kernel symbols.
+
+Artifacts /tmp/marble-mmu-tree, /tmp/mmu-start.{s,macros,o},
+/tmp/mmu-disassembly.txt, /tmp/mmu-verify.py, /tmp/mmu-extra.py,
+/tmp/mmu-cc-command.json, /tmp/marble-mmu-build.log. No commit/push (explicit
+user prohibition overrides default), no new CI dispatch, device/storage action.
+Next: review diagnostic report, separately submit build and obtain physical
+check colors/E2/F/exception tile. Absence of E2/red is not conclusive because
+pre-ISB translation effects and vector/framebuffer faults can obscure evidence.
+
+Earlier handoffs below are historical.
+
 ## Active handoff: MARBLE A-H pre-C diagnostics (2026-10-22)
 
 User physically observed CYAN, GREEN and WHITE on real marble. This supersedes
