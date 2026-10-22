@@ -45,6 +45,35 @@ Doing boot task, fsck progression without boot task is not a platform binary.
 Physical success remains pending. Full link/exact CI/package results follow.
 Unrelated tools/iosroot-sparse.sh and docs/MARBLE_BOOTSTRAP_BREADCRUMBS.md preserved.
 
+Automated build COMPLETE: source commit
+e541dfdcdb9679cde301864d28d0fbb977932b3b pushed origin marble; exact Actions
+39761856910 SUCCESS (headSha independently matches), inputs13.5/DEVELOPMENT/
+MARBLE/keep_going=true. CI log confirms0082 and all three translation-unit
+compiles; full link PASS, zero undefined symbols. Fresh artifact directory
+xnu/out-marble-ci-39761856910; artifact SHA256SUMS verified.
+Linked bsd_init at0xfffffe0007761c1c calls existing policy registration,
+after vfsinit and before HFS/root mount/userspace exec. Linked hook contains
+ORR CS_SIGNED0x20000000 and rootfs-gated CS_PLATFORM_BINARY0x04000000;
+validated XML entitlement extraction/create/set remains. MARBLE registration
+message linked. SWEET/BCM2837/Apple T8103 preprocessing unchanged.
+UFS write/sync/persistent logger symbols absent; HFS/UFS retained. Four
+executable sections: zero physical CNTP instructions, one CNTV_CTL MSR.
+Exact payload segments byte-match this kernel, same full cmdline above;
+no RAMDisk/extra root segment, chosen boot-manifest-hash48 and asmb retained.
+Sparse bootstrap mappings,160-page allocator, stacks/tables/aliases PASS.
+BOARD=marble-xnu build, stock boot_a repack/inspect and independent boot-v4
+headers/bounds/padding/payload locator/no-trailing-bytes checks PASS.
+Kernel SHA256 7c2bcf73921b8b0b36f290269196b0d2e1288caa0dfef1aaf416ae7e21541175
+Payload SHA256 ed0faee7dd1bb5c229c347d957e53478f7a0fa106144ebd99e1b00b76ffd3de6
+Boot SHA256 0bab7aeb5fc7f0ace58e574dcbf3f117c738d48ee858c8673c55f7f0ebedd50a
+Final image shim/out/marble-xnu/latest-marble-xnu.img (17137664 bytes).
+Logs /tmp/marble-amfi-{pipeline.log,ci.log,run.json,final-audit.txt,cntp.txt};
+linked proofs /tmp/amfi-linked-{bsd_init,hook}.txt. Six existing tests PASS;
+git diff/staged checks PASS. Physical AMFI/fsck result PENDING user's manual
+test. No userdata/root rebuild or modification; no fastboot/adb executed.
+Manual command:
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
+
 
 MARBLE INTERNAL-UFS HFS PID1: PASS (user physical report, 2026-10-22).
 Internal UFS, GPT, userdata, BSD ufsroot0, HFS mount, exec and sustained
