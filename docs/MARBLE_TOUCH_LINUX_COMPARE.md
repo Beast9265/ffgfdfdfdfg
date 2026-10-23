@@ -154,3 +154,55 @@ zero writes, Linux-derived packing/word length. Existing power/reset/confirm
 and RPMh ownership/quarantine suites remain passing. USB descriptor/ring/SMMU
 tests are included. Complete82-patch replay/source equality, CI-header arm64
 compiles and non-MARBLE preprocessing equality pass; physical results pending.
+
+## Final combined USB-log + Linux SPI checkpoint — manual test pending
+
+Kernel source `3dedd6976ddacdab275db0c984219d32bf7ed0a0`, [CI39908684058 SUCCESS](https://github.com/Beast9265/ios-marble/actions/runs/39908684058),
+exact headSha independently verified. USB-only checkpoint remains from
+cdc38016c5522fff9c6917c97bb29b15022bcfe9 / successful CI39907701061.
+
+| Artifact | SHA256 |
+|---|---|
+| Kernel | `387e16ac712f728224604c5fe53456fe281d236e6edb9603f398de728b0a35bd` |
+| Exact Hello ADT | `35f0bff762c339e86a0e67392267ed148ae06b24703b682ce2327c9296ed84e3` |
+| marble-xnu-touch-usblog.payload | `12524e89b6a9180b2d34602cefe4095d8d119ef03c320ef89f9ae6f749741b3d` |
+| latest-marble-xnu-touch-usblog.img | `d68c7b333aee6ac9bf75927346cae9514834a5e05d9835cf18a1f32d1dc7d9eb` |
+
+Command line (no synthetic injection):
+
+```text
+debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1 ufsrw=1 rootrw=1 launchd_unsecure_cache=1 marbleguidiag=1 marbleusb=2 marbleusblog=1 marbletouchinit=1
+```
+
+Fresh exact CI artifact SHA256SUMS, arm64/full link zero undefined, payload
+segment/fixup equality, boot-v4 metadata/padding/footer/content, bootstrap
+capacity/aliases/stacks/tables, timer scan and linked HID personalities pass.
+Linked USB init/RAM-log hooks and diagnostics present; SWEET persistent disk
+writer/start absent. Five preserved images rehashed unchanged: Hello rollback,
+normal physical-input, hidtest, touchinit and USB-only checkpoint.
+setup-fast raw7ca8c990...22798 and sparsecec3daf0...4aa01 were rehashed unchanged.
+No root image generated/mounted/modified, retention cleanup, SSH/VNC install,
+fastboot/adb or other phone commands. No SMP, display, identity, key/HID, AKS,
+sandbox or UFS hardware/read/write/root policy changes. UFS file changes are
+only shared RAM-ring guards; persistent writer remains SWEET-only.
+
+USB enumeration/CDC-ECM/UDP and corrected physical touch are **UNTESTED**.
+Actual GPIO before/after, IF_DISABLE_RO/FIFO_IF_DISABLE/DMA_MODE_EN and first
+physical failure remain UNKNOWN. FIFO is selected only if enabled/idle. If
+disabled, stop names GPI/SID5b6 ownership/IOVA dependency; no unsafe GPI or
+SMMU workaround. USB itself also requires validated inherited clocks/device
+mode/direct-DMA bypass and refuses otherwise; UDP transport is best effort.
+
+Manual combined test (host receiver may be started before boot):
+
+```sh
+fastboot boot \
+  ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu-touch-usblog.img
+sudo ~/ios-marble/tools/marble-usbnet.sh \
+  ~/ios-marble/logs/marble-touch-live.txt
+```
+
+Expected next evidence: connected/ECM/ue0 USB messages in the saved log,
+then complete touch mode/power/reset/confirm/version/IC-info/polling gates.
+If probing succeeds, tap(i) then physical bottom-edge swipe. Send the log;
+no physical success or exact prior blocker is claimed by this build.
