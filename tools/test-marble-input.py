@@ -23,6 +23,19 @@ def function(source, name):
     return source[start:end] + '\n'
 
 
+def diagnostic_stubs(tree):
+    header = (Path(tree) / 'bsd/dev/marble_hwdiag.h').read_text()
+    header = header.replace('#include <sys/types.h>', '')
+    return header + r"""
+static bool mh_first_spi;
+static unsigned rh_diag_usb;
+void marble_hwdiag_stage(unsigned u,unsigned s){(void)u;(void)s;}
+void marble_hwdiag_value(unsigned u,const char *n,uint32_t a,uint32_t b){(void)u;(void)n;(void)a;(void)b;}
+void marble_hwdiag_bytes(unsigned u,const char *n,const uint8_t *p,unsigned z){(void)u;(void)n;(void)p;(void)z;}
+void marble_hwdiag_fail(unsigned u,enum mh_reason r,int e,const char *g){(void)u;(void)r;(void)e;(void)g;}
+"""
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('tree', type=Path)
@@ -133,7 +146,7 @@ int main(void) {
     with tempfile.TemporaryDirectory(prefix='marble-input-test-') as directory:
         c = Path(directory) / 'input.c'
         binary = Path(directory) / 'input'
-        c.write_text(harness + body + tests)
+        c.write_text(harness + diagnostic_stubs(args.tree) + body + tests)
         subprocess.run(['clang', '-std=gnu11', '-O1', '-g', '-fsanitize=address,undefined',
                         '-fno-omit-frame-pointer', str(c), '-o', str(binary)], check=True)
         subprocess.run([str(binary)], check=True)

@@ -34,7 +34,7 @@ static int marble_touch_power_prepare(void){assert(stage==0);stage=1;return 0;}
 static int marble_touch_power_vote(const char *name,unsigned mv){
  assert(!(regs[0x14004/4]&2));assert(regs[0x14000/4]&0x200);
  if(stage==1){assert(!strcmp(name,"ldoc2")&&mv==1800&&clockms==2);stage=2;}
- else {assert(stage==2&&!strcmp(name,"ldoc9")&&mv==3224&&clockms==5);stage=3;}
+ else {assert(stage==2&&!strcmp(name,"ldoc9")&&mv==3224&&clockms==32);stage=3;}
  return failvote==stage?5:0;
 }
 static bool mt_exchange(unsigned n){
@@ -61,11 +61,11 @@ static void frame(unsigned count){
  checksum(event+8,count*8+2);reads=acks=0;
 }
 int main(void){
- assert(mt_power_on()&&stage==3&&clockms==24&&(regs[0x14004/4]&2));
+ assert(mt_power_on()&&stage==3&&clockms==147&&(regs[0x14004/4]&2));
  assert(!(regs[0x15000/4]&0x200));
  for(unsigned pin=16;pin<=19;pin++)assert(((regs[pin*0x1000/4]>>2)&15)==1);
  stage=clockms=0;failvote=2;assert(!mt_power_on()&&!(regs[0x14004/4]&2)&&clockms==2);
- stage=clockms=0;failvote=3;assert(!mt_power_on()&&!(regs[0x14004/4]&2)&&clockms==5);
+ stage=clockms=0;failvote=3;assert(!mt_power_on()&&!(regs[0x14004/4]&2)&&clockms==32);
  clockms=0;assert(mt_confirm()&&attempts==1&&exchanges==1);
  mismatch=true;attempts=exchanges=clockms=0;assert(!mt_confirm()&&attempts==3&&exchanges==3&&clockms==10);
  io_fail=true;attempts=exchanges=0;assert(!mt_confirm()&&attempts==0&&exchanges==1);io_fail=false;
@@ -83,6 +83,6 @@ int main(void){
 with tempfile.TemporaryDirectory(prefix='marble-touchinit-test-') as directory:
     c = Path(directory) / 'test.c'
     binary = Path(directory) / 'test'
-    c.write_text(prefix + body + tests)
+    c.write_text(prefix + module.diagnostic_stubs(sys.argv[1]) + body + tests)
     subprocess.run(['clang', '-std=gnu11', '-O1', '-g', '-fsanitize=address,undefined', str(c), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True)

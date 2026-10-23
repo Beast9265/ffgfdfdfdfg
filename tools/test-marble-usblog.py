@@ -43,6 +43,25 @@ static uint32_t usb_rd(vm_offset_t base,unsigned off){assert(base==1&&off<0x1000
 '''
 body = usb[usb.index('static const uint8_t ud_dev_desc'):usb.index('static uint32_t\nud_string')]
 body += module.function(usb, 'ud_string') + module.function(usb, 'ud_marble_dma_ok')
+prefix += r'''
+#define printf(...) ((void)0)
+#define UD_SETUP 0x1040
+#define UD_DATA 0x1100
+#define DCFG 0xc700
+#define TRBCTL_DATA (5u<<4)
+static uint8_t dma[0x4000+16];
+static struct {uintptr_t dma; bool data_in,configured; unsigned state,data_alt;} ud;
+enum {EP0_SETUP,EP0_DATA,EP0_WAIT_STATUS2,EP0_WAIT_STATUS3,EP0_STATUS};
+static unsigned starts,stalls,last_len,last_ep;static uint32_t cfg;
+static uint32_t dwc_rd(unsigned off){assert(off==DCFG);return cfg;}
+static void dwc_wr(unsigned off,uint32_t v){assert(off==DCFG);cfg=v;}
+static void ud_start(unsigned ep,unsigned off,unsigned n,unsigned ctl){assert(ep<2&&off==UD_DATA&&n<=512&&ctl==TRBCTL_DATA);starts++;last_len=n;last_ep=ep;}
+static void ud_stall(void){stalls++;}
+static void ud_configure(void){ud.configured=true;}
+static void ud_notify_connected(void){}
+static void ud_link_event(bool up){(void)up;}
+'''
+body += module.function(usb, 'ud_setup')
 for name,typ in [('sweet_log_append','void'),('sweet_log_copy','uint32_t'),('sweet_log_position','uint64_t')]:
     start = ufs.index('\n'+typ+'\n'+name+'(')+1
     brace = ufs.index('{',start); end=brace+1;depth=1
@@ -72,12 +91,23 @@ int main(void){
  regs[0xc00/4]=0;assert(!ud_marble_dma_ok());regs[0xc00/4]=2u<<16;assert(!ud_marble_dma_ok());
  regs[0xc00/4]=1u<<16;regs[0x804/4]=1u<<31;regs[0xc04/4]=1u<<16;assert(!ud_marble_dma_ok());
  regs[0x804/4]=0;regs[0]|=8;regs[0x20/4]|=256;regs[0x800/4]=0;regs[0xc00/4]=(1u<<16)|(1u<<10);assert(ud_marble_dma_ok());
+ ud.dma=(uintptr_t)dma;memset(dma+0x4000,0x5a,16);
+ uint8_t *setup=dma+UD_SETUP;
+ memset(setup,0,8);setup[0]=0x80;setup[1]=6;setup[3]=1;setup[6]=18;ud_setup();
+ assert(last_len==18&&last_ep==1&&!memcmp(dma+UD_DATA,ud_dev_desc,18));
+ setup[6]=8;ud_setup();assert(last_len==8);
+ setup[1]=5;setup[0]=0;setup[2]=42;setup[3]=setup[6]=0;ud_setup();assert(((cfg>>3)&127)==42&&ud.state==EP0_WAIT_STATUS2);
+ setup[1]=9;setup[2]=1;ud_setup();assert(ud.configured);
+ uint32_t rng=1;
+ for(unsigned i=0;i<100000;i++){for(unsigned b=0;b<8;b++){rng=rng*1664525+1013904223;setup[b]=rng>>24;}ud_setup();}
+ for(unsigned i=0;i<16;i++)assert(dma[0x4000+i]==0x5a);
+ puts("PASS extracted EP0: descriptor short reads, SET_ADDRESS/CONFIGURATION, 100000 arbitrary SETUP packets with TRB/buffer bounds");
  puts("PASS USB: CDC-ECM topology/strings, 4MiB RAM-ring wrap/backlog, bounded read-only SMMUv2 bypass/translation/fault/duplicate/EXID gates; logger no printf, eight-chunk budget and send-failure rewind");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='marble-usblog-test-') as directory:
     c=Path(directory)/'test.c';binary=Path(directory)/'test'
-    c.write_text(prefix+body+tests)
+    c.write_text(prefix+module.diagnostic_stubs(root)+body+tests)
     subprocess.run(['clang','-std=gnu11','-O1','-g','-fsanitize=address,undefined',str(c),'-o',str(binary)],check=True)
     subprocess.run([str(binary)],check=True)
 # Parse embedded host Python without starting a listener or touching networking.

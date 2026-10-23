@@ -80,6 +80,6 @@ int main(void){
 '''
 with tempfile.TemporaryDirectory(prefix='marble-power-test-') as directory:
     c=Path(directory)/'test.c';binary=Path(directory)/'test'
-    c.write_text(prefix+constants+mock+body+tests)
+    c.write_text(prefix+module.diagnostic_stubs(sys.argv[1])+constants+mock+body+tests)
     subprocess.run(['clang','-std=gnu11','-O1','-g','-fsanitize=address,undefined',str(c),'-o',str(binary)],check=True)
     subprocess.run([str(binary)],check=True)

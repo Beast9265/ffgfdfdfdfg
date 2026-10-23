@@ -1,5 +1,50 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+
+## Active handoff: MARBLE touch/USB v3 hardware initialization (2026-10-23)
+
+Starting HEAD6dcf1e3cc9167e28bbbc683ab2d684456c39f23d, origin fetched.
+USER PHYSICAL combined d68c7b33 image: Hello/keys PASS, physical touch FAIL;
+USB produces NO Linux host dmesg event and NO lsusb device. Previous pending
+claims below are superseded. No physical device command executed by agent.
+Preexisting tools/iosroot-sparse.sh mode, bootstrap doc and logs preserved.
+
+Source-backed fixes locally COMPLETE, CI/package next. Pzqqt currentcf63f539,
+f552724 adaptation/parent,fa376fbb voltage/parent,d4a2fc8 import,historical4fe1919,
+cupid kernel a699db2 + separate devicetrees ea504086 inspected. Exact vendor
+regulator delays30/15ms + reset100ms BEFORE confirm replace3/15/4ms; no firmware
+flash/upload, no HID normalization change. USB follows actual U-Boot4e1c8502
+and downstream eUSB driver: ldob5=880,ldoc10=1200,smpb10=1800,ldob2=3080mV;
+SID2 GPIO7 owned SPMI reset; eUSB ref gate9c00c (NOT USB3 gate9c010),28ordered
+PHY mask writes, source-backedGCC RCG/branches/BCR and QSCRATCHUTMI sequence.
+No shared PLL retune or global SMMU bypass. FIFO-disabled/GPI and translated
+USB SID0 still hard-refuse: safe owned domains/rings not established. They now
+persist exact stage/reason/register evidence independently of USB.
+
+New marble_hwdiag RAM enums/512records, static framebuffer pages gated by
+marblehwdiag=1: hold both volume keys2seconds,release; up/down page, both2sGUI.
+Small raw-state key hook only; original sampling/HID delivery preserved.
+Overlay uses original framebuffer mapping, pauses CPU presentation/console
+only while active. VFS best-effort/private/var/tmp/marble-hwdiag.txt at90/120/
+180/300seconds and explicit gesture,<=16attempts,64KiB; no raw-sector writer.
+Detailed source ledger, differences and limitations:
+docs/MARBLE_TOUCH_USB_V3_RESEARCH.md.
+
+Local PASS: full82ordered patch replay/strict0082/source-byte equality in
+/tmp/marble-v3-verified;10actualCI-header arm64Mach-O translation units;
+oldkernel+newobject symbol closure no unknown undefined;ASan/UBSan protocol/
+FIFO/TCS/SMMU tests,100000 malformedtouch+100000EP0SETUP fuzz;28PHY step/
+failure/clock-timeout/rail-reset order tests;512record bound/terminal reason/
+12framebuffer page guard tests;10existingunit tests.15non-MARBLE preprocessor
+checks SWEET/BCM2837/T8103 pass. UFS sourcebyte-identical;root not modified.
+
+Preserved/rehashed: Hello789377d9...1eb6242,USB-only68b47e27...f4fdb3,
+combinedd68c7b33...dc7d9eb;exactHelloADT35f0bff7...d84e3 retained.
+Do not overwrite old images or regenerateADT. New requested target is
+shim/out/marble-xnu/latest-marble-xnu-touchusb-v3.img. No root retention cleanup.
+Pending: commit/push exact source,13.5DEVELOPMENTMARBLE CI, exactartifact
+verification/full link, packaging/audit/hashes. No physical success claimed.
+
 ## Final combined USB-log + Linux SPI checkpoint — manual test pending
 
 Kernel source `3dedd6976ddacdab275db0c984219d32bf7ed0a0`, [CI39908684058 SUCCESS](https://github.com/Beast9265/ios-marble/actions/runs/39908684058),

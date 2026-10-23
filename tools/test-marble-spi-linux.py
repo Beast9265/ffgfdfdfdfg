@@ -40,6 +40,6 @@ int main(void){
 }
 '''
 with tempfile.TemporaryDirectory(prefix='marble-spi-linux-') as directory:
-    p=Path(directory);(p/'test.c').write_text(prefix+body+tests)
+    p=Path(directory);(p/'test.c').write_text(prefix+m.diagnostic_stubs(sys.argv[1])+body+tests)
     subprocess.run(['clang','-std=gnu11','-O1','-g','-fsanitize=address,undefined',str(p/'test.c'),'-o',str(p/'test')],check=True)
     subprocess.run([str(p/'test')],check=True)
