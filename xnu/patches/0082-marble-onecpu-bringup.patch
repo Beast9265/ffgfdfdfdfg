@@ -15590,7 +15590,7 @@ new file mode 100644
 +  APPEND("%s stage=%u failed_at=%u reason=%u errno=%d gate=%s dropped=%u\n", u?"USB":"TOUCH", s->stage, s->failed_at, s->reason, s->error, s->gate, s->dropped);
 +  for (unsigned i = 0; i < s->count; i++) {
 +   struct mh_record *r = &s->records[i];
-+   APPEND("%s %03u %-31s %08x -> %08x t=%llu\n", u?"U":"T", i, r->name, r->before, r->after, r->time);
++   APPEND("%s %03u %-31s %08x -> %08x t=%llu\n", u?"U":"T", i, r->name, r->before, r->after, (unsigned long long)r->time);
 +  }
 + }
 + #undef APPEND
@@ -15606,7 +15606,7 @@ new file mode 100644
 + volatile uint32_t *fb = (volatile uint32_t *)pixels;
 + for (unsigned y = 0; y < height; y++) for (unsigned x = 0; x < width; x++) fb[y*(stride/4)+x] = 0x00101820;
 + /* 65 columns, 68 lines; page through records, header repeated on every page. */
-+ char header[192];
++ char header[512];
 + snprintf(header, sizeof(header), "MARBLE HW V3 PAGE %u\nTOUCH s%u at%u reason%u err%d\n%s\nUSB s%u at%u reason%u err%d\n%s\nVOL+: NEXT  VOL-: PREV  BOTH 2s: GUI\n", mh_page, mh.touch.stage, mh.touch.failed_at, mh.touch.reason, mh.touch.error, mh.touch.gate, mh.usb.stage, mh.usb.failed_at, mh.usb.reason, mh.usb.error, mh.usb.gate);
 + unsigned row = 0, col = 0, skip = (unsigned)mh_page * 45, line = 0;
 + for (unsigned part = 0; part < 2; part++) {
@@ -15678,7 +15678,7 @@ diff --git a/bsd/dev/marble_usb_hw.c b/bsd/dev/marble_usb_hw.c
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/marble_usb_hw.c
-@@ -0,0 +1,166 @@
+@@ -0,0 +1,168 @@
 +/* Minimal MARBLE USB2 electrical path. Source/offset audit in V3_RESEARCH.
 + * No QUSB2/QMP, I2C tuning, global SMMU change or unrelated regulator writes. */
 +#if defined(ARM64_BOARD_CONFIG_MARBLE)
@@ -15726,15 +15726,17 @@ new file mode 100644
 + unsigned off=uh_apid*(write?0x1000:0x20); vm_offset_t base=write?uh_ch:uh_obs;
 + if(write) uh_wr(base,off+0x10,*value);
 + uh_wr(base,off,(write?0u:1u<<27)|((reg&255)<<4));
++ uint32_t status=0;
 + for(unsigned i=0;i<1000;i++) {
-+  uint32_t status=uh_rd(base,off+8);
++  status=uh_rd(base,off+8);
 +  if(status&1) {
-+   if(status&14) { uh_poisoned=true; return false; }
++   if(status&14) { marble_hwdiag_value(1,"SPMI_error_reg/status",reg,status); uh_poisoned=true; return false; }
 +   if(!write) *value=(uint8_t)uh_rd(base,off+0x18);
 +   return true;
 +  }
 +  delay(1);
 + }
++ marble_hwdiag_value(1,"SPMI_timeout_reg/status",reg,status);
 + uh_poisoned=true; return false;
 +}
 +static bool uh_pmic_mask(unsigned reg, uint8_t mask, uint8_t val)

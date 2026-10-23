@@ -3,6 +3,11 @@
 
 ## Active handoff: MARBLE touch/USB v3 hardware initialization (2026-10-23)
 
+Source a89da84f3399879f54cef8874ffac0d5a4d9dc60 pushed; CI39945823888
+started with matchingheadSha. Superseded by final diagnostic review: retain
+SPMI failed status/address and allow full overlay header. No artifact from the
+intermediate run is to be packaged. Final exact source/CI recorded below later.
+
 Starting HEAD6dcf1e3cc9167e28bbbc683ab2d684456c39f23d, origin fetched.
 USER PHYSICAL combined d68c7b33 image: Hello/keys PASS, physical touch FAIL;
 USB produces NO Linux host dmesg event and NO lsusb device. Previous pending
@@ -35,8 +40,8 @@ Local PASS: full82ordered patch replay/strict0082/source-byte equality in
 oldkernel+newobject symbol closure no unknown undefined;ASan/UBSan protocol/
 FIFO/TCS/SMMU tests,100000 malformedtouch+100000EP0SETUP fuzz;28PHY step/
 failure/clock-timeout/rail-reset order tests;512record bound/terminal reason/
-12framebuffer page guard tests;10existingunit tests.15non-MARBLE preprocessor
-checks SWEET/BCM2837/T8103 pass. UFS sourcebyte-identical;root not modified.
+12framebuffer page guard tests;10existingunit tests.20non-MARBLE preprocessor
+checks SWEET/VMAPPLE/BCM2837/T8103 pass. UFS sourcebyte-identical;root not modified.
 
 Preserved/rehashed: Hello789377d9...1eb6242,USB-only68b47e27...f4fdb3,
 combinedd68c7b33...dc7d9eb;exactHelloADT35f0bff7...d84e3 retained.

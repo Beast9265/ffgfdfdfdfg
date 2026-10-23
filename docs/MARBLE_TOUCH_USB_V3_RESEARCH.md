@@ -156,6 +156,12 @@ peripheral8e. These are separate from the working keys' SID0/SID1 peripherals.
 | DMA | contiguousPA, width guard | unchanged; physical address/width saved before reset | existing gadget, cache operations preserved |
 | DWC start | soft reset/EP0/RUN | bounded soft reset, event ring,EP0,RUN, now refuse DEVCTRLHLT timeout; first32events/16SETUP saved | existing SWEET protocol code, MARBLE hardware scope |
 
+An additional clock audit found U-Boot's `clock-sm8450.c` table swaps eUSB
+and PCIe1 clkref addresses (eUSB9c008/PCIe1 9c00c). The MARBLE downstream
+`gcc-waipio.c` blob`d02275962ca5f1ad682a5c61b7513288db134086`, lines2044
+and2347, agrees with Linux: **eUSB9c00c/PCIe1 9c008**. XNU follows these two
+agreeing sources; it does not copy that U-Boot clock-table discrepancy.
+
 The driver does not retune shared GPLL0, globally disable SMMU, initialize QMP,
 change root/UFS, or write unrelated streams. If USB SID0 translates, no safe
 owned page-table/context has been established; it refuses with

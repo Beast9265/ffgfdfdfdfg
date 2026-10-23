@@ -111,9 +111,43 @@ int main(void){
  puts("PASS diagnostics: terminal reason retention, 512-record bound/drop count, bounded formatter, all 12 framebuffer pages and guard words under ASan/UBSan");
 }
 '''
+# Real low-level MMIO polling and SPMI transaction/reset routines.
+lowmock=r'''
+static uintptr_t uh_core,uh_cfg,uh_obs,uh_ch;
+static unsigned uh_apid,reason,elapsed,transactions;
+static bool uh_poisoned,timeout,denied,readback_fail,mapping_fail;
+static uint32_t regs[5][0x4000/4];static uint8_t pmic[256];
+static uint32_t uh_rd(uintptr_t b,unsigned o){assert(b>=1&&b<=4&&o<0x4000);return regs[b][o/4];}
+static void uh_wr(uintptr_t b,unsigned o,uint32_t v){
+ assert(b>=1&&b<=4&&o<0x4000);if(readback_fail)return;regs[b][o/4]=v;
+ if((b==3||b==4)&&o==0){transactions++;regs[b][8/4]=timeout?0:denied?3:1;
+  if(!timeout&&!denied){unsigned r=(v>>4)&255;if(b==3)regs[b][0x18/4]=pmic[r];else pmic[r]=regs[b][0x10/4];}}
+}
+static uintptr_t ml_io_map(uintptr_t pa,unsigned z){(void)z;if(mapping_fail)return 0;switch(pa){case 0xc400000:return 1;case 0xc42d000:return 2;case 0xc440000:return 3;case 0xc500000:return 4;default:assert(0);return 0;}}
+static void delay(unsigned n){elapsed+=n;}
+static bool uh_fail(enum mh_reason r,int e,const char*g){(void)e;(void)g;reason=r;return false;}
+'''
+lowbody='\n'.join(t.function(s,name) for name in ['uh_mask','uh_poll','uh_pmic_byte','uh_pmic_mask','uh_repeater_map','uh_repeater_reset'])
+
+lowtests=r'''
+static void init(void){memset(regs,0,sizeof(regs));memset(pmic,0,sizeof(pmic));uh_apid=reason=elapsed=transactions=0;uh_poisoned=timeout=denied=readback_fail=mapping_fail=false;regs[1][0]=0x70000000;regs[1][1]=1;regs[1][0x2000/4]=(0x28e<<8)|1;pmic[4]=0x10;pmic[5]=0x12;}
+int main(void){
+ init();assert(uh_repeater_map());assert(uh_repeater_reset(false));assert(!(pmic[0x44]&0x80));assert(uh_repeater_reset(true));assert(pmic[0x44]==0x80&&pmic[0x40]==2&&pmic[0x41]==1&&pmic[0x42]==5&&pmic[0x45]==2&&pmic[0x46]==0x80);
+ init();mapping_fail=true;assert(!uh_repeater_map()&&reason==MH_MAPPING);
+ init();regs[2][0]=1;assert(!uh_repeater_map()&&reason==MH_OWNERSHIP&&transactions==0);
+ init();pmic[4]=0;assert(!uh_repeater_map()&&reason==MH_PROTOCOL);
+ init();timeout=true;assert(!uh_repeater_map()&&uh_poisoned&&elapsed==1000);unsigned before=transactions;uint8_t v=0;assert(!uh_pmic_byte(0x8e44,&v,true)&&transactions==before);
+ init();denied=true;assert(!uh_repeater_map()&&uh_poisoned);
+ init();readback_fail=true;assert(!uh_mask(1,0x100,1,1)&&reason==MH_READBACK);
+ init();regs[1][0x100/4]=~0u;assert(!uh_mask(1,0x100,1,1));
+ init();assert(!uh_poll(1,0x100,1,1,17)&&elapsed==17&&reason==MH_TIMEOUT);
+ puts("PASS real MMIO/SPMI helpers: GPIO7 setup/release/readback, unique EE0 ownership, identity/mapping refusal,1000us timeout+poison, denied transaction, mask and poll failures");
+}
+'''
 with tempfile.TemporaryDirectory(prefix='marble-hw-v3-') as directory:
  p=Path(directory)
- codes={'usb':common+(r/'bsd/dev/marble_hwdiag.h').read_text().replace('#include <sys/types.h>','')+mock+stubs.split('#endif',1)[-1]+body+tests,
+ codes={'low':common+(r/'bsd/dev/marble_hwdiag.h').read_text().replace('#include <sys/types.h>','')+lowmock+t.diagnostic_stubs(r).split('#endif',1)[-1]+lowbody+lowtests,
+ 'usb':common+(r/'bsd/dev/marble_hwdiag.h').read_text().replace('#include <sys/types.h>','')+mock+stubs.split('#endif',1)[-1]+body+tests,
  'diag':common+(r/'bsd/dev/marble_hwdiag.h').read_text().replace('#include <sys/types.h>','')+diagtypes+diagmock+'\n'.join(funcs)+diagtest}
  for name,code in codes.items():
   c=p/(name+'.c');binary=p/name;c.write_text(code)
