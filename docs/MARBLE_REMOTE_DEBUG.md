@@ -1,5 +1,10 @@
 # MARBLE remote debug feasibility — 2026-10-23
 
+Current follow-up: the USB CDC-ECM/live-log port is now implemented for a
+dedicated debug checkpoint; see [MARBLE_USB_LOG.md](MARBLE_USB_LOG.md).
+Physical enumeration/networking is pending. This does not add Apple usbmux,
+SSH or VNC. The original audit below describes the preceding touchinit kernel.
+
 Audit only, performed **after** touchinit artifact packaging succeeded. No USB,
 SSH, VNC, root or physical-device changes were made. Kernel examined: source
 `efb27bc77c45dca4443167dc347c0c14d1eb0ea0`, CI39903264776. Device-mode

@@ -11248,7 +11248,7 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
  extern void sweet_keys_init(void);
  extern void sweet_touch_init(void);
  extern void sweet_usb_probe(void);
-
++
 +/* Keep the historical filename: patches 0030..0077 still apply before 0082.
 + * MARBLE shares the guarded write transport; SWEET retains its original policy. */
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
@@ -11259,10 +11259,10 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 +#define UFS_DT_PATH "/sweet-ufs"
 +#endif
 +#define REG_VER         0x08
-+
+ 
  #define REG_CAP         0x00
  #define REG_IS          0x20
-@@ -97,21 +110,36 @@
+@@ -97,6 +110,13 @@
  #define DMA_UCD         0x1000                  /* 128 byte aligned */
  #define DMA_BOUNCE      0x4000
  #define DMA_SIZE        (DMA_BOUNCE + BOUNCE_SIZE)
@@ -11273,34 +11273,13 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 +_Static_assert((DMA_BOUNCE & 4095) == 0, "data alignment");
 +_Static_assert(sizeof(struct ucd) <= DMA_BOUNCE - DMA_UCD, "descriptor region overlap");
 +#endif
-
+ 
  static struct {
--	vm_offset_t regs;
-+	vm_offset_t regs;
--	vm_offset_t dma;                        /* kernel VA of the DMA allocation */
-+	vm_offset_t dma;                        /* kernel VA of the DMA allocation */
--	uint64_t dma_pa;
-+	uint64_t dma_pa;
--	uint8_t lun;
-+	uint8_t lun;
--	uint8_t tag;
-+	uint8_t tag;
--	uint64_t first_block, nblocks;          /* partition, in 4 KiB device blocks */
-+	uint64_t first_block, nblocks;          /* partition, in 4 KiB device blocks */
--	uint32_t secsize;                       /* logical sector size for the BSD layer */
-+	uint32_t secsize;                       /* logical sector size for the BSD layer */
--	bool writable;                          /* boot-arg ufsrw=1 */
-+	bool writable;                          /* boot-arg ufsrw=1 */
--	bool cache;                             /* boot-arg ufscache=1 */
-+	bool cache;                             /* boot-arg ufscache=1 */
--	bool wait;                              /* boot-arg ufswait=1 */
-+	bool wait;                              /* boot-arg ufswait=1 */
--	int bmajor, cmajor;
-+	int bmajor, cmajor;
--	dev_t bdev;
-+	dev_t bdev;
--	bool ready;
-+	bool ready;
+ 	vm_offset_t regs;
+@@ -112,6 +132,14 @@
+ 	int bmajor, cmajor;
+ 	dev_t bdev;
+ 	bool ready;
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
 +	uint64_t ready_deadline;
 +	bool quiet;
@@ -11310,9 +11289,9 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 +	uint64_t device_blocks;
 +#endif
  } su;
-
+ 
  static LCK_GRP_DECLARE(sweet_ufs_grp, "sweet_ufs");
-@@ -148,125 +176,293 @@
+@@ -148,6 +176,36 @@
  static int
  ufs_scsi(const uint8_t *cdb, unsigned cdb_len, uint32_t len, bool write)
  {
@@ -11346,72 +11325,13 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 +		return EIO;
 +	}
 +#endif
--	struct utrd *utrd = (struct utrd *)(su.dma + DMA_UTRL);
-+	struct utrd *utrd = (struct utrd *)(su.dma + DMA_UTRL);
--	struct ucd *ucd = (struct ucd *)(su.dma + DMA_UCD);
-+	struct ucd *ucd = (struct ucd *)(su.dma + DMA_UCD);
--	uint64_t ucd_pa = su.dma_pa + DMA_UCD, bounce_pa = su.dma_pa + DMA_BOUNCE;
-+	uint64_t ucd_pa = su.dma_pa + DMA_UCD, bounce_pa = su.dma_pa + DMA_BOUNCE;
-
--	assert(len <= BOUNCE_SIZE);
-+	assert(len <= BOUNCE_SIZE);
--	bzero(utrd, sizeof(*utrd));
-+	bzero(utrd, sizeof(*utrd));
--	bzero(ucd, sizeof(*ucd));
-+	bzero(ucd, sizeof(*ucd));
-
--	ucd->cmd[0] = 0x01;                     /* COMMAND UPIU */
-+	ucd->cmd[0] = 0x01;                     /* COMMAND UPIU */
--	ucd->cmd[1] = len ? (write ? 0x20 : 0x40) : 0x00;      /* W: data out, R: data in */
-+	ucd->cmd[1] = len ? (write ? 0x20 : 0x40) : 0x00;      /* W: data out, R: data in */
--	ucd->cmd[2] = su.lun;
-+	ucd->cmd[2] = su.lun;
--	ucd->cmd[3] = ++su.tag;
-+	ucd->cmd[3] = ++su.tag;
--	ucd->cmd[12] = (uint8_t)(len >> 24);
-+	ucd->cmd[12] = (uint8_t)(len >> 24);
--	ucd->cmd[13] = (uint8_t)(len >> 16);
-+	ucd->cmd[13] = (uint8_t)(len >> 16);
--	ucd->cmd[14] = (uint8_t)(len >> 8);
-+	ucd->cmd[14] = (uint8_t)(len >> 8);
--	ucd->cmd[15] = (uint8_t)len;
-+	ucd->cmd[15] = (uint8_t)len;
--	memcpy(&ucd->cmd[16], cdb, cdb_len);
-+	memcpy(&ucd->cmd[16], cdb, cdb_len);
-
--	/* DD: 1 = memory to device, 2 = device to memory. */
-+	/* DD: 1 = memory to device, 2 = device to memory. */
--	utrd->dw0 = (1u << 28) | ((len ? (write ? 1u : 2u) : 0u) << 25) | (1u << 24);
-+	utrd->dw0 = (1u << 28) | ((len ? (write ? 1u : 2u) : 0u) << 25) | (1u << 24);
--	utrd->dw2 = 0x0f;                       /* OCS invalid until updated */
-+	utrd->dw2 = 0x0f;                       /* OCS invalid until updated */
--	utrd->ucdba = (uint32_t)ucd_pa;
-+	utrd->ucdba = (uint32_t)ucd_pa;
--	utrd->ucdbau = (uint32_t)(ucd_pa >> 32);
-+	utrd->ucdbau = (uint32_t)(ucd_pa >> 32);
--	utrd->resp = (512u / 4) << 16 | (512u / 4);
-+	utrd->resp = (512u / 4) << 16 | (512u / 4);
--	if (len) {
-+	if (len) {
--		uint32_t n = 0;
-+		uint32_t n = 0;
--		for (uint32_t done = 0; done < len; done += PRDT_CHUNK, n++) {
-+		for (uint32_t done = 0; done < len; done += PRDT_CHUNK, n++) {
--			uint32_t chunk = MIN(PRDT_CHUNK, len - done);
-+			uint32_t chunk = MIN(PRDT_CHUNK, len - done);
--			ucd->prdt[n].addr_lo = (uint32_t)(bounce_pa + done);
-+			ucd->prdt[n].addr_lo = (uint32_t)(bounce_pa + done);
--			ucd->prdt[n].addr_hi = (uint32_t)((bounce_pa + done) >> 32);
-+			ucd->prdt[n].addr_hi = (uint32_t)((bounce_pa + done) >> 32);
--			ucd->prdt[n].dbc = chunk - 1;
-+			ucd->prdt[n].dbc = chunk - 1;
--		}
-+		}
--		utrd->prdt = (1024u / 4) << 16 | n;
-+		utrd->prdt = (1024u / 4) << 16 | n;
--	}
-+	}
-
+ 	struct utrd *utrd = (struct utrd *)(su.dma + DMA_UTRL);
+ 	struct ucd *ucd = (struct ucd *)(su.dma + DMA_UCD);
+ 	uint64_t ucd_pa = su.dma_pa + DMA_UCD, bounce_pa = su.dma_pa + DMA_BOUNCE;
+@@ -183,6 +241,13 @@
+ 		utrd->prdt = (1024u / 4) << 16 | n;
+ 	}
+ 
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
 +	if (devact) {
 +		printf(UFS_LOG "ACTIVE request TT 0x%02x flags 0x%02x LUN 0x%02x expected length %u PRDT entries %u CDB %02x%02x%02x%02x%02x%02x\n",
@@ -11419,137 +11339,35 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 +		    ucd->cmd[16], ucd->cmd[17], ucd->cmd[18], ucd->cmd[19], ucd->cmd[20], ucd->cmd[21]);
 +	}
 +#endif
--	if (su.cache) {
-+	if (su.cache) {
--		dma_clean(DMA_UTRL, sizeof(*utrd));
-+		dma_clean(DMA_UTRL, sizeof(*utrd));
--		dma_clean(DMA_UCD, 16 + cdb_len);
-+		dma_clean(DMA_UCD, 16 + cdb_len);
--		dma_sync(DMA_UCD + offsetof(struct ucd, resp), sizeof(ucd->resp));
-+		dma_sync(DMA_UCD + offsetof(struct ucd, resp), sizeof(ucd->resp));
--		if (len) {
-+		if (len) {
--			dma_clean(DMA_UCD + offsetof(struct ucd, prdt),
-+			dma_clean(DMA_UCD + offsetof(struct ucd, prdt),
--			    (utrd->prdt & 0xffff) * sizeof(ucd->prdt[0]));
-+			    (utrd->prdt & 0xffff) * sizeof(ucd->prdt[0]));
--		}
-+		}
--	} else {
-+	} else {
--		dma_sync(DMA_UTRL, sizeof(*utrd));
-+		dma_sync(DMA_UTRL, sizeof(*utrd));
--		dma_sync(DMA_UCD, sizeof(*ucd));
-+		dma_sync(DMA_UCD, sizeof(*ucd));
--	}
-+	}
--	if (len) {
-+	if (len) {
--		if (su.cache && write) {
-+		if (su.cache && write) {
--			dma_clean(DMA_BOUNCE, len);
-+			dma_clean(DMA_BOUNCE, len);
--		} else {
-+		} else {
--			dma_sync(DMA_BOUNCE, len);
-+			dma_sync(DMA_BOUNCE, len);
--		}
-+		}
--	}
-+	}
--	__builtin_arm_dsb(0xf);
-+	__builtin_arm_dsb(0xf);
-
--	ufs_wr(REG_UTRLDBR, 1);
-+	ufs_wr(REG_UTRLDBR, 1);
--	uint64_t deadline;
-+	uint64_t deadline;
--	nanoseconds_to_absolutetime(CMD_TIMEOUT_NS, &deadline);
-+	nanoseconds_to_absolutetime(CMD_TIMEOUT_NS, &deadline);
--	deadline += mach_absolute_time();
-+	deadline += mach_absolute_time();
+ 	if (su.cache) {
+ 		dma_clean(DMA_UTRL, sizeof(*utrd));
+ 		dma_clean(DMA_UCD, 16 + cdb_len);
+@@ -208,6 +273,9 @@
+ 	uint64_t deadline;
+ 	nanoseconds_to_absolutetime(CMD_TIMEOUT_NS, &deadline);
+ 	deadline += mach_absolute_time();
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
 +	if (su.ready_deadline && su.ready_deadline < deadline) deadline = su.ready_deadline;
 +#endif
--	bool sleepable = su.wait && su.ready && ml_get_interrupts_enabled() &&
-+	bool sleepable = su.wait && su.ready && ml_get_interrupts_enabled() &&
--	    !ml_at_interrupt_context() && get_preemption_level() == 0;
-+	    !ml_at_interrupt_context() && get_preemption_level() == 0;
--	uint64_t spin_until = 0, sleep_interval = 0;
-+	uint64_t spin_until = 0, sleep_interval = 0;
--	if (sleepable) {
-+	if (sleepable) {
--		nanoseconds_to_absolutetime(CMD_SPIN_NS, &spin_until);
-+		nanoseconds_to_absolutetime(CMD_SPIN_NS, &spin_until);
--		spin_until += mach_absolute_time();
-+		spin_until += mach_absolute_time();
--		nanoseconds_to_absolutetime(CMD_SLEEP_NS, &sleep_interval);
-+		nanoseconds_to_absolutetime(CMD_SLEEP_NS, &sleep_interval);
--	}
-+	}
--	while (ufs_rd(REG_UTRLDBR) & 1) {
-+	while (ufs_rd(REG_UTRLDBR) & 1) {
--		uint64_t now = mach_absolute_time();
-+		uint64_t now = mach_absolute_time();
--		if (now > deadline) {
-+		if (now > deadline) {
--			ufs_wr(REG_UTRLCLR, ~1u);
-+			ufs_wr(REG_UTRLCLR, ~1u);
+ 	bool sleepable = su.wait && su.ready && ml_get_interrupts_enabled() &&
+ 	    !ml_at_interrupt_context() && get_preemption_level() == 0;
+ 	uint64_t spin_until = 0, sleep_interval = 0;
+@@ -220,7 +288,10 @@
+ 		uint64_t now = mach_absolute_time();
+ 		if (now > deadline) {
+ 			ufs_wr(REG_UTRLCLR, ~1u);
 -			printf("SWEET UFS: command 0x%02x timed out\n", cdb[0]);
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
 +			su.failed = true;
 +#endif
 +			printf(UFS_LOG "command 0x%02x timed out\n", cdb[0]);
--			return ETIMEDOUT;
-+			return ETIMEDOUT;
--		}
-+		}
--		if (sleepable && now >= spin_until) {
-+		if (sleepable && now >= spin_until) {
--			uint64_t wake = now + MIN(sleep_interval, deadline - now);
-+			uint64_t wake = now + MIN(sleep_interval, deadline - now);
--			/* Keep the mutex: slot 0 and the bounce buffer are still owned. */
-+			/* Keep the mutex: slot 0 and the bounce buffer are still owned. */
--			if (assert_wait_deadline_with_leeway((event_t)&su.wait, THREAD_UNINT,
-+			if (assert_wait_deadline_with_leeway((event_t)&su.wait, THREAD_UNINT,
--			    TIMEOUT_URGENCY_SYS_CRITICAL, wake, 0) == THREAD_WAITING) {
-+			    TIMEOUT_URGENCY_SYS_CRITICAL, wake, 0) == THREAD_WAITING) {
--				thread_block(THREAD_CONTINUE_NULL);
-+				thread_block(THREAD_CONTINUE_NULL);
--			}
-+			}
--		} else {
-+		} else {
--			delay(1);
-+			delay(1);
--		}
-+		}
--	}
-+	}
--	__builtin_arm_dsb(0xf);
-+	__builtin_arm_dsb(0xf);
--	ufs_wr(REG_IS, ufs_rd(REG_IS));         /* acknowledge completion status */
-+	ufs_wr(REG_IS, ufs_rd(REG_IS));         /* acknowledge completion status */
-
--	dma_sync(DMA_UTRL, sizeof(*utrd));
-+	dma_sync(DMA_UTRL, sizeof(*utrd));
--	if (su.cache) {
-+	if (su.cache) {
--		dma_sync(DMA_UCD + offsetof(struct ucd, resp), sizeof(ucd->resp));
-+		dma_sync(DMA_UCD + offsetof(struct ucd, resp), sizeof(ucd->resp));
--	} else {
-+	} else {
--		dma_sync(DMA_UCD, sizeof(*ucd));
-+		dma_sync(DMA_UCD, sizeof(*ucd));
--	}
-+	}
--	if (len && !(su.cache && write)) {
-+	if (len && !(su.cache && write)) {
--		dma_sync(DMA_BOUNCE, len);
-+		dma_sync(DMA_BOUNCE, len);
--	}
-+	}
-
+ 			return ETIMEDOUT;
+ 		}
+ 		if (sleepable && now >= spin_until) {
+@@ -247,19 +318,144 @@
+ 		dma_sync(DMA_BOUNCE, len);
+ 	}
+ 
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
 +	su.initializing = false;
 +	if (devact) printf(UFS_LOG "ACTIVE completion OCS 0x%x transaction 0x%x response 0x%x status 0x%x\n",
@@ -11574,25 +11392,19 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 +	    ucd->resp[7] == 2 && key == 2 && asc == 4 && ascq == 2;
 +	if (ucd->resp[7] && !su.quiet) printf(UFS_LOG "sense %02x/%02x/%02x\n", key, asc, ascq);
 +#endif
--	uint32_t ocs = utrd->dw2 & 0xff;
-+	uint32_t ocs = utrd->dw2 & 0xff;
--	if (ocs || ucd->resp[0] != 0x21 || ucd->resp[6] || ucd->resp[7]) {
-+	if (ocs || ucd->resp[0] != 0x21 || ucd->resp[6] || ucd->resp[7]) {
+ 	uint32_t ocs = utrd->dw2 & 0xff;
+ 	if (ocs || ucd->resp[0] != 0x21 || ucd->resp[6] || ucd->resp[7]) {
 -		printf("SWEET UFS: command 0x%02x failed: ocs 0x%x upiu 0x%x response 0x%x status 0x%x\n",
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
 +		if (!su.quiet)
 +#endif
 +		printf(UFS_LOG "command 0x%02x failed: ocs 0x%x upiu 0x%x response 0x%x status 0x%x\n",
--		    cdb[0], ocs, ucd->resp[0], ucd->resp[6], ucd->resp[7]);
-+		    cdb[0], ocs, ucd->resp[0], ucd->resp[6], ucd->resp[7]);
--		return EIO;
-+		return EIO;
--	}
-+	}
--	return 0;
-+	return 0;
+ 		    cdb[0], ocs, ucd->resp[0], ucd->resp[6], ucd->resp[7]);
+ 		return EIO;
+ 	}
+ 	return 0;
  }
-
+ 
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
 +/* NOP / READ_FLAG only: no query-write opcode or general management API. */
 +static int
@@ -11695,60 +11507,22 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 +		first_read = false;
 +	}
 +#endif
--	if (lba > UINT32_MAX || count > BOUNCE_SIZE / UFS_BLOCK) {
-+	if (lba > UINT32_MAX || count > BOUNCE_SIZE / UFS_BLOCK) {
--		return EINVAL;
-+		return EINVAL;
--	}
-+	}
--	uint8_t cdb[10] = {
-+	uint8_t cdb[10] = {
--		0x28, 0,
-+		0x28, 0,
--		(uint8_t)(lba >> 24), (uint8_t)(lba >> 16), (uint8_t)(lba >> 8), (uint8_t)lba,
-+		(uint8_t)(lba >> 24), (uint8_t)(lba >> 16), (uint8_t)(lba >> 8), (uint8_t)lba,
--		0, (uint8_t)(count >> 8), (uint8_t)count, 0
-+		0, (uint8_t)(count >> 8), (uint8_t)count, 0
--	};
-+	};
--	return ufs_scsi(cdb, sizeof(cdb), count * UFS_BLOCK, false);
-+	return ufs_scsi(cdb, sizeof(cdb), count * UFS_BLOCK, false);
- }
-@@ -280,14 +476,14 @@
- {
--	if (!su.writable || !su.nblocks || count == 0 || count > BOUNCE_SIZE / UFS_BLOCK ||
-+	if (!su.writable || !su.nblocks || count == 0 || count > BOUNCE_SIZE / UFS_BLOCK ||
--	    lba < su.first_block || lba - su.first_block >= su.nblocks ||
-+	    lba < su.first_block || lba - su.first_block >= su.nblocks ||
--	    count > su.nblocks - (lba - su.first_block) || lba + count - 1 > UINT32_MAX) {
-+	    count > su.nblocks - (lba - su.first_block) || lba + count - 1 > UINT32_MAX) {
+ 	if (lba > UINT32_MAX || count > BOUNCE_SIZE / UFS_BLOCK) {
+ 		return EINVAL;
+ 	}
+@@ -281,7 +477,7 @@
+ 	if (!su.writable || !su.nblocks || count == 0 || count > BOUNCE_SIZE / UFS_BLOCK ||
+ 	    lba < su.first_block || lba - su.first_block >= su.nblocks ||
+ 	    count > su.nblocks - (lba - su.first_block) || lba + count - 1 > UINT32_MAX) {
 -		printf("SWEET UFS: refusing write of %u blocks at 0x%llx\n", count, lba);
 +		printf(UFS_LOG "refusing write of %u blocks at 0x%llx\n", count, lba);
--		return EPERM;
-+		return EPERM;
--	}
-+	}
--	uint8_t cdb[10] = {
-+	uint8_t cdb[10] = {
--		0x2a, 0,
-+		0x2a, 0,
--		(uint8_t)(lba >> 24), (uint8_t)(lba >> 16), (uint8_t)(lba >> 8), (uint8_t)lba,
-+		(uint8_t)(lba >> 24), (uint8_t)(lba >> 16), (uint8_t)(lba >> 8), (uint8_t)lba,
--		0, (uint8_t)(count >> 8), (uint8_t)count, 0
-+		0, (uint8_t)(count >> 8), (uint8_t)count, 0
--	};
-+	};
--	return ufs_scsi(cdb, sizeof(cdb), count * UFS_BLOCK, true);
-+	return ufs_scsi(cdb, sizeof(cdb), count * UFS_BLOCK, true);
+ 		return EPERM;
+ 	}
+ 	uint8_t cdb[10] = {
+@@ -299,6 +495,21 @@
+ 	return ufs_scsi(cdb, sizeof(cdb), 0, false);
  }
-@@ -297,92 +493,148 @@
- {
--	static const uint8_t cdb[10] = { 0x35 };       /* SYNCHRONIZE CACHE(10), whole LUN */
-+	static const uint8_t cdb[10] = { 0x35 };       /* SYNCHRONIZE CACHE(10), whole LUN */
--	return ufs_scsi(cdb, sizeof(cdb), 0, false);
-+	return ufs_scsi(cdb, sizeof(cdb), 0, false);
- }
-+
+ 
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
 +/* GPT uses IEEE CRC32, including the header with its CRC field zeroed. */
 +static uint32_t
@@ -11763,28 +11537,18 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 +	return ~crc;
 +}
 +#endif
-
++
  static int
  ufs_find_partition(const char *want)
  {
--	const uint8_t *b = (const uint8_t *)(su.dma + DMA_BOUNCE);
-+	const uint8_t *b = (const uint8_t *)(su.dma + DMA_BOUNCE);
--	int error = ufs_read_blocks(1, 1);
-+	int error = ufs_read_blocks(1, 1);
--	if (error) {
-+	if (error) {
--		return error;
-+		return error;
--	}
-+	}
--	if (memcmp(b, "EFI PART", 8) != 0) {
-+	if (memcmp(b, "EFI PART", 8) != 0) {
+@@ -308,22 +519,52 @@
+ 		return error;
+ 	}
+ 	if (memcmp(b, "EFI PART", 8) != 0) {
 -		printf("SWEET UFS: LUN %u has no GPT\n", su.lun);
 +		printf(UFS_LOG "LUN %u has no GPT\n", su.lun);
--		return ENXIO;
-+		return ENXIO;
--	}
-+	}
+ 		return ENXIO;
+ 	}
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
 +	uint32_t header_size, header_crc, entries_crc;
 +	uint64_t current_lba, first_usable, last_usable;
@@ -11800,16 +11564,11 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 +	bzero((void *)(b + 16), 4);
 +	if (ufs_gpt_crc(b, header_size) != header_crc) return ENXIO;
 +#endif
--	uint64_t entry_lba;
-+	uint64_t entry_lba;
--	uint32_t nent, esz;
-+	uint32_t nent, esz;
--	memcpy(&entry_lba, b + 72, 8);
-+	memcpy(&entry_lba, b + 72, 8);
--	memcpy(&nent, b + 80, 4);
-+	memcpy(&nent, b + 80, 4);
--	memcpy(&esz, b + 84, 4);
-+	memcpy(&esz, b + 84, 4);
+ 	uint64_t entry_lba;
+ 	uint32_t nent, esz;
+ 	memcpy(&entry_lba, b + 72, 8);
+ 	memcpy(&nent, b + 80, 4);
+ 	memcpy(&esz, b + 84, 4);
 -	if (esz != 128 || nent == 0 || nent * esz > BOUNCE_SIZE) {
 -		printf("SWEET UFS: unsupported GPT entries %u x %u\n", nent, esz);
 +	if (esz != 128 || nent == 0 ||
@@ -11820,182 +11579,85 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 +#endif
 +	    ) {
 +		printf(UFS_LOG "unsupported GPT entries %u x %u\n", nent, esz);
--		return ENXIO;
-+		return ENXIO;
--	}
-+	}
+ 		return ENXIO;
+ 	}
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
 +	if (entry_lba < 2 || entry_lba >= first_usable ||
 +	    (nent * esz + UFS_BLOCK - 1) / UFS_BLOCK > first_usable - entry_lba)
 +		return ENXIO;
 +	printf(UFS_LOG "GPT header valid; entries %u at 0x%llx\n", nent, entry_lba);
 +#endif
--	error = ufs_read_blocks(entry_lba, (nent * esz + UFS_BLOCK - 1) / UFS_BLOCK);
-+	error = ufs_read_blocks(entry_lba, (nent * esz + UFS_BLOCK - 1) / UFS_BLOCK);
--	if (error) {
-+	if (error) {
--		return error;
-+		return error;
--	}
-+	}
+ 	error = ufs_read_blocks(entry_lba, (nent * esz + UFS_BLOCK - 1) / UFS_BLOCK);
+ 	if (error) {
+ 		return error;
+ 	}
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
 +	if (ufs_gpt_crc(b, nent * esz) != entries_crc) return ENXIO;
 +#endif
--	for (uint32_t i = 0; i < nent; i++) {
-+	for (uint32_t i = 0; i < nent; i++) {
--		const uint8_t *e = b + i * esz;
-+		const uint8_t *e = b + i * esz;
--		char name[37];
-+		char name[37];
--		unsigned c;
-+		unsigned c;
--		for (c = 0; c < 36; c++) {
-+		for (c = 0; c < 36; c++) {
--			uint16_t ch = (uint16_t)(e[56 + 2 * c] | e[57 + 2 * c] << 8);
-+			uint16_t ch = (uint16_t)(e[56 + 2 * c] | e[57 + 2 * c] << 8);
--			if (ch == 0 || ch > 0x7f) {
-+			if (ch == 0 || ch > 0x7f) {
--				break;
-+				break;
--			}
-+			}
--			name[c] = (char)ch;
-+			name[c] = (char)ch;
--		}
-+		}
--		name[c] = 0;
-+		name[c] = 0;
--		if (strcmp(name, want) != 0) {
-+		if (strcmp(name, want) != 0) {
--			continue;
-+			continue;
--		}
-+		}
--		uint64_t first, last;
-+		uint64_t first, last;
--		memcpy(&first, e + 32, 8);
-+		memcpy(&first, e + 32, 8);
--		memcpy(&last, e + 40, 8);
-+		memcpy(&last, e + 40, 8);
+ 	for (uint32_t i = 0; i < nent; i++) {
+ 		const uint8_t *e = b + i * esz;
+ 		char name[37];
+@@ -342,6 +583,11 @@
+ 		uint64_t first, last;
+ 		memcpy(&first, e + 32, 8);
+ 		memcpy(&last, e + 40, 8);
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
 +		if (first < first_usable || last > last_usable || last >= su.device_blocks || last > UINT32_MAX) {
 +			return ENXIO;
 +		}
 +#endif
--		if (last < first) {
-+		if (last < first) {
--			return ENXIO;
-+			return ENXIO;
--		}
-+		}
--		su.first_block = first;
-+		su.first_block = first;
--		su.nblocks = last - first + 1;
-+		su.nblocks = last - first + 1;
--		return 0;
-+		return 0;
--	}
-+	}
+ 		if (last < first) {
+ 			return ENXIO;
+ 		}
+@@ -349,25 +595,31 @@
+ 		su.nblocks = last - first + 1;
+ 		return 0;
+ 	}
 -	printf("SWEET UFS: no GPT partition named \"%s\"\n", want);
 +	printf(UFS_LOG "no GPT partition named \"%s\"\n", want);
--	return ENOENT;
-+	return ENOENT;
+ 	return ENOENT;
  }
-
+ 
  static int
  ufs_take_over_host(void)
  {
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
 +	printf(UFS_LOG "CAP 0x%x VER 0x%x\n", ufs_rd(REG_CAP), ufs_rd(REG_VER));
 +#endif
--	uint32_t hce = ufs_rd(REG_HCE), hcs = ufs_rd(REG_HCS);
-+	uint32_t hce = ufs_rd(REG_HCE), hcs = ufs_rd(REG_HCS);
--	if (!(hce & 1) || !(hcs & HCS_DP) || !(hcs & HCS_UTRLRDY)) {
-+	if (!(hce & 1) || !(hcs & HCS_DP) || !(hcs & HCS_UTRLRDY)) {
+ 	uint32_t hce = ufs_rd(REG_HCE), hcs = ufs_rd(REG_HCS);
+ 	if (!(hce & 1) || !(hcs & HCS_DP) || !(hcs & HCS_UTRLRDY)) {
 -		printf("SWEET UFS: host not ready (hce 0x%x hcs 0x%x)\n", hce, hcs);
 +		printf(UFS_LOG "host not ready (hce 0x%x hcs 0x%x)\n", hce, hcs);
--		return ENXIO;
-+		return ENXIO;
--	}
-+	}
--	if (ufs_rd(REG_UTRLDBR)) {
-+	if (ufs_rd(REG_UTRLDBR)) {
+ 		return ENXIO;
+ 	}
+ 	if (ufs_rd(REG_UTRLDBR)) {
 -		printf("SWEET UFS: requests outstanding from the bootloader\n");
 +		printf(UFS_LOG "requests outstanding from the bootloader\n");
--		return EBUSY;
-+		return EBUSY;
--	}
-+	}
+ 		return EBUSY;
+ 	}
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
 +	printf(UFS_LOG "controller ready HCE 0x%x HCS 0x%x\n", hce, hcs);
 +#endif
--	/* With RAM above 4 GiB (mkadt.py --highmem) the DMA memory can be there too. */
-+	/* With RAM above 4 GiB (mkadt.py --highmem) the DMA memory can be there too. */
--	if (((su.dma_pa + DMA_SIZE - 1) >> 32) && !(ufs_rd(REG_CAP) & CAP_64AS)) {
-+	if (((su.dma_pa + DMA_SIZE - 1) >> 32) && !(ufs_rd(REG_CAP) & CAP_64AS)) {
+ 	/* With RAM above 4 GiB (mkadt.py --highmem) the DMA memory can be there too. */
+ 	if (((su.dma_pa + DMA_SIZE - 1) >> 32) && !(ufs_rd(REG_CAP) & CAP_64AS)) {
 -		printf("SWEET UFS: DMA memory at 0x%llx but the host has no 64-bit addressing\n",
 +		printf(UFS_LOG "DMA memory at 0x%llx but the host has no 64-bit addressing\n",
--		    su.dma_pa);
-+		    su.dma_pa);
--		return ENXIO;
-+		return ENXIO;
--	}
-+	}
--	ufs_wr(REG_IE, 0);                      /* polled operation */
-+	ufs_wr(REG_IE, 0);                      /* polled operation */
--	ufs_wr(REG_IS, ufs_rd(REG_IS));
-+	ufs_wr(REG_IS, ufs_rd(REG_IS));
--	ufs_wr(REG_UTRLRSR, 0);
-+	ufs_wr(REG_UTRLRSR, 0);
--	uint64_t list = su.dma_pa + DMA_UTRL;
-+	uint64_t list = su.dma_pa + DMA_UTRL;
--	ufs_wr(REG_UTRLBA, (uint32_t)list);
-+	ufs_wr(REG_UTRLBA, (uint32_t)list);
--	ufs_wr(REG_UTRLBAU, (uint32_t)(list >> 32));
-+	ufs_wr(REG_UTRLBAU, (uint32_t)(list >> 32));
--	ufs_wr(REG_UTRLRSR, 1);
-+	ufs_wr(REG_UTRLRSR, 1);
--	/* Never ring a doorbell unless the host uses our list. */
-+	/* Never ring a doorbell unless the host uses our list. */
--	if (ufs_rd(REG_UTRLBA) != (uint32_t)list || ufs_rd(REG_UTRLBAU) != (uint32_t)(list >> 32) ||
-+	if (ufs_rd(REG_UTRLBA) != (uint32_t)list || ufs_rd(REG_UTRLBAU) != (uint32_t)(list >> 32) ||
--	    !(ufs_rd(REG_UTRLRSR) & 1)) {
-+	    !(ufs_rd(REG_UTRLRSR) & 1)) {
+ 		    su.dma_pa);
+ 		return ENXIO;
+ 	}
+@@ -381,7 +633,7 @@
+ 	/* Never ring a doorbell unless the host uses our list. */
+ 	if (ufs_rd(REG_UTRLBA) != (uint32_t)list || ufs_rd(REG_UTRLBAU) != (uint32_t)(list >> 32) ||
+ 	    !(ufs_rd(REG_UTRLRSR) & 1)) {
 -		printf("SWEET UFS: host did not take our request list\n");
 +		printf(UFS_LOG "host did not take our request list\n");
--		return EIO;
-+		return EIO;
--	}
-+	}
--	return 0;
-+	return 0;
- }
-@@ -407,59 +659,67 @@
- {
--	int error = 0;
-+	int error = 0;
--	caddr_t vaddr = NULL;
-+	caddr_t vaddr = NULL;
--	uint64_t off = (uint64_t)buf_blkno(bp) * su.secsize;
-+	uint64_t off = (uint64_t)buf_blkno(bp) * su.secsize;
--	uint32_t count = buf_count(bp);
-+	uint32_t count = buf_count(bp);
--	uint64_t part_bytes = su.nblocks * UFS_BLOCK;
-+	uint64_t part_bytes = su.nblocks * UFS_BLOCK;
-
--	bool rd = buf_flags(bp) & B_READ;
-+	bool rd = buf_flags(bp) & B_READ;
-
--	buf_setresid(bp, count);
-+	buf_setresid(bp, count);
--	if (!rd && !su.writable) {
-+	if (!rd && !su.writable) {
--		error = EROFS;
-+		error = EROFS;
--		goto done;
-+		goto done;
--	}
-+	}
+ 		return EIO;
+ 	}
+ 	return 0;
+@@ -418,6 +670,13 @@
+ 		error = EROFS;
+ 		goto done;
+ 	}
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
 +	/* Reject negative or overflowing logical block numbers before multiply. */
 +	if (buf_blkno(bp) < 0 || (uint64_t)buf_blkno(bp) > UINT64_MAX / su.secsize) {
@@ -12003,222 +11665,42 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 +		goto done;
 +	}
 +#endif
--	if (off > part_bytes || count > part_bytes - off) {
-+	if (off > part_bytes || count > part_bytes - off) {
--		error = EINVAL;
-+		error = EINVAL;
--		goto done;
-+		goto done;
--	}
-+	}
--	if (count == 0) {
-+	if (count == 0) {
--		goto done;
-+		goto done;
--	}
-+	}
--	if (buf_map(bp, &vaddr)) {
-+	if (buf_map(bp, &vaddr)) {
--		error = EIO;
-+		error = EIO;
--		goto done;
-+		goto done;
--	}
-+	}
-
--	lck_mtx_lock(&sweet_ufs_lock);
-+	lck_mtx_lock(&sweet_ufs_lock);
--	for (uint32_t done = 0; done < count;) {
-+	for (uint32_t done = 0; done < count;) {
--		uint64_t pos = off + done;
-+		uint64_t pos = off + done;
--		uint64_t lba = pos / UFS_BLOCK;
-+		uint64_t lba = pos / UFS_BLOCK;
--		uint32_t skip = (uint32_t)(pos % UFS_BLOCK);
-+		uint32_t skip = (uint32_t)(pos % UFS_BLOCK);
--		uint32_t want = MIN(count - done, BOUNCE_SIZE - skip);
-+		uint32_t want = MIN(count - done, BOUNCE_SIZE - skip);
--		uint32_t blocks = (skip + want + UFS_BLOCK - 1) / UFS_BLOCK;
-+		uint32_t blocks = (skip + want + UFS_BLOCK - 1) / UFS_BLOCK;
--		void *bounce = (void *)(su.dma + DMA_BOUNCE);
-+		void *bounce = (void *)(su.dma + DMA_BOUNCE);
--		if (rd) {
-+		if (rd) {
--			error = ufs_read_blocks(su.first_block + lba, blocks);
-+			error = ufs_read_blocks(su.first_block + lba, blocks);
--			if (!error) {
-+			if (!error) {
--				memcpy(vaddr + done, (const char *)bounce + skip, want);
-+				memcpy(vaddr + done, (const char *)bounce + skip, want);
--			}
-+			}
+ 	if (off > part_bytes || count > part_bytes - off) {
+ 		error = EINVAL;
+ 		goto done;
+@@ -443,7 +702,8 @@
+ 			if (!error) {
+ 				memcpy(vaddr + done, (const char *)bounce + skip, want);
+ 			}
 -		} else {
 +		}
 +		else {
--			/* Partial device blocks at either end: read, merge, write back. */
-+			/* Partial device blocks at either end: read, merge, write back. */
--			if (skip || (want % UFS_BLOCK)) {
-+			if (skip || (want % UFS_BLOCK)) {
--				error = ufs_read_blocks(su.first_block + lba, blocks);
-+				error = ufs_read_blocks(su.first_block + lba, blocks);
--			}
-+			}
--			if (!error) {
-+			if (!error) {
--				memcpy((char *)bounce + skip, vaddr + done, want);
-+				memcpy((char *)bounce + skip, vaddr + done, want);
--				error = ufs_write_blocks(su.first_block + lba, blocks);
-+				error = ufs_write_blocks(su.first_block + lba, blocks);
--			}
-+			}
--		}
-+		}
--		if (error) {
-+		if (error) {
--			break;
-+			break;
--		}
-+		}
--		done += want;
-+		done += want;
--		buf_setresid(bp, count - done);
-+		buf_setresid(bp, count - done);
--	}
-+	}
--	lck_mtx_unlock(&sweet_ufs_lock);
-+	lck_mtx_unlock(&sweet_ufs_lock);
--	buf_unmap(bp);
-+	buf_unmap(bp);
-
- done:
-@@ -475,50 +735,53 @@
- {
--	uint32_t *f = (uint32_t *)data;
-+	uint32_t *f = (uint32_t *)data;
--	uint64_t *o = (uint64_t *)data;
-+	uint64_t *o = (uint64_t *)data;
-
--	switch (cmd) {
-+	switch (cmd) {
--	case DKIOCGETBLOCKSIZE:
-+	case DKIOCGETBLOCKSIZE:
--		*f = su.secsize;
-+		*f = su.secsize;
--		return 0;
-+		return 0;
--	case DKIOCSETBLOCKSIZE:
-+	case DKIOCSETBLOCKSIZE:
--		if (is_char) {
-+		if (is_char) {
--			return ENODEV;
-+			return ENODEV;
--		}
-+		}
--		if (*f < DEV_BSIZE || *f > UFS_BLOCK || (*f & (*f - 1))) {
-+		if (*f < DEV_BSIZE || *f > UFS_BLOCK || (*f & (*f - 1))) {
--			return EINVAL;
-+			return EINVAL;
--		}
-+		}
--		su.secsize = *f;
-+		su.secsize = *f;
--		return 0;
-+		return 0;
--	case DKIOCGETPHYSICALBLOCKSIZE:
-+	case DKIOCGETPHYSICALBLOCKSIZE:
--		*f = UFS_BLOCK;
-+		*f = UFS_BLOCK;
--		return 0;
-+		return 0;
--	case DKIOCGETBLOCKCOUNT:
-+	case DKIOCGETBLOCKCOUNT:
--		*o = su.nblocks * UFS_BLOCK / su.secsize;
-+		*o = su.nblocks * UFS_BLOCK / su.secsize;
--		return 0;
-+		return 0;
--	case DKIOCISWRITABLE:
-+	case DKIOCISWRITABLE:
--		*f = su.writable;
-+		*f = su.writable;
--		return 0;
-+		return 0;
--	case DKIOCSYNCHRONIZE:
-+	case DKIOCSYNCHRONIZE:
--	case DKIOCSYNCHRONIZECACHE: {
-+	case DKIOCSYNCHRONIZECACHE: {
+ 			/* Partial device blocks at either end: read, merge, write back. */
+ 			if (skip || (want % UFS_BLOCK)) {
+ 				error = ufs_read_blocks(su.first_block + lba, blocks);
+@@ -500,6 +760,9 @@
+ 		return 0;
+ 	case DKIOCSYNCHRONIZE:
+ 	case DKIOCSYNCHRONIZECACHE: {
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
 +		if (!su.writable) return EROFS;
 +#endif
--		if (!su.writable) {
-+		if (!su.writable) {
--			return 0;
-+			return 0;
--		}
-+		}
--		lck_mtx_lock(&sweet_ufs_lock);
-+		lck_mtx_lock(&sweet_ufs_lock);
--		int error = ufs_sync_cache();
-+		int error = ufs_sync_cache();
--		lck_mtx_unlock(&sweet_ufs_lock);
-+		lck_mtx_unlock(&sweet_ufs_lock);
--		return error;
-+		return error;
--	}
-+	}
--	case DKIOCGETMAXBLOCKCOUNTREAD:
-+	case DKIOCGETMAXBLOCKCOUNTREAD:
--		*o = BOUNCE_SIZE / su.secsize;
-+		*o = BOUNCE_SIZE / su.secsize;
--		return 0;
-+		return 0;
--	case DKIOCGETMAXBLOCKCOUNTWRITE:
-+	case DKIOCGETMAXBLOCKCOUNTWRITE:
--		*o = su.writable ? BOUNCE_SIZE / su.secsize : 0;
-+		*o = su.writable ? BOUNCE_SIZE / su.secsize : 0;
--		return 0;
-+		return 0;
--	case DKIOCGETMAXSEGMENTCOUNTREAD:
-+	case DKIOCGETMAXSEGMENTCOUNTREAD:
--	case DKIOCGETMAXSEGMENTCOUNTWRITE:
-+	case DKIOCGETMAXSEGMENTCOUNTWRITE:
--		*o = 1;
-+		*o = 1;
--		return 0;
-+		return 0;
--	default:
-+	default:
--		return ENOTTY;
-+		return ENOTTY;
--	}
-+	}
- }
-@@ -588,81 +851,133 @@
- {
--	DTEntry node;
-+	DTEntry node;
--	uintptr_t const *reg = NULL;
-+	uintptr_t const *reg = NULL;
--	unsigned int size = 0;
-+	unsigned int size = 0;
--	char want[64] = "userdata";
-+	char want[64] = "userdata";
--	int error;
-+	int error;
-
+ 		if (!su.writable) {
+ 			return 0;
+ 		}
+@@ -592,13 +855,25 @@
+ 	char want[64] = "userdata";
+ 	int error;
+ 
 -	if (SecureDTLookupEntry(NULL, "/sweet-ufs", &node) != kSuccess ||
 +	if (SecureDTLookupEntry(NULL, UFS_DT_PATH, &node) != kSuccess ||
--	    SecureDTGetProperty(node, "reg", (void const **)&reg, &size) != kSuccess ||
-+	    SecureDTGetProperty(node, "reg", (void const **)&reg, &size) != kSuccess ||
--	    size < 2 * sizeof(uintptr_t)) {
-+	    size < 2 * sizeof(uintptr_t)) {
+ 	    SecureDTGetProperty(node, "reg", (void const **)&reg, &size) != kSuccess ||
+ 	    size < 2 * sizeof(uintptr_t)) {
 -		printf("SWEET UFS: no /sweet-ufs node in the device tree\n");
 +		printf(UFS_LOG "no " UFS_DT_PATH " node in the device tree\n");
--		return ENXIO;
-+		return ENXIO;
--	}
-+	}
--	PE_parse_boot_argn("ufsroot", want, sizeof(want));
-+	PE_parse_boot_argn("ufsroot", want, sizeof(want));
+ 		return ENXIO;
+ 	}
+ 	PE_parse_boot_argn("ufsroot", want, sizeof(want));
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
 +	/* MARBLE writes always target userdata, regardless of ufsroot override. */
 +	uint32_t rw = 0;
@@ -12231,77 +11713,50 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 +		return ENXIO;
 +	}
 +#else
--	uint32_t rw = 0;
-+	uint32_t rw = 0;
--	PE_parse_boot_argn("ufsrw", &rw, sizeof(rw));
-+	PE_parse_boot_argn("ufsrw", &rw, sizeof(rw));
--	uint32_t cache = 0, wait = 0;
-+	uint32_t cache = 0, wait = 0;
--	PE_parse_boot_argn("ufscache", &cache, sizeof(cache));
-+	PE_parse_boot_argn("ufscache", &cache, sizeof(cache));
--	PE_parse_boot_argn("ufswait", &wait, sizeof(wait));
-+	PE_parse_boot_argn("ufswait", &wait, sizeof(wait));
--	su.cache = (cache == 1);
-+	su.cache = (cache == 1);
--	su.wait = (wait == 1);
-+	su.wait = (wait == 1);
-
+ 	uint32_t rw = 0;
+ 	PE_parse_boot_argn("ufsrw", &rw, sizeof(rw));
+ 	uint32_t cache = 0, wait = 0;
+@@ -607,10 +882,16 @@
+ 	su.cache = (cache == 1);
+ 	su.wait = (wait == 1);
+ 
 +
 +#endif
--	su.regs = ml_io_map(reg[0], reg[1]);
-+	su.regs = ml_io_map(reg[0], reg[1]);
+ 	su.regs = ml_io_map(reg[0], reg[1]);
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
 +	if (!su.regs) return ENOMEM;
 +	printf(UFS_LOG "MMIO mapped 0x%lx\n", su.regs);
 +#endif
--	if (kmem_alloc_contig(kernel_map, &su.dma, DMA_SIZE, PAGE_MASK, 0, 0,
-+	if (kmem_alloc_contig(kernel_map, &su.dma, DMA_SIZE, PAGE_MASK, 0, 0,
--	    KMA_DATA | KMA_ZERO | KMA_PERMANENT, VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS) {
-+	    KMA_DATA | KMA_ZERO | KMA_PERMANENT, VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS) {
+ 	if (kmem_alloc_contig(kernel_map, &su.dma, DMA_SIZE, PAGE_MASK, 0, 0,
+ 	    KMA_DATA | KMA_ZERO | KMA_PERMANENT, VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS) {
 -		printf("SWEET UFS: no contiguous DMA memory\n");
 +		printf(UFS_LOG "no contiguous DMA memory\n");
--		return ENOMEM;
-+		return ENOMEM;
--	}
-+	}
--	ppnum_t pn = pmap_find_phys(kernel_pmap, (addr64_t)su.dma);
-+	ppnum_t pn = pmap_find_phys(kernel_pmap, (addr64_t)su.dma);
--	if (!pn) {
-+	if (!pn) {
--		return ENOMEM;
-+		return ENOMEM;
--	}
-+	}
--	su.dma_pa = ptoa_64(pn);
-+	su.dma_pa = ptoa_64(pn);
+ 		return ENOMEM;
+ 	}
+ 	ppnum_t pn = pmap_find_phys(kernel_pmap, (addr64_t)su.dma);
+@@ -618,17 +899,41 @@
+ 		return ENOMEM;
+ 	}
+ 	su.dma_pa = ptoa_64(pn);
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
 +	if (su.dma_pa & PAGE_MASK) return EINVAL;
 +	printf(UFS_LOG "UTRL allocation PA 0x%llx size 0x%x\n", su.dma_pa, DMA_SIZE);
 +#endif
--	su.lun = 0;
-+	su.lun = 0;
--	su.secsize = DEV_BSIZE;
-+	su.secsize = DEV_BSIZE;
-
--	lck_mtx_lock(&sweet_ufs_lock);
-+	lck_mtx_lock(&sweet_ufs_lock);
--	error = ufs_take_over_host();
-+	error = ufs_take_over_host();
--	if (!error) {
-+	if (!error) {
+ 	su.lun = 0;
+ 	su.secsize = DEV_BSIZE;
+ 
+ 	lck_mtx_lock(&sweet_ufs_lock);
+ 	error = ufs_take_over_host();
+ 	if (!error) {
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
 +		error = ufs_marble_ready();
 +#else
--		static const uint8_t tur[6] = { 0x00 };
-+		static const uint8_t tur[6] = { 0x00 };
--		/* The first command after the bootloader may report a unit attention. */
-+		/* The first command after the bootloader may report a unit attention. */
--		for (int i = 0; i < 3 && (error = ufs_scsi(tur, sizeof(tur), 0, false)); i++) {
-+		for (int i = 0; i < 3 && (error = ufs_scsi(tur, sizeof(tur), 0, false)); i++) {
--		}
-+		}
-+#endif
+ 		static const uint8_t tur[6] = { 0x00 };
+ 		/* The first command after the bootloader may report a unit attention. */
+ 		for (int i = 0; i < 3 && (error = ufs_scsi(tur, sizeof(tur), 0, false)); i++) {
+ 		}
 -	}
++#endif
 +	}
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
 +	printf(UFS_LOG "TEST UNIT READY result %d\n", error);
@@ -12319,121 +11774,75 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 +		}
 +	}
 +#endif
--	if (!error) {
-+	if (!error) {
--		error = ufs_find_partition(want);
-+		error = ufs_find_partition(want);
--	}
-+	}
--	lck_mtx_unlock(&sweet_ufs_lock);
-+	lck_mtx_unlock(&sweet_ufs_lock);
--	if (error) {
-+	if (error) {
--		return error;
-+		return error;
--	}
-+	}
-
--	su.bmajor = bdevsw_add(-1, &sweet_ufs_bdevsw);
-+	su.bmajor = bdevsw_add(-1, &sweet_ufs_bdevsw);
--	if (su.bmajor < 0) {
-+	if (su.bmajor < 0) {
--		return ENXIO;
-+		return ENXIO;
--	}
-+	}
--	su.cmajor = cdevsw_add_with_bdev(-1, &sweet_ufs_cdevsw, su.bmajor);
-+	su.cmajor = cdevsw_add_with_bdev(-1, &sweet_ufs_cdevsw, su.bmajor);
--	if (su.cmajor < 0) {
-+	if (su.cmajor < 0) {
--		return ENXIO;
-+		return ENXIO;
--	}
-+	}
--	su.bdev = makedev(su.bmajor, 0);
-+	su.bdev = makedev(su.bmajor, 0);
--	devfs_make_node(su.bdev, DEVFS_BLOCK, UID_ROOT, GID_OPERATOR, 0640, "ufsroot0");
-+	devfs_make_node(su.bdev, DEVFS_BLOCK, UID_ROOT, GID_OPERATOR, 0640, "ufsroot0");
--	devfs_make_node(makedev(su.cmajor, 0), DEVFS_CHAR, UID_ROOT, GID_OPERATOR, 0640, "rufsroot0");
-+	devfs_make_node(makedev(su.cmajor, 0), DEVFS_CHAR, UID_ROOT, GID_OPERATOR, 0640, "rufsroot0");
--	/* Only now, with the partition bounds known, can writes be allowed. */
-+	/* Only now, with the partition bounds known, can writes be allowed. */
+ 	if (!error) {
+ 		error = ufs_find_partition(want);
+ 	}
+@@ -649,20 +954,30 @@
+ 	devfs_make_node(su.bdev, DEVFS_BLOCK, UID_ROOT, GID_OPERATOR, 0640, "ufsroot0");
+ 	devfs_make_node(makedev(su.cmajor, 0), DEVFS_CHAR, UID_ROOT, GID_OPERATOR, 0640, "rufsroot0");
+ 	/* Only now, with the partition bounds known, can writes be allowed. */
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
 +	su.writable = (rw == 1);
 +	if (su.writable) printf(UFS_LOG "userdata writable enabled\n");
 +#else
--	su.writable = (rw != 0);
-+	su.writable = (rw != 0);
+ 	su.writable = (rw != 0);
 +#endif
--	su.ready = true;
-+	su.ready = true;
+ 	su.ready = true;
 -	printf("SWEET UFS: \"%s\" on LUN %u: first block 0x%llx, %llu MiB, %s, DMA at 0x%llx\n",
 +	printf(UFS_LOG "\"%s\" on LUN %u: first block 0x%llx, %llu MiB, %s, DMA at 0x%llx\n",
--	    want, su.lun, su.first_block, su.nblocks * UFS_BLOCK >> 20,
-+	    want, su.lun, su.first_block, su.nblocks * UFS_BLOCK >> 20,
--	    su.writable ? "read-write" : "read-only", su.dma_pa);
-+	    su.writable ? "read-write" : "read-only", su.dma_pa);
+ 	    want, su.lun, su.first_block, su.nblocks * UFS_BLOCK >> 20,
+ 	    su.writable ? "read-write" : "read-only", su.dma_pa);
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
 +	printf(UFS_LOG "BSD devices created ufsroot0/rufsroot0 major %d/%d minor 0\n", su.bmajor, su.cmajor);
 +#else
--	sweet_log_start();
-+	sweet_log_start();
--	sweet_sample_start();
-+	sweet_sample_start();
--	/* Input drivers (HID services in iokit/Kernel/arm/hid/SweetHID.cpp). */
-+	/* Input drivers (HID services in iokit/Kernel/arm/hid/SweetHID.cpp). */
--	sweet_keys_init();
-+	sweet_keys_init();
--	sweet_touch_init();
-+	sweet_touch_init();
--	sweet_usb_probe();
-+	sweet_usb_probe();
+ 	sweet_log_start();
+ 	sweet_sample_start();
+ 	/* Input drivers (HID services in iokit/Kernel/arm/hid/SweetHID.cpp). */
+ 	sweet_keys_init();
+ 	sweet_touch_init();
+ 	sweet_usb_probe();
 +#endif
--	return 0;
-+	return 0;
+ 	return 0;
  }
-
-+#ifdef ARM64_BOARD_CONFIG_SWEET
+ 
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_MARBLE)
  /*
   * Persistent console log ("sweetlog"). Filming the phone screen is the only
   * other way to see the console, so every character that reaches the
-@@ -791,21 +1106,23 @@
- {
--	uint32_t on = 1;
-+	uint32_t on = 1;
--	thread_t thread;
-+	thread_t thread;
-
--	PE_parse_boot_argn("sweetlog", &on, sizeof(on));
-+	PE_parse_boot_argn("sweetlog", &on, sizeof(on));
--	if (!on || !su.writable || su.nblocks < 2 * SWEET_LOG_BLOCKS) {
-+	if (!on || !su.writable || su.nblocks < 2 * SWEET_LOG_BLOCKS) {
--		return;
-+		return;
--	}
-+	}
--	PE_parse_boot_argn("ufslogsecs", &sweet_log_secs, sizeof(sweet_log_secs));
-+	PE_parse_boot_argn("ufslogsecs", &sweet_log_secs, sizeof(sweet_log_secs));
--	if (sweet_log_secs == 0 || sweet_log_secs > 60) {
-+	if (sweet_log_secs == 0 || sweet_log_secs > 60) {
--		sweet_log_secs = SWEET_LOG_SECS;
-+		sweet_log_secs = SWEET_LOG_SECS;
--	}
-+	}
--	if (kernel_thread_start(sweet_log_thread, NULL, &thread) == KERN_SUCCESS) {
-+	if (kernel_thread_start(sweet_log_thread, NULL, &thread) == KERN_SUCCESS) {
--		thread_deallocate(thread);
-+		thread_deallocate(thread);
--	}
-+	}
+@@ -682,8 +997,10 @@
+ 
+ static char sweet_log_ring[SWEET_LOG_SIZE];
+ static uint64_t _Atomic sweet_log_total;
++#ifdef ARM64_BOARD_CONFIG_SWEET
+ static int sweet_log_chan;
+ static uint32_t sweet_log_secs = SWEET_LOG_SECS;
++#endif
+ 
+ /* Called for all console output, any context: never blocks. */
+ void sweet_log_append(const char *c, int size);
+@@ -730,6 +1047,7 @@
+ 	return os_atomic_load(&sweet_log_total, relaxed);
  }
-
+ 
++#ifdef ARM64_BOARD_CONFIG_SWEET
+ struct sweet_log_header {
+ 	char magic[8];
+ 	uint32_t version, size;
+@@ -805,6 +1123,8 @@
+ 	}
+ }
+ 
 +#endif
 +
  /* Root device for rd=ufsroot0 (IOFindBSDRoot). */
  int sweet_ufs_rootdev(dev_t *dev);
-
- int
+ 
+@@ -820,4 +1140,5 @@
+ 	*dev = su.bdev;
+ 	return 0;
+ }
++#endif /* disk writer remains SWEET-only */
+ #endif /* ARM64_BOARD_CONFIG_SWEET */
 diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
 --- a/iokit/bsddev/IOKitBSDInit.cpp
 +++ b/iokit/bsddev/IOKitBSDInit.cpp
@@ -12487,46 +11896,26 @@ diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
 diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
 --- a/bsd/kern/bsd_init.c
 +++ b/bsd/kern/bsd_init.c
-@@ -684,21 +684,21 @@
--	/*
-+	/*
--	 * Initialize the calendar.
-+	 * Initialize the calendar.
--	 */
-+	 */
--	bsd_init_kprintf("calling IOKitInitializeTime\n");
-+	bsd_init_kprintf("calling IOKitInitializeTime\n");
--	IOKitInitializeTime();
-+	IOKitInitializeTime();
--
-+
--	/* Initialize the file systems. */
-+	/* Initialize the file systems. */
--	bsd_init_kprintf("calling vfsinit\n");
-+	bsd_init_kprintf("calling vfsinit\n");
--	vfsinit();
-+	vfsinit();
--
-+
+@@ -691,7 +691,7 @@
+ 	bsd_init_kprintf("calling vfsinit\n");
+ 	vfsinit();
+ 
 -#if defined(ARM64_BOARD_CONFIG_SWEET)
 +#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_MARBLE)
--	/* AMFI's MAC policy is built in on SWEET (bsd/kern/sweet_amfi.c). */
-+	/* AMFI's MAC policy is built in on SWEET (bsd/kern/sweet_amfi.c). */
--	extern void sweet_amfi_policy_register(void);
-+	extern void sweet_amfi_policy_register(void);
--	sweet_amfi_policy_register();
-+	sweet_amfi_policy_register();
+ 	/* AMFI's MAC policy is built in on SWEET (bsd/kern/sweet_amfi.c). */
+ 	extern void sweet_amfi_policy_register(void);
+ 	sweet_amfi_policy_register();
+@@ -898,6 +898,10 @@
  #endif
--
-+
- #if SWEET_HFS
--	/* HFS is built in on SWEET: register it like its kext would, before mounting root. */
-+	/* HFS is built in on SWEET: register it like its kext would, before mounting root. */
--	extern void sweet_hfs_register(void);
-+	extern void sweet_hfs_register(void);
--	sweet_hfs_register();
-+	sweet_hfs_register();
- #endif
+ 		printf("cannot mount root, errno = %d\n", err);
+ 	}
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++	extern void marble_usb_init(void);
++	marble_usb_init();
++#endif
+ 
+ 	IOSecureBSDRoot(rootdevice);
+ 
 diff --git a/bsd/kern/sweet_amfi.c b/bsd/kern/sweet_amfi.c
 --- a/bsd/kern/sweet_amfi.c
 +++ b/bsd/kern/sweet_amfi.c
@@ -15067,3 +14456,561 @@ new file mode 100644
 + return error;
 +}
 +#endif /* ARM64_BOARD_CONFIG_MARBLE */
+diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
+--- a/bsd/dev/sweet_usb.c
++++ b/bsd/dev/sweet_usb.c
+@@ -10,7 +10,7 @@
+  * DWC3 / PHY register blocks only when the GCC status registers say their
+  * power domain and clocks are on (an access to a gated block would hang).
+  */
+-#if defined(ARM64_BOARD_CONFIG_SWEET)
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_MARBLE)
+ #include <sys/param.h>
+ #include <sys/systm.h>
+ #include <kern/clock.h>
+@@ -37,20 +37,46 @@
+ #include <net/dlil.h>
+ #include <sys/kern_event.h>
+ 
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++#define USB_LOG "MARBLE USB: "
++#define USB_ARG "marbleusb"
++#define USB_LOG_ARG "marbleusblog"
++#define USB_UNIQUE "marble-usb-ecm"
++#else
++#define USB_LOG "SWEET USB: "
++#define USB_ARG "sweetusb"
++#define USB_LOG_ARG "sweetusblog"
++#define USB_UNIQUE "sweet-usb-ecm"
++#endif
+ extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
+ void sweet_usb_probe(void);
+ static void sweet_usb_gadget_start(vm_offset_t dwc);
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++extern kern_return_t thread_terminate(thread_t);
++#endif
+ extern ppnum_t pmap_find_phys(pmap_t pmap, addr64_t va);
+ 
+ #define GCC_PA                  0x00100000
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++#define GCC_SIZE                0x000a0000 /* includes CLKREF@9c010 */
++#else
+ #define GCC_SIZE                0x00090000
++#endif
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++#define GCC_USB30_PRIM_GDSCR    0x49004
++#else
+ #define GCC_USB30_PRIM_GDSCR    0x0f004         /* bit 31: power on */
++#endif
+ #define CBCR_CLK_OFF            (1u << 31)
+ 
+ static const struct {
+ 	const char *name;
+ 	uint32_t    off;
+ } usb_cbcr[] = {
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++ { "master", 0x49018 }, { "sleep", 0x49020 }, { "utmi", 0x49024 },
++ { "cfg-noc-axi", 0x49084 }, { "aggre-axi", 0x49088 }, { "clkref", 0x9c010 },
++#else
+ 	{ "master", 0x0f010 },
+ 	{ "sleep", 0x0f014 },
+ 	{ "utmi", 0x0f018 },
+@@ -58,6 +84,7 @@
+ 	{ "aggre-axi", 0x8201c },
+ 	{ "ahb2phy", 0x6a004 },
+ 	{ "clkref", 0x8c010 },
++#endif
+ };
+ 
+ #define DWC3_PA                 0x0a600000
+@@ -76,51 +103,66 @@
+ void
+ sweet_usb_probe(void)
+ {
+-	int enabled = 1;
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++ int enabled = 0; /* dedicated debug image opts in; normal boot untouched */
++#else
++ int enabled = 1;
++#endif
+ 	uint32_t gdscr, cbcr[sizeof(usb_cbcr) / sizeof(usb_cbcr[0])];
+ 	bool clocks_on = true;
+ 
+ 	/* sweetusb=0 off, 1 (default) report state only, 2 also start the USB device */
+-	PE_parse_boot_argn("sweetusb", &enabled, sizeof(enabled));
++	PE_parse_boot_argn(USB_ARG, &enabled, sizeof(enabled));
+ 	if (!enabled) {
+ 		return;
+ 	}
+ 	vm_offset_t gcc = ml_io_map(GCC_PA, GCC_SIZE);
+ 	if (gcc == 0) {
+-		printf("SWEET USB: GCC map failed\n");
++		printf(USB_LOG "GCC map failed\n");
+ 		return;
+ 	}
+ 	gdscr = usb_rd(gcc, GCC_USB30_PRIM_GDSCR);
+-	printf("SWEET USB: GDSC usb30_prim 0x%08x (%s)\n", gdscr, (gdscr & (1u << 31)) ? "on" : "off");
++	printf(USB_LOG "GDSC usb30_prim 0x%08x (%s)\n", gdscr, (gdscr & (1u << 31)) ? "on" : "off");
+ 	for (unsigned i = 0; i < sizeof(usb_cbcr) / sizeof(usb_cbcr[0]); i++) {
+ 		cbcr[i] = usb_rd(gcc, usb_cbcr[i].off);
+-		printf("SWEET USB: clk %-12s CBCR 0x%08x (%s)\n", usb_cbcr[i].name, cbcr[i],
++		printf(USB_LOG "clk %-12s CBCR 0x%08x (%s)\n", usb_cbcr[i].name, cbcr[i],
+ 		    (cbcr[i] & CBCR_CLK_OFF) ? "off" : "on");
+ 	}
+ 	/* DWC3 registers need the GDSC, the master clock and the config-NoC path. */
+ 	clocks_on = (gdscr & (1u << 31)) && !(cbcr[0] & CBCR_CLK_OFF) && !(cbcr[3] & CBCR_CLK_OFF);
++	#ifdef ARM64_BOARD_CONFIG_MARBLE
++ for (unsigned i = 0; i < 5; i++) clocks_on &= !(cbcr[i] & CBCR_CLK_OFF);
++#endif
+ 	if (!clocks_on) {
+-		printf("SWEET USB: controller unpowered or unclocked; DWC3 not read\n");
++		printf(USB_LOG "controller unpowered or unclocked; DWC3 not read\n");
+ 		return;
+ 	}
+ 	vm_offset_t dwc = ml_io_map(DWC3_PA, DWC3_SIZE);
+ 	if (dwc == 0) {
+-		printf("SWEET USB: DWC3 map failed\n");
+-		return;
+-	}
+-	printf("SWEET USB: DWC3 GSNPSID 0x%08x GCTL 0x%08x GSTS 0x%08x GUSB2PHYCFG 0x%08x\n",
++		printf(USB_LOG "DWC3 map failed\n");
++		return;
++	}
++	printf(USB_LOG "DWC3 GSNPSID 0x%08x GCTL 0x%08x GSTS 0x%08x GUSB2PHYCFG 0x%08x\n",
+ 	    usb_rd(dwc, 0xc120), usb_rd(dwc, 0xc110), usb_rd(dwc, 0xc118), usb_rd(dwc, 0xc200));
+-	printf("SWEET USB: DWC3 DCFG 0x%08x DCTL 0x%08x DEVTEN 0x%08x DSTS 0x%08x DALEPENA 0x%08x\n",
++	printf(USB_LOG "DWC3 DCFG 0x%08x DCTL 0x%08x DEVTEN 0x%08x DSTS 0x%08x DALEPENA 0x%08x\n",
+ 	    usb_rd(dwc, 0xc700), usb_rd(dwc, 0xc704), usb_rd(dwc, 0xc708), usb_rd(dwc, 0xc70c),
+ 	    usb_rd(dwc, 0xc720));
+-	printf("SWEET USB: DWC3 GEVNTADR 0x%08x%08x GEVNTSIZ 0x%08x GEVNTCOUNT 0x%08x GHWPARAMS0 0x%08x\n",
++	printf(USB_LOG "DWC3 GEVNTADR 0x%08x%08x GEVNTSIZ 0x%08x GEVNTCOUNT 0x%08x GHWPARAMS0 0x%08x\n",
+ 	    usb_rd(dwc, 0xc404), usb_rd(dwc, 0xc400), usb_rd(dwc, 0xc408), usb_rd(dwc, 0xc40c),
+ 	    usb_rd(dwc, 0xc140));
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++ uint32_t id = usb_rd(dwc, 0xc120), ctl = usb_rd(dwc, 0xc110);
++ if ((id & 0xffff0000u) != 0x55330000u || ((ctl >> 12) & 3) != 2) {
++  printf(USB_LOG "STOP: resident DWC3 device-mode identity not validated\n"); return;
++ }
++ printf(USB_LOG "eUSB2 PHY@88e3000/repeater PTN3222@4f inherited; no PHY/reset/I2C writes\n");
++ if (enabled == 2) sweet_usb_gadget_start(dwc);
++#else
+ 	if (enabled >= 2) {
+ 		sweet_usb_gadget_start(dwc);
+ 	}
+ 	if (cbcr[5] & CBCR_CLK_OFF) {
+-		printf("SWEET USB: ahb2phy clock off; QUSB2 PHY not read\n");
++		printf(USB_LOG "ahb2phy clock off; QUSB2 PHY not read\n");
+ 		return;
+ 	}
+ 	vm_offset_t phy = ml_io_map(QUSB2_PA, QUSB2_SIZE);
+@@ -130,8 +172,9 @@
+ 	/* DT qcom,qusb-phy-reg-offset order (Linux phy-msm-qusb-v2.c): PORT_TUNE1 0x240,
+ 	 * PLL_COMMON_STATUS_ONE 0x1a0, PWR_CTRL1 0x210, INTR_CTRL 0x230,
+ 	 * PLL_CORE_INPUT_OVERRIDE 0x0a8, TEST1 0x254. */
+-	printf("SWEET USB: QUSB2 PLL_STATUS 0x%08x PWR_CTRL1 0x%08x PORT_TUNE1 0x%08x TEST1 0x%08x\n",
++	printf(USB_LOG "QUSB2 PLL_STATUS 0x%08x PWR_CTRL1 0x%08x PORT_TUNE1 0x%08x TEST1 0x%08x\n",
+ 	    usb_rd(phy, 0x1a0), usb_rd(phy, 0x210), usb_rd(phy, 0x240), usb_rd(phy, 0x254));
++#endif
+ }
+ 
+ /*
+@@ -227,6 +270,9 @@
+ 	enum { EP0_SETUP, EP0_DATA, EP0_WAIT_STATUS2, EP0_WAIT_STATUS3, EP0_STATUS } state;
+ 	bool        data_in;        /* data stage direction */
+ 	uint32_t    events;
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++ bool host_ready;
++#endif
+ 	bool        configured;
+ 	uint8_t     data_alt;       /* data interface alternate setting */
+ 	/* network */
+@@ -278,14 +324,14 @@
+ 		if (!(v & DEPCMD_CMDACT)) {
+ 			uint32_t status = (v >> 12) & 0xf;
+ 			if (status) {
+-				printf("SWEET USB: ep%u cmd 0x%x status %u\n", ep, cmd & 0xf, status);
++				printf(USB_LOG "ep%u cmd 0x%x status %u\n", ep, cmd & 0xf, status);
+ 				return -1;
+ 			}
+ 			return 0;
+ 		}
+ 		delay(1);
+ 	}
+-	printf("SWEET USB: ep%u cmd 0x%x timeout\n", ep, cmd & 0xf);
++	printf(USB_LOG "ep%u cmd 0x%x timeout\n", ep, cmd & 0xf);
+ 	return -1;
+ }
+ 
+@@ -351,7 +397,11 @@
+ };
+ /* The host side's MAC (ECM iMACAddress); the phone's own is ..:02 */
+ static const char *const ud_strings[] = {
+-	NULL, "ios-sweet", "Sweet iOS (USB Ethernet)", "0001", "02005E77EE01",
++	#ifdef ARM64_BOARD_CONFIG_MARBLE
++ NULL, "ios-marble", "Marble iOS USB debug", "0001", "02005E77EE01",
++#else
++ NULL, "ios-sweet", "Sweet iOS (USB Ethernet)", "0001", "02005E77EE01",
++#endif
+ };
+ static const uint8_t ud_phone_mac[ETHER_ADDR_LEN] = { 0x02, 0x00, 0x5e, 0x77, 0xee, 0x02 };
+ 
+@@ -407,13 +457,13 @@
+ 	    ud_epcmd(EP_INT, DEPCMD_SETEPCONFIG, (3u << 1) | (16u << 3) | (2u << 17),
+ 	    (1u << 8) | (8u << 16) | ((uint32_t)EP_INT << 25), 0) ||
+ 	    ud_epcmd(EP_INT, DEPCMD_SETTRANSFRESOURCE, 1, 0, 0)) {
+-		printf("SWEET USB: data endpoints setup failed\n");
++		printf(USB_LOG "data endpoints setup failed\n");
+ 		return;
+ 	}
+ 	dwc_wr(DALEPENA, dwc_rd(DALEPENA) | (1u << EP_RX) | (1u << EP_TX) | (1u << EP_INT));
+ 	ud.configured = true;
+ 	ud_rx_arm();
+-	printf("SWEET USB: ECM endpoints configured\n");
++	printf(USB_LOG "ECM endpoints configured\n");
+ }
+ 
+ static void
+@@ -428,7 +478,7 @@
+ 	uint32_t n = 0;
+ 	bool ok = true;
+ 
+-	printf("SWEET USB: setup %02x %02x %04x %04x len %u\n", type, req, value, index, length);
++	printf(USB_LOG "setup %02x %02x %04x %04x len %u\n", type, req, value, index, length);
+ 	ud.data_in = (type & 0x80) != 0;
+ 	if ((type & 0x60) == 0x20) {    /* class request (e.g. SET_ETHERNET_PACKET_FILTER) */
+ 		ok = (length == 0);
+@@ -444,12 +494,12 @@
+ 	} else if (req == 5) {          /* SET_ADDRESS: takes effect now (DWC3 handles the timing) */
+ 		uint32_t dcfg = dwc_rd(DCFG) & ~(0x7fu << 3);
+ 		dwc_wr(DCFG, dcfg | ((uint32_t)(value & 0x7f) << 3));
+-		printf("SWEET USB: address %u\n", value & 0x7f);
++		printf(USB_LOG "address %u\n", value & 0x7f);
+ 	} else if (req == 9) {          /* SET_CONFIGURATION */
+ 		if (value == 1) {
+ 			ud_configure();
+ 		}
+-		printf("SWEET USB: configured (%u)\n", value);
++		printf(USB_LOG "configured (%u)\n", value);
+ 	} else if (req == 8) {          /* GET_CONFIGURATION */
+ 		data[0] = ud.configured ? 1 : 0; n = 1;
+ 	} else if (req == 0) {          /* GET_STATUS */
+@@ -513,6 +563,17 @@
+ 		    mbuf_mclget(MBUF_DONTWAIT, MBUF_TYPE_DATA, &m) == 0 &&
+ 		    (mbuf_flags(m) & MBUF_EXT) && mbuf_maxlen(m) >= len) {
+ 			struct ifnet_stat_increment_param stats = {};
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++   /* Host listener starts before interface configuration. An ARP from its
++    * assigned IPv4 address proves peer setup before consuming the backlog. */
++   const uint8_t *packet = (const uint8_t *)(ud.dma + UD_RX);
++   if (len >= 42 && packet[12] == 8 && packet[13] == 6 &&
++       packet[14] == 0 && packet[15] == 1 && packet[16] == 8 && !packet[17] &&
++       packet[18] == 6 && packet[19] == 4 && !packet[20] &&
++       (packet[21] == 1 || packet[21] == 2) &&
++       packet[28] == 192 && packet[29] == 168 && packet[30] == 7 && packet[31] == 1)
++    ud.host_ready = true;
++#endif
+ 			memcpy(mbuf_data(m), (const void *)(ud.dma + UD_RX), len);
+ 			mbuf_setlen(m, len);
+ 			mbuf_pkthdr_setlen(m, len);
+@@ -643,8 +704,8 @@
+ 	init.ver = IFNET_INIT_CURRENT_VERSION;
+ 	init.len = sizeof(init);
+ 	init.flags = IFNET_INIT_LEGACY;
+-	init.uniqueid = "sweet-usb-ecm";
+-	init.uniqueid_len = sizeof("sweet-usb-ecm") - 1;
++	init.uniqueid = USB_UNIQUE;
++	init.uniqueid_len = sizeof(USB_UNIQUE) - 1;
+ 	init.name = "ue";
+ 	init.unit = 0;
+ 	init.family = IFNET_FAMILY_ETHERNET;
+@@ -660,7 +721,7 @@
+ 	init.broadcast_addr = etherbroadcastaddr;
+ 	init.broadcast_len = ETHER_ADDR_LEN;
+ 	if (ifnet_allocate_extended(&init, &ud.ifp) != 0) {
+-		printf("SWEET USB: ifnet_allocate failed\n");
++		printf(USB_LOG "ifnet_allocate failed\n");
+ 		ud.ifp = NULL;
+ 		return;
+ 	}
+@@ -670,7 +731,7 @@
+ 	ifnet_set_baudrate(ud.ifp, 480000000);
+ 	ifnet_set_flags(ud.ifp, IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST, 0xffff);
+ 	if (ifnet_attach(ud.ifp, NULL) != 0) {
+-		printf("SWEET USB: ifnet_attach failed\n");
++		printf(USB_LOG "ifnet_attach failed\n");
+ 		ud.ifp = NULL;
+ 		return;
+ 	}
+@@ -701,7 +762,7 @@
+ 		sock_close(so);
+ 	}
+ 	ifnet_set_flags(ud.ifp, IFF_UP | IFF_RUNNING, IFF_UP | IFF_RUNNING);
+-	printf("SWEET USB: ue0 192.168.7.2/24 %s (err %d)\n", err ? "NOT configured" : "up", err);
++	printf(USB_LOG "ue0 192.168.7.2/24 %s (err %d)\n", err ? "NOT configured" : "up", err);
+ }
+ 
+ static void
+@@ -711,7 +772,7 @@
+ 		uint32_t type = (ev >> 8) & 0xf;
+ 		if (type == 1) {        /* USB reset */
+ 			dwc_wr(DCFG, dwc_rd(DCFG) & ~(0x7fu << 3));
+-			printf("SWEET USB: bus reset\n");
++			printf(USB_LOG "bus reset\n");
+ 		} else if (type == 2) { /* connect done */
+ 			uint32_t speed = dwc_rd(DSTS) & 7;
+ 			/* ep0 max packet: 64 at high/full speed (modify action) */
+@@ -719,9 +780,9 @@
+ 			    (1u << 8) | (1u << 10) | (0u << 25), 0);
+ 			ud_epcmd(1, DEPCMD_SETEPCONFIG, (0u << 1) | (64u << 3) | (2u << 30),
+ 			    (1u << 8) | (1u << 10) | (1u << 25), 0);
+-			printf("SWEET USB: connected, speed %u\n", speed);
++			printf(USB_LOG "connected, speed %u\n", speed);
+ 		} else if (type == 0) {
+-			printf("SWEET USB: disconnect\n");
++			printf(USB_LOG "disconnect\n");
+ 		}
+ 		return;
+ 	}
+@@ -781,20 +842,26 @@
+ 	uint32_t ticks = 0;
+ 	for (;;) {
+ 		uint32_t count = dwc_rd(GEVNTCOUNT) & 0xffff;
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++  if (count > UD_EVT_SIZE || (count & 3)) {
++   printf(USB_LOG "STOP: invalid event count=%u\n", count); ud.configured = false;
++   (void)thread_terminate(current_thread());
++  }
++#endif
+ 		if (count) {
+ 			ud_sync(UD_EVT, UD_EVT_SIZE);
+ 			for (uint32_t done = 0; done < count; done += 4) {
+ 				uint32_t ev = *(volatile uint32_t *)(ud.dma + UD_EVT + ud.evt_pos);
+ 				ud.evt_pos = (ud.evt_pos + 4) % UD_EVT_SIZE;
+ 				if (ud.events++ < 200) {
+-					printf("SWEET USB: event 0x%08x\n", ev);
++					printf(USB_LOG "event 0x%08x\n", ev);
+ 				}
+ 				ud_event(ev);
+ 			}
+ 			dwc_wr(GEVNTCOUNT, count);
+ 		}
+ 		if ((++ticks % 30000) == 0) {
+-			printf("SWEET USB: ue0 rx %llu tx %llu frames\n", ud.rx_frames, ud.tx_frames);
++			printf(USB_LOG "ue0 rx %llu tx %llu frames\n", ud.rx_frames, ud.tx_frames);
+ 		}
+ 		ud_sleep_ms(1);
+ 	}
+@@ -826,6 +893,9 @@
+ 	to.sin_addr.s_addr = htonl(0xc0a80701);         /* 192.168.7.1 */
+ 	for (;;) {
+ 		ud_sleep_ms(100);
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++  if (!ud.host_ready) continue;
++#endif
+ 		if (!ud.configured) {
+ 			continue;
+ 		}
+@@ -834,6 +904,10 @@
+ 			continue;
+ 		}
+ 		uint32_t n;
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++  unsigned budget = 8; /* <=11200 bytes/100ms, below32-frame TX queue */
++  uint64_t committed = pos;
++#endif
+ 		while ((n = sweet_log_copy(&pos, chunk, sizeof(chunk))) > 0) {
+ 			struct iovec iov = { .iov_base = chunk, .iov_len = n };
+ 			struct msghdr msg = {
+@@ -841,12 +915,52 @@
+ 				.msg_iov = &iov, .msg_iovlen = 1,
+ 			};
+ 			size_t sent = 0;
+-			if (sock_send(so, &msg, 0, &sent) != 0) {
++			if (sock_send(so, &msg, 0, &sent) != 0
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++       || sent != n
++#endif
++       ) {
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++    pos = committed;
++#endif
+ 				break;          /* no route/ARP yet: retry later */
+ 			}
+-		}
+-	}
+-}
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++   committed = pos;
++   if (!--budget) break;
++#endif
++		}
++	}
++}
++
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++/* Captured apps-smmu@15000000, USB stream0. Read-only ARM SMMUv2 discovery.
++ * Direct PA DMA is allowed only if the inherited stream is demonstrably bypass.
++ * Translation/fault/ambiguous geometry: stop, never reprogram the SMMU. */
++static bool
++ud_marble_dma_ok(void)
++{
++ vm_offset_t smmu = ml_io_map(0x15000000u, 0x10000);
++ if (!smmu) { printf(USB_LOG "STOP: SMMU mapping\n"); return false; }
++ uint32_t cr0 = usb_rd(smmu, 0), id0 = usb_rd(smmu, 0x20);
++ printf(USB_LOG "SMMU USB SID0 CR0=%#x ID0=%#x (read only)\n", cr0, id0);
++ if (cr0 == 0xffffffffu || !id0 || id0 == 0xffffffffu) return false;
++ if (cr0 & 1) return !(cr0 & (1u << 10)); /* CLIENTPD: USFCFG chooses bypass/fault */
++ unsigned count = id0 & 255, matches = 0;
++ bool bypass = true, exid = (cr0 & 8) && (id0 & 256);
++ if (!(id0 & (1u << 27)) || !count) return false;
++ for (unsigned i = 0; i < count; i++) {
++  uint32_t smr = usb_rd(smmu, 0x800 + i * 4), s2cr = usb_rd(smmu, 0xc00 + i * 4);
++  bool valid = exid ? (s2cr & (1u << 10)) != 0 : (smr & (1u << 31)) != 0;
++  unsigned mask = (smr >> 16) & (exid ? 65535 : 32767);
++  if (valid && !((smr & 65535) & ~mask)) {
++   printf(USB_LOG "SMMU SID0 match%u SMR=%#x S2CR=%#x\n", i, smr, s2cr);
++   matches++; bypass &= ((s2cr >> 16) & 3) == 1;
++  }
++ }
++ return matches == 1 ? bypass : matches == 0 && !(cr0 & (1u << 10));
++}
++#endif
+ 
+ static void
+ sweet_usb_gadget_start(vm_offset_t dwc)
+@@ -856,7 +970,7 @@
+ 	ud.dwc = dwc;
+ 	if (kmem_alloc_contig(kernel_map, &ud.dma, UD_SIZE, PAGE_MASK, 0, 0,
+ 	    KMA_DATA | KMA_ZERO | KMA_PERMANENT, VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS) {
+-		printf("SWEET USB: no DMA memory\n");
++		printf(USB_LOG "no DMA memory\n");
+ 		return;
+ 	}
+ 	ppnum_t pn = pmap_find_phys(kernel_pmap, (addr64_t)ud.dma);
+@@ -864,15 +978,30 @@
+ 		return;
+ 	}
+ 	ud.dma_pa = ptoa_64(pn);
+-	ud_if_create();
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++ unsigned width = usb_rd(dwc, 0xc140) >> 24;
++ if (width < 32 || width > 64 || (width < 64 &&
++     (ud.dma_pa > ((1ull << width) - UD_SIZE)))) {
++  printf(USB_LOG "STOP: DMA PA=%#llx size=%#x exceeds AWIDTH=%u\n", ud.dma_pa, UD_SIZE, width); return;
++ }
++ if (!ud_marble_dma_ok()) {
++  printf(USB_LOG "STOP: USB SID0 direct DMA not proven; no SMMU writes\n"); return;
++ }
++ printf(USB_LOG "DMA direct PA=%#llx AWIDTH=%u inherited bypass validated\n", ud.dma_pa, width);
++#endif
++ ud_if_create();
+ 
+ 	/* Device controller soft reset (PHY and global setup stay as ABL left them). */
+ 	dwc_wr(DCTL, DCTL_CSFTRST);
+ 	int i;
+ 	for (i = 0; i < 500 && (dwc_rd(DCTL) & DCTL_CSFTRST); i++) {
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++  ud_sleep_ms(1);
++#else
+ 		delay(1000);
+-	}
+-	printf("SWEET USB: soft reset %s after %d ms, GCTL 0x%08x DCFG 0x%08x\n",
++#endif
++	}
++	printf(USB_LOG "soft reset %s after %d ms, GCTL 0x%08x DCFG 0x%08x\n",
+ 	    (dwc_rd(DCTL) & DCTL_CSFTRST) ? "STUCK" : "done", i, dwc_rd(GCTL), dwc_rd(DCFG));
+ 	if (dwc_rd(DCTL) & DCTL_CSFTRST) {
+ 		return;
+@@ -896,7 +1025,7 @@
+ 	    ud_epcmd(0, DEPCMD_SETTRANSFRESOURCE, 1, 0, 0) ||
+ 	    ud_epcmd(1, DEPCMD_SETEPCONFIG, (0u << 1) | (512u << 3), (1u << 8) | (1u << 10) | (1u << 25), 0) ||
+ 	    ud_epcmd(1, DEPCMD_SETTRANSFRESOURCE, 1, 0, 0)) {
+-		printf("SWEET USB: endpoint 0 setup failed\n");
++		printf(USB_LOG "endpoint 0 setup failed\n");
+ 		return;
+ 	}
+ 	dwc_wr(DALEPENA, 0x3);
+@@ -905,27 +1034,51 @@
+ 	vm_offset_t qs = ml_io_map(QSCRATCH_PA, 0x100);
+ 	if (qs != 0) {
+ 		uint32_t hs = usb_rd(qs, QSCRATCH_HS_PHY_CTRL), ss = usb_rd(qs, QSCRATCH_SS_PHY_CTRL);
+-		printf("SWEET USB: QSCRATCH HS_PHY_CTRL 0x%08x SS_PHY_CTRL 0x%08x GENERAL_CFG 0x%08x\n",
++		printf(USB_LOG "QSCRATCH HS_PHY_CTRL 0x%08x SS_PHY_CTRL 0x%08x GENERAL_CFG 0x%08x\n",
+ 		    hs, ss, usb_rd(qs, 0x08));
+ 		*(volatile uint32_t *)(qs + QSCRATCH_HS_PHY_CTRL) = hs | UTMI_OTG_VBUS_VALID | SW_SESSVLD_SEL;
+ 		*(volatile uint32_t *)(qs + QSCRATCH_SS_PHY_CTRL) = ss | LANE0_PWR_PRESENT;
+ 		__asm__ volatile ("dsb sy" ::: "memory");
+-		printf("SWEET USB: VBUS override on: HS_PHY_CTRL 0x%08x SS_PHY_CTRL 0x%08x\n",
++		printf(USB_LOG "VBUS override on: HS_PHY_CTRL 0x%08x SS_PHY_CTRL 0x%08x\n",
+ 		    usb_rd(qs, QSCRATCH_HS_PHY_CTRL), usb_rd(qs, QSCRATCH_SS_PHY_CTRL));
+ 	}
+ 
+ 	dwc_wr(DCTL, dwc_rd(DCTL) | DCTL_RUN_STOP);
+ 	for (i = 0; i < 500 && (dwc_rd(DSTS) & DSTS_DEVCTRLHLT); i++) {
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++  ud_sleep_ms(1);
++#else
+ 		delay(1000);
+-	}
+-	printf("SWEET USB: running (DSTS 0x%08x after %d ms), DMA at 0x%llx\n", dwc_rd(DSTS), i, ud.dma_pa);
++#endif
++	}
++	printf(USB_LOG "running (DSTS 0x%08x after %d ms), DMA at 0x%llx\n", dwc_rd(DSTS), i, ud.dma_pa);
+ 	if (kernel_thread_start(ud_thread, NULL, &thread) == KERN_SUCCESS) {
+ 		thread_deallocate(thread);
+ 	}
+ 	int livelog = 1;
+-	PE_parse_boot_argn("sweetusblog", &livelog, sizeof(livelog));
++	PE_parse_boot_argn(USB_LOG_ARG, &livelog, sizeof(livelog));
+ 	if (livelog && ud.ifp != NULL && kernel_thread_start(ud_log_thread, NULL, &thread) == KERN_SUCCESS) {
+ 		thread_deallocate(thread);
+ 	}
+ }
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++void marble_usb_init(void);
++static void
++marble_usb_thread(void *arg __unused, wait_result_t wr __unused)
++{
++ ud_sleep_ms(15000); /* network initialized; precedes touch's60s probe */
++ sweet_usb_probe();
++ (void)thread_terminate(current_thread());
++}
++void
++marble_usb_init(void)
++{
++ int enabled = 0; PE_parse_boot_argn(USB_ARG, &enabled, sizeof(enabled));
++ if (enabled != 1 && enabled != 2) return;
++ thread_t thread;
++ kern_return_t kr = kernel_thread_start(marble_usb_thread, NULL, &thread);
++ if (kr == KERN_SUCCESS) thread_deallocate(thread);
++ else printf(USB_LOG "worker start failed %d\n", kr);
++}
++#endif
+ #endif /* ARM64_BOARD_CONFIG_SWEET */
+diff --git a/osfmk/console/serial_console.c b/osfmk/console/serial_console.c
+--- a/osfmk/console/serial_console.c
++++ b/osfmk/console/serial_console.c
+@@ -266,8 +266,10 @@
+  *             waiting for an interrupt when the hardware device isn't ready
+  * @param size The number of characters to print to the console.
+  */
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_MARBLE)
++extern void sweet_log_append(const char *c, int size);  /* RAM ring only on MARBLE */
++#endif
+ #if defined(ARM64_BOARD_CONFIG_SWEET)
+-extern void sweet_log_append(const char *c, int size);  /* bsd/dev/sweet_ufs.c */
+ /*
+  * Set by AppleCLCD (boot-arg sweetfb_noconsole=1) once the GUI presents:
+  * console text still goes to the persistent log, but is not drawn over
+@@ -281,8 +283,10 @@
+ {
+ 	extern int disableConsoleOutput;
+ 
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_MARBLE)
++	sweet_log_append(c, size);
++#endif
+ #if defined(ARM64_BOARD_CONFIG_SWEET)
+-	sweet_log_append(c, size);
+ 	if (sweet_console_muted && !panic_active()) {
+ 		return;
+ 	}

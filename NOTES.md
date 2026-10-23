@@ -1,5 +1,30 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## Active handoff: MARBLE USB live log + Linux SPI alignment (2026-10-23)
+
+USER PHYSICAL: touchinit image4c57ea14...86ba25 was tested; physical touch
+STILL FAILS. Startup/refusal text scrolls away, so actual GENI mode, power and
+first failing gate remain UNKNOWN. GUI/Hello, physical keys and synthetic HID
+remain PASS. No firmware upload, root modification, cleanup or device commands.
+Read complete AGENTS/NOTES/input/remote-debug handoffs before changes; local
+and remote marble independently2cd42fe0e1a7ae87896d6c0ea5c842d9cdb13d30.
+Existing Hello/normal/hidtest/touchinit images and exact ADT rehashed unchanged.
+Preexisting sparse-script mode and bootstrap doc preserved/excluded.
+
+Work order: source-backed shared SWEET USB CDC-ECM + RAM-only ring/host listener,
+local USB checkpoint compile, then Linux-equivalent touch mode/pinctrl/CS.
+USB-only local checkpoint COMPLETE: shared final SWEET gadget compiles with
+MARBLE-specific GCC/PHY/DMA checks, RAM-only ring, manual host listener.
+Full82-patch replay/source equality,4CI-header compiles,12non-MARBLE token
+comparisons, sanitizer descriptor/ring/SMMU tests and host syntax PASS.
+Touch source and physical keys/HID/power are still byte-identical. No persistent
+logger or UFS behavior imported. Next commit/push/exact CI and standalone
+usblog image BEFORE functional touch changes. docs/MARBLE_USB_LOG.md.
+Primary iLtanaka/forks/U-Boot/firmware revisions pinned under
+/tmp/marble-usb-research; comparison and source proof in progress.
+No observed FIFO_IF_DISABLE or DMA mode; do not invent runtime results.
+
+
 ## Packaged active-init checkpoint — physical test pending
 
 Source `efb27bc77c45dca4443167dc347c0c14d1eb0ea0`, successful MARBLE DEVELOPMENT CI [39903264776](https://github.com/Beast9265/ios-marble/actions/runs/39903264776).
