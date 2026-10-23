@@ -591,9 +591,18 @@ diff --git a/iokit/KernelConfigTables.cpp b/iokit/KernelConfigTables.cpp
      "     'IONameMatch'     = 'sweet,display';"
      "   },"
 +#endif
-+#if defined(ARM64_BOARD_CONFIG_SWEET)
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_MARBLE)
      "   {"
      "     'IOClass'         = SweetHIDButtons;"
+     "     'IOProviderClass' = IOResources;"
+@@ -77,6 +87,8 @@
+     "     'IOProviderClass' = IOResources;"
+     "     'IOMatchCategory' = SweetHIDTouch;"
+     "   },"
++#endif
++#if defined(ARM64_BOARD_CONFIG_SWEET)
+     "   {"
+     "     'IOClass'         = SweetBattery;"
      "     'IOProviderClass' = IOResources;"
 diff --git a/iokit/conf/files.arm64 b/iokit/conf/files.arm64
 --- a/iokit/conf/files.arm64
@@ -13862,3 +13871,654 @@ diff --git a/osfmk/kern/exception.c b/osfmk/kern/exception.c
  /*
   * SWEET process sampler (bsd/dev/sweet_sample.c): user pc/lr/sp and a frame
   * pointer backtrace of every thread of a task, from the saved user state.
+diff --git a/iokit/Kernel/arm/hid/SweetHID.cpp b/iokit/Kernel/arm/hid/SweetHID.cpp
+--- a/iokit/Kernel/arm/hid/SweetHID.cpp
++++ b/iokit/Kernel/arm/hid/SweetHID.cpp
+@@ -30,6 +30,27 @@
+ #include "IOHIDUsageTables.h"
+ 
+ extern "C" uint64_t mach_absolute_time(void);
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++extern "C" void proc_selfname(char *, int);
++extern "C" void marble_keys_init(void);
++extern "C" int marble_hid_setup_ready(void);
++extern "C" void marble_touch_init(void);
++static bool marble_hid_diag(void)
++{
++ int value = 0;
++ return PE_parse_boot_argn("marbleguidiag", &value, sizeof(value)) && value;
++}
++static volatile UInt32 marble_open_logs, marble_key_logs, marble_touch_logs;
++static bool marble_log_take(volatile UInt32 *counter, UInt32 limit)
++{
++ UInt32 old = *counter;
++ while (old < limit) {
++  if (OSCompareAndSwap(old, old + 1, counter)) return true;
++  old = *counter;
++ }
++ return false;
++}
++#endif
+ 
+ /* One open client: the user client and its event callback. */
+ class IOHIDEventServiceClient : public OSObject {
+@@ -128,7 +149,15 @@
+ 		ok = super::open(client, options, data);
+ 	}
+ 	OSSafeReleaseNULL(data);
+-	IOLog("SWEET HID: %s open by %s -> %d\n", getName(), client ? client->getName() : "?", ok);
++	#if defined(ARM64_BOARD_CONFIG_MARBLE)
++ if (marble_hid_diag() && marble_log_take(&marble_open_logs, 16)) {
++  char name[64]; proc_selfname(name, sizeof(name));
++  IOLog("MARBLE HID: %s open by %s (%s) -> %d\n", getName(),
++      client ? client->getName() : "?", name, ok);
++ }
++#else
++ IOLog("SWEET HID: %s open by %s -> %d\n", getName(), client ? client->getName() : "?", ok);
++#endif
+ 	return ok;
+ }
+ 
+@@ -339,6 +368,10 @@
+ 	IOTimerEventSource *fTest;
+ 	UInt32 fTestSecs;
+ 	UInt32 fTestCount;
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++ UInt32 fTestWaits;
++ bool fTestReady;
++#endif
+ };
+ OSDefineMetaClassAndStructors(SweetHIDButtons, IOHIDEventService);
+ 
+@@ -384,7 +417,12 @@
+ 	if (!IOHIDEventService::start(provider)) {
+ 		return false;
+ 	}
+-	if (PE_parse_boot_argn("sweethidtest", &fTestSecs, sizeof(fTestSecs)) && fTestSecs) {
++	#if defined(ARM64_BOARD_CONFIG_MARBLE)
++ if (PE_parse_boot_argn("marblehidtest", &fTestSecs, sizeof(fTestSecs)) &&
++     fTestSecs >= 60 && fTestSecs <= 600) {
++#else
++ if (PE_parse_boot_argn("sweethidtest", &fTestSecs, sizeof(fTestSecs)) && fTestSecs) {
++#endif
+ 		fTest = IOTimerEventSource::timerEventSource(this, &SweetHIDButtons::testFired);
+ 		if (fTest && _hidWorkLoop->addEventSource(fTest) == kIOReturnSuccess) {
+ 			fTest->setTimeoutMS(fTestSecs * 1000);
+@@ -392,7 +430,13 @@
+ 	}
+ 	gSweetButtons = this;
+ 	registerService();
+-	IOLog("SWEET HID: buttons registered (test every %u s)\n", fTestSecs);
++	#if defined(ARM64_BOARD_CONFIG_MARBLE)
++ if (marble_hid_diag()) IOLog("MARBLE HID: buttons service registered (test delay %u s)\n", fTestSecs);
++ marble_keys_init();
++ marble_touch_init();
++#else
++ IOLog("SWEET HID: buttons registered (test every %u s)\n", fTestSecs);
++#endif
+ 	return true;
+ }
+ 
+@@ -402,8 +446,13 @@
+ 	IOHIDEvent *event = IOHIDEvent::keyboardEvent(mach_absolute_time(), kHIDPage_Consumer, usage, down);
+ 
+ 	if (event) {
+-		IOLog("SWEET HID: key 0x%x %s (%u clients)\n", (unsigned)usage, down ? "down" : "up",
+-		    _clients ? _clients->getCount() : 0);
++		#if defined(ARM64_BOARD_CONFIG_MARBLE)
++  if (marble_hid_diag() && marble_log_take(&marble_key_logs, 64))
++   IOLog("MARBLE HID: key 0x%x %s\n", (unsigned)usage, down ? "down" : "up");
++#else
++ IOLog("SWEET HID: key 0x%x %s (%u clients)\n", (unsigned)usage, down ? "down" : "up",
++     _clients ? _clients->getCount() : 0);
++#endif
+ 		dispatchEvent(event);
+ 		event->release();
+ 	}
+@@ -414,6 +463,30 @@
+ {
+ 	SweetHIDButtons *self = (SweetHIDButtons *)owner;
+ 
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++ /* One volume-up press/release, then one info-button tap. No Home, no loop.
++  * Retry readiness at most six times; never leave an injected contact held. */
++ if (self->fTestCount == 0 && (!self->isOpen() || !gSweetTouch || !gSweetTouch->isOpen() || !marble_hid_setup_ready())) {
++  if (++self->fTestWaits <= 6) sender->setTimeoutMS(10000);
++  else IOLog("MARBLE HIDTEST: stopped: services not opened\n");
++  return;
++ }
++ if (self->fTestCount == 0 && !self->fTestReady) {
++  self->fTestReady = true; sender->setTimeoutMS(10000); return;
++ }
++ switch (self->fTestCount++) {
++ case 0:
++  IOLog("MARBLE HIDTEST: one volume-up then info tap\n");
++  self->key(kHIDUsage_Csmr_VolumeIncrement, true); sender->setTimeoutMS(100); break;
++ case 1:
++  self->key(kHIDUsage_Csmr_VolumeIncrement, false); sender->setTimeoutMS(5000); break;
++ case 2:
++  gSweetTouch->touch(0, true, 1040, 2320); sender->setTimeoutMS(100); break;
++ case 3:
++  gSweetTouch->touch(0, false, 1040, 2320);
++  IOLog("MARBLE HIDTEST: complete, injection disabled\n"); break;
++ }
++#else
+ 	/*
+ 	 * Home (Menu) press, then the release 100 ms later; Setup's "Hello"
+ 	 * screen waits for it. Even counts press, odd counts release.
+@@ -423,6 +496,7 @@
+ 	if (++self->fTestCount < 60) {
+ 		sender->setTimeoutMS(press ? 100 : self->fTestSecs * 1000);
+ 	}
++#endif
+ }
+ 
+ bool
+@@ -444,7 +518,11 @@
+ 	setProperty("SurfaceHeight", (unsigned long long)(151 << 16), 32);
+ 	gSweetTouch = this;
+ 	registerService();
+-	IOLog("SWEET HID: touch registered\n");
++	#if defined(ARM64_BOARD_CONFIG_MARBLE)
++ if (marble_hid_diag()) IOLog("MARBLE HID: touch service registered\n");
++#else
++ IOLog("SWEET HID: touch registered\n");
++#endif
+ 	return true;
+ }
+ 
+@@ -530,10 +608,17 @@
+ 	collection->setIntegerValue(kIOHIDEventFieldDigitizerButtonMask, any ? 1 : 0);
+ 	IOLockUnlock(fLock);
+ 
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++ if (marble_hid_diag() && marble_log_take(&marble_touch_logs, 32))
++  IOLog("MARBLE TOUCH: id=%d %s x=%d y=%d%s\n", finger,
++      down ? (was ? "move" : "down") : "up", x, y, fEdge[finger] ? " edge" : "");
++#else
+ 	if (was != down) {
+ 		IOLog("SWEET HID: touch %d %s at %d,%d%s\n", finger, down ? "down" : "up", x, y,
+ 		    fEdge[finger] ? " edge" : "");
+ 	}
++#endif
++
+ 	dispatchEvent(collection);
+ 	collection->release();
+ }
+@@ -559,3 +644,8 @@
+ 		gSweetTouch->touch(finger, down != 0, x, y);
+ 	}
+ }
++
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++extern "C" void marble_hid_key(int key, int down) { if (key >= 0 && key < 3) sweet_hid_key(key, down); }
++extern "C" void marble_hid_touch(int finger, int down, int x, int y) { sweet_hid_touch(finger, down, x, y); }
++#endif
+diff --git a/bsd/conf/files b/bsd/conf/files
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -648,3 +648,6 @@
+ bsd/skywalk/packet/pbufpool.c			optional skywalk
+ bsd/skywalk/packet/pbufpool_kern.c		optional skywalk
+ bsd/dev/cpu_copy_in_cksum_gen.c			optional skywalk
++
++bsd/dev/marble_keys.c			standard
++bsd/dev/marble_touch.c			standard
+diff --git a/bsd/dev/marble_keys.c b/bsd/dev/marble_keys.c
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/marble_keys.c
+@@ -0,0 +1,141 @@
++/*
++ * MARBLE PMK8350 PON / PM8350 GPIO6, observer-only SPMI arbiter v7.
++ * Register provenance: docs/MARBLE_INPUT_HW.md. No PMIC/IRQ/reset writes.
++ * On any uncertain transaction stop; only key transitions enter shared HID.
++ */
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <sys/proc_internal.h>
++#include <kern/clock.h>
++#include <kern/thread.h>
++#include <kern/sched_prim.h>
++#include <machine/machine_routines.h>
++#include <pexpert/pexpert.h>
++
++extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
++extern kern_return_t thread_terminate(thread_t);
++extern void marble_hid_key(int, int);
++void marble_keys_init(void);
++int marble_hid_setup_ready(void);
++static int
++mk_setup_proc(proc_t proc, void *arg)
++{
++ if (!strcmp(proc->p_comm, "Setup")) { *(int *)arg = 1; return PROC_RETURNED_DONE; }
++ return PROC_RETURNED;
++}
++int
++marble_hid_setup_ready(void)
++{
++ int found = 0;
++ proc_iterate(PROC_ALLPROCLIST, mk_setup_proc, &found, NULL, NULL);
++ return found;
++}
++static vm_offset_t mk_core, mk_cfg, mk_obs;
++static uint16_t mk_pon, mk_gpio;
++static int mk_wait_chan, mk_diag;
++static bool mk_started;
++static uint32_t mk_logs;
++#define MK_INVALID 0xffffu
++
++static uint32_t
++mk_read(vm_offset_t base, uint32_t off)
++{
++ uint32_t value = *(volatile uint32_t *)(base + off);
++ __asm__ volatile("dmb oshld" ::: "memory");
++ return value;
++}
++
++static uint16_t
++mk_apid(uint16_t ppid, uint32_t count)
++{
++ uint16_t found = MK_INVALID;
++ for (uint32_t i = 0; i < count; i++) {
++  uint32_t map = mk_read(mk_core, 0x2000 + 4 * i);
++  if (map && ((map >> 8) & 0xfff) == ppid &&
++      (found == MK_INVALID || (mk_read(mk_cfg, 4 * i) & 7) == 0)) found = (uint16_t)i;
++ }
++ return found;
++}
++
++static bool
++mk_byte(uint16_t apid, uint16_t addr, uint8_t *out)
++{
++ if (apid == MK_INVALID) return false;
++ uint32_t off = 0x20u * apid; /* v7 primary bus, EE0 */
++ *(volatile uint32_t *)(mk_obs + off) = (1u << 27) | ((addr & 255u) << 4);
++ __asm__ volatile("dsb osh" ::: "memory");
++ for (unsigned n = 0; n < 1000; n++) {
++  uint32_t status = mk_read(mk_obs, off + 8);
++  if (status & 1) {
++   if (status & 14) return false;
++   *out = (uint8_t)mk_read(mk_obs, off + 0x18); return true;
++  }
++  delay(1);
++ }
++ return false;
++}
++
++static void
++mk_thread(void *arg, wait_result_t result)
++{
++ (void)arg; (void)result;
++ uint8_t pon, gpio;
++ int state[3] = {0, 0, 0};
++ const char *names[3] = {"power", "volup", "voldown"};
++ for (;;) {
++  if (!mk_byte(mk_pon, 0x1310, &pon) || !mk_byte(mk_gpio, 0x8d10, &gpio)) {
++   for (int k = 0; k < 3; k++) if (state[k]) marble_hid_key(k, 0);
++   printf("MARBLE KEYS: read failed; observer quarantined, no retries\n");
++   (void)thread_terminate(current_thread()); return;
++  }
++  int now[3] = {!!(pon & 0x80), !(gpio & 1), !!(pon & 0x40)};
++  for (int k = 0; k < 3; k++) if (state[k] != now[k]) {
++   state[k] = now[k];
++   if (mk_diag && mk_logs < 64) {
++    mk_logs++; printf("MARBLE KEYS: %s %s\n", names[k], now[k] ? "down" : "up");
++   }
++   marble_hid_key(k, now[k]);
++  }
++  uint64_t deadline; clock_interval_to_deadline(20, NSEC_PER_MSEC, &deadline);
++  (void)assert_wait_deadline(&mk_wait_chan, THREAD_UNINT, deadline);
++  thread_block(THREAD_CONTINUE_NULL);
++ }
++}
++
++void
++marble_keys_init(void)
++{
++ if (mk_started) return;
++ mk_started = true;
++ int enabled = 1;
++ PE_parse_boot_argn("marblekeys", &enabled, sizeof(enabled));
++ PE_parse_boot_argn("marbleguidiag", &mk_diag, sizeof(mk_diag));
++ if (!enabled) return;
++ mk_core = ml_io_map(0x0c400000, 0x4000);
++ mk_cfg = ml_io_map(0x0c42d000, 0x4000);
++ mk_obs = ml_io_map(0x0c440000, 0x80000);
++ if (!mk_core || !mk_cfg || !mk_obs) { printf("MARBLE KEYS: mapping failed\n"); return; }
++ uint32_t version = mk_read(mk_core, 0), count = mk_read(mk_core, 4) & 0x7ff;
++ if (version < 0x70000000 || version >= 0x80000000 || !count || count > 1024) {
++  printf("MARBLE KEYS: unsupported arb=%#x apids=%u; no transactions\n", version, count); return;
++ }
++ mk_pon = mk_apid(0x013, count); /* SID0 PON_HLOS */
++ mk_gpio = mk_apid(0x18d, count); /* SID1 PM8350 GPIO6, base8800 +5*100 */
++ uint8_t subtype, type, mode, en, pon, gpio;
++ if (!mk_byte(mk_pon, 0x1305, &subtype) || subtype != 9 ||
++     !mk_byte(mk_gpio, 0x8d04, &type) || type != 0x10 ||
++     !mk_byte(mk_gpio, 0x8d05, &subtype) || subtype < 0x10 || subtype > 0x13 ||
++     !mk_byte(mk_gpio, 0x8d40, &mode) || (mode & 3) != 0 ||
++     !mk_byte(mk_gpio, 0x8d46, &en) || !(en & 0x80) ||
++     !mk_byte(mk_pon, 0x1310, &pon) || !mk_byte(mk_gpio, 0x8d10, &gpio)) {
++  printf("MARBLE KEYS: PMK8350/PON9 or enabled PM8350 GPIO6 input not confirmed; withheld\n"); return;
++ }
++ if (mk_diag) printf("MARBLE KEYS: arb=%#x apids=%u PON9 SID0:1310 apid%u bits7/6 high; PM8350 SID1:8d10 apid%u bit0 low; initial=%#x/%#x\n",
++     version, count, mk_pon, mk_gpio, pon, gpio);
++ thread_t thread;
++ kern_return_t kr = kernel_thread_start(mk_thread, NULL, &thread);
++ if (kr == KERN_SUCCESS) thread_deallocate(thread);
++ else printf("MARBLE KEYS: thread failed %d\n", kr);
++}
++#endif
+diff --git a/bsd/dev/marble_touch.c b/bsd/dev/marble_touch.c
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/marble_touch.c
+@@ -0,0 +1,307 @@
++/*
++ * MARBLE: inherited GENI SE4 SPI0 / Goodix GT9916S (Berlin-D).
++ * Original small FIFO transport + bounded protocol parser; register/protocol
++ * references in docs/MARBLE_INPUT_HW.md. No reset, rail/clock vote, firmware
++ * upload or config write. Only controller write: zero event ACK after a fully
++ * validated event. Uncertain bus state is quarantined, never reset/retried.
++ */
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <kern/clock.h>
++#include <kern/thread.h>
++#include <kern/sched_prim.h>
++#include <machine/machine_routines.h>
++#include <pexpert/pexpert.h>
++extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
++extern kern_return_t thread_terminate(thread_t);
++extern void marble_hid_touch(int, int, int, int);
++void marble_touch_init(void);
++
++#define MT_MAX 1024u
++#define MT_FINGERS 10u
++#define MT_ERRORS 0x33007e3eu /* command, GP errors and FIFO errors; not watermarks */
++static vm_offset_t mt_se, mt_tlmm, mt_gcc;
++static uint32_t mt_depth, mt_rxdepth, mt_event;
++static unsigned mt_factor;
++static bool mt_started, mt_bad, mt_legacy_range, mt_down[MT_FINGERS];
++static int mt_x[MT_FINGERS], mt_y[MT_FINGERS], mt_chan, mt_diag;
++static uint8_t mt_tx[MT_MAX + 8], mt_rx[MT_MAX + 8], mt_info[MT_MAX];
++
++static uint32_t
++mt_rd(vm_offset_t base, unsigned off)
++{
++ uint32_t v = *(volatile uint32_t *)(base + off);
++ __asm__ volatile("dmb oshld" ::: "memory"); return v;
++}
++static void
++mt_wr(unsigned off, uint32_t v)
++{
++ *(volatile uint32_t *)(mt_se + off) = v;
++ __asm__ volatile("dsb osh" ::: "memory");
++}
++static unsigned mt_le16(const uint8_t *p) { return p[0] | (unsigned)p[1] << 8; }
++static uint32_t mt_le32(const uint8_t *p) { return mt_le16(p) | (uint32_t)mt_le16(p + 2) << 16; }
++static bool
++mt_checksum(const uint8_t *p, unsigned n)
++{
++ if (n < 2) return false;
++ unsigned sum = 0;
++ for (unsigned i = 0; i < n - 2; i++) sum += p[i];
++ return (sum & 0xffff) == mt_le16(p + n - 2);
++}
++static void
++mt_wait(unsigned ms)
++{
++ uint64_t deadline; clock_interval_to_deadline(ms, NSEC_PER_MSEC, &deadline);
++ (void)assert_wait_deadline(&mt_chan, THREAD_UNINT, deadline);
++ thread_block(THREAD_CONTINUE_NULL);
++}
++
++/* CS assert/deassert, only when the previous command is known idle. */
++static bool
++mt_cs(unsigned opcode)
++{
++ if (mt_bad || (mt_rd(mt_se, 0x40) & 0x1001)) return false;
++ mt_wr(0x618, mt_rd(mt_se, 0x610));
++ mt_wr(0x600, opcode << 27);
++ for (unsigned i = 0; i < 200; i++) {
++  uint32_t irq = mt_rd(mt_se, 0x610);
++  if (irq & MT_ERRORS) break;
++  if ((irq & 1) && !(mt_rd(mt_se, 0x40) & 1)) { mt_wr(0x618, irq); return true; }
++  delay(5);
++ }
++ mt_bad = true; return false;
++}
++
++/* Little-endian CPU FIFO words; MSB-first bits within each 8-bit SPI word.
++ * All RX words/counts are validated; no DMA or physical address descriptors. */
++static bool
++mt_exchange(unsigned n)
++{
++ if (n == 0 || n > sizeof(mt_tx) || mt_bad ||
++     (mt_rd(mt_se, 0x800) & 0xfffffff) || (mt_rd(mt_se, 0x804) & 0x1ffffff)) return false;
++ if (!mt_cs(8)) return false;
++ mt_wr(0x26c, n); mt_wr(0x270, n);
++ mt_wr(0x25c, mt_rd(mt_se, 0x25c) & ~1u); /* no CS toggle between words */
++ mt_wr(0x600, (3u << 27) | 4); /* FULL_DUPLEX, fragmentation: retain CS until command9 */
++ unsigned tx = 0, rx = 0;
++ for (unsigned poll = 0; poll < 1000; poll++) {
++  uint32_t irq = mt_rd(mt_se, 0x610);
++  if (irq & MT_ERRORS) break;
++  unsigned used = mt_rd(mt_se, 0x800) & 0xfffffff;
++  if (used > mt_depth) break;
++  for (unsigned room = mt_depth - used; room && tx < n; room--) {
++   uint32_t word = 0;
++   for (unsigned b = 0; b < 4 && tx < n; b++, tx++) word |= (uint32_t)mt_tx[tx] << (8 * b);
++   mt_wr(0x700, word);
++  }
++  uint32_t status = mt_rd(mt_se, 0x804);
++  unsigned words = status & 0x1ffffff;
++  if (words > mt_rxdepth) break;
++  for (unsigned w = 0; w < words; w++) {
++   unsigned bytes = 4;
++   if (w + 1 == words && (status & (1u << 31))) {
++    unsigned valid = (status >> 28) & 7;
++    if (valid > 4) goto bad;
++    if (valid) bytes = valid;
++   }
++   if (bytes > n - rx) goto bad;
++   uint32_t word = mt_rd(mt_se, 0x780);
++   for (unsigned b = 0; b < bytes; b++) mt_rx[rx++] = (uint8_t)(word >> (8 * b));
++  }
++  if ((irq & 1) && !(mt_rd(mt_se, 0x40) & 1)) {
++   if (tx != n || rx != n) break;
++   mt_wr(0x618, mt_rd(mt_se, 0x610));
++   return mt_cs(9);
++  }
++  /* Watermark/last flags only: never acknowledge an external GPIO/PMIC IRQ. */
++  mt_wr(0x618, irq & 0x4c000000u);
++  delay(5);
++ }
++ bad:
++ mt_bad = true;
++ printf("MARBLE TOUCH: SPI uncertain irq=%#x tx=%u rx=%u; quarantined, no reset/retry\n",
++     mt_rd(mt_se, 0x610), tx, rx);
++ return false;
++}
++static bool
++mt_read(uint32_t addr, uint8_t *out, unsigned n)
++{
++ if (n > MT_MAX || !n) return false;
++ bzero(mt_tx, n + 8);
++ mt_tx[0] = 0xf1;
++ for (unsigned i = 0; i < 4; i++) mt_tx[1 + i] = (uint8_t)(addr >> (24 - 8 * i));
++ mt_tx[5] = mt_tx[6] = mt_tx[7] = 0xff;
++ if (!mt_exchange(n + 8)) return false;
++ memcpy(out, mt_rx + 8, n); return true;
++}
++static bool
++mt_ack(void)
++{
++ bzero(mt_tx, 6); mt_tx[0] = 0xf0;
++ for (unsigned i = 0; i < 4; i++) mt_tx[1 + i] = (uint8_t)(mt_event >> (24 - 8 * i));
++ return mt_exchange(6); /* only permitted IC write: event status = 0 */
++}
++
++/* Decode packed IC-info with five variable-length frequency lists. No casts
++ * to untrusted packed structs. Require exact supported report and aspect. */
++static bool
++mt_parse_info(const uint8_t *data, unsigned len)
++{
++ if (len < 34 || len > MT_MAX || mt_le16(data) != len || !mt_checksum(data, len) ||
++     data[13] != 1 || data[14] != 0) return false;
++ unsigned pos = 32; /* length2 + version16 + feature10 + drv/sen/button/force4 */
++ const unsigned limits[5] = {5, 10, 10, 10, 8};
++ for (unsigned i = 0; i < 5; i++) {
++  if (pos >= len - 2) return false;
++  unsigned count = data[pos++];
++  if (count > limits[i] || count * 2 > len - 2 - pos) return false;
++  pos += count * 2;
++ }
++ if (pos + 114 + 2 > len) return false;
++ uint32_t event = mt_le32(data + pos + 44);
++ unsigned head = mt_le16(data + pos + 48), point = mt_le16(data + pos + 50);
++ unsigned x, y;
++ if (pos + 122 + 20 + 2 == len) {
++  x = mt_le16(data + pos + 122 + 16); y = mt_le16(data + pos + 122 + 18);
++ } else if (pos + 114 + 2 == len && mt_legacy_range && data[4] == 0x22) {
++  /* Stock goodix_berlin_driver has no screen_max extension. This exact
++   * 9916R ROM/FW + die22 is captured locally; postmarketOS's on-board
++   * measurements establish 10800x24000 (10x) for this controller. */
++  x = 10800; y = 24000;
++ } else return false;
++ if (event < 0x10000 || event > 0x100000 - 90 || head != 8 || point != 8 ||
++     x < 1080 || x % 1080 || x / 1080 > 16 || y != 2400 * (x / 1080)) return false;
++ mt_event = event; mt_factor = x / 1080;
++ if (mt_diag) printf("MARBLE TOUCH: IC-info len%u event=%#x head%u point%u range%ux%u factor%u\n",
++     len, event, head, point, x, y, mt_factor);
++ return true;
++}
++static bool
++mt_frame(const uint8_t *data, unsigned n)
++{
++ if (n < 8 || !mt_checksum(data, 8) || !(data[0] & 0x80) || (data[0] & 0x60)) return false;
++ unsigned count = data[2] & 15;
++ if (count > MT_FINGERS || n < 8 + count * 8 + 2 ||
++     (count && !mt_checksum(data + 8, count * 8 + 2))) return false;
++ bool next[MT_FINGERS] = {false}; int x[MT_FINGERS], y[MT_FINGERS];
++ for (unsigned i = 0; i < count; i++) {
++  const uint8_t *p = data + 8 + i * 8;
++  unsigned id = p[0] >> 4, rawx = mt_le16(p + 2), rawy = mt_le16(p + 4);
++  if (id >= MT_FINGERS || next[id] || (p[0] & 15) == 1 || (p[0] & 15) == 3 ||
++      rawx > 1080 * mt_factor || rawy > 2400 * mt_factor) return false;
++  next[id] = true; x[id] = rawx / mt_factor; y[id] = rawy / mt_factor;
++ }
++ /* Validate the complete snapshot before emitting any contact. */
++ for (unsigned id = 0; id < MT_FINGERS; id++) {
++  if (next[id]) { mt_x[id] = x[id]; mt_y[id] = y[id]; }
++  if (next[id] || mt_down[id]) marble_hid_touch(id, next[id], mt_x[id], mt_y[id]);
++  mt_down[id] = next[id];
++ }
++ return true;
++}
++static bool
++mt_probe(void)
++{
++ mt_se = ml_io_map(0x00990000, 0x4000);
++ mt_tlmm = ml_io_map(0x0f100000, 0x16000) /* CAPE TLMM REG_BASE=0x100000 */;
++ mt_gcc = ml_io_map(0x00100000, 0x70000);
++ if (!mt_se || !mt_tlmm || !mt_gcc) return false;
++ uint32_t fw = mt_rd(mt_se, 0x68), status = mt_rd(mt_se, 0x40), dma = mt_rd(mt_se, 0x258);
++ uint32_t hwtx = mt_rd(mt_se, 0xe24), hwrx = mt_rd(mt_se, 0xe28);
++ mt_depth = (hwtx >> 16) & 63; mt_rxdepth = (hwrx >> 16) & 63;
++ if (mt_diag) {
++  printf("MARBLE TOUCH: SPI SE4@990000 CS0 fw=%#x proto%u status=%#x DMA=%#x FIFO=%#x/%#x clock=%#x sel=%#x\n",
++      fw, (fw >> 8) & 255, status, dma, hwtx, hwrx, mt_rd(mt_se, 0x48), mt_rd(mt_se, 0x7c));
++  printf("MARBLE TOUCH: inherited GCC vote=%#x SE4=%#x mAHB=%#x sAHB=%#x RCG=%#x/%#x; no clock writes\n",
++      mt_rd(mt_gcc, 0x62008), mt_rd(mt_gcc, 0x274dc), mt_rd(mt_gcc, 0x27004),
++      mt_rd(mt_gcc, 0x27008), mt_rd(mt_gcc, 0x274e4), mt_rd(mt_gcc, 0x274e8));
++  for (unsigned pin = 16; pin <= 21; pin++) printf("MARBLE TOUCH: GPIO%u cfg=%#x io=%#x\n",
++      pin, mt_rd(mt_tlmm, pin * 0x1000), mt_rd(mt_tlmm, pin * 0x1000 + 4));
++  printf("MARBLE TOUCH: rails expected PM8350C ldoc2=1800mV ldoc9=3224mV; voltage not measured, no RPMh writes\n");
++ }
++ if (((fw >> 8) & 255) != 1 || (status & 0x1001) || (dma & 1) ||
++     ((hwtx >> 24) & 63) != 32 || ((hwrx >> 24) & 63) != 32 ||
++     mt_depth < 4 || mt_rxdepth < 4 || !(mt_rd(mt_se, 0x48) & 1) ||
++     (mt_rd(mt_gcc, 0x274dc) & (1u << 31)) ||
++     (mt_rd(mt_gcc, 0x27004) & (1u << 31)) || (mt_rd(mt_gcc, 0x27008) & (1u << 31))) {
++  printf("MARBLE TOUCH: inherited SPI FIFO/clock state not validated; read-only stop\n"); return false;
++ }
++ for (unsigned pin = 16; pin <= 19; pin++) if (((mt_rd(mt_tlmm, pin * 0x1000) >> 2) & 15) != 1) {
++  printf("MARBLE TOUCH: inherited SPI pin mux invalid; no pin writes\n"); return false;
++ }
++ if (((mt_rd(mt_tlmm, 0x14000) >> 2) & 15) ||
++     !(mt_rd(mt_tlmm, 0x14000) & (1u << 9)) ||
++     !(mt_rd(mt_tlmm, 0x14004) & 2) || /* reset output must remain high */
++     ((mt_rd(mt_tlmm, 0x15000) >> 2) & 15) ||
++     (mt_rd(mt_tlmm, 0x15000) & (1u << 9)) ||
++     (mt_rd(mt_se, 0x800) & 0xfffffff) || (mt_rd(mt_se, 0x804) & 0x1ffffff)) {
++  printf("MARBLE TOUCH: reset/IRQ mux or FIFO state not inherited safely; withheld\n"); return false;
++ }
++ /* Only own SE configuration after validating idle SPI state. Never turn on
++  * clocks/power or switch firmware/protocol/DMA. Same Linux 8-bit MSB packing. */
++ mt_wr(0x614, 0); /* polled local sequencer, no GIC interrupt enabled */
++ mt_wr(0x260, 0x7f8fe); mt_wr(0x264, 0xffefe);
++ mt_wr(0x284, 0x7f8fe); mt_wr(0x288, 0xffefe); mt_wr(0x254, 0);
++ mt_wr(0x268, 4); mt_wr(0x224, 0); mt_wr(0x230, 0); mt_wr(0x22c, 0);
++ mt_wr(0x24c, 0); mt_wr(0x250, 0);
++ uint8_t version[28];
++ if (!mt_read(0x10014, version, sizeof(version)) || !mt_checksum(version, sizeof(version)) ||
++     memcmp(version + 10, "9916", 4)) {
++  printf("MARBLE TOUCH: GT9916 version probe failed; no config/firmware/reset fallback\n"); return false;
++ }
++ if (mt_diag) printf("MARBLE TOUCH: identified GT%.8s ROM%.6s FW=%02x.%02x.%02x.%02x sensor%u\n",
++     version + 10, version, version[18], version[19], version[20], version[21], version[23]);
++ mt_legacy_range = !memcmp(version, "BERLIN", 6) &&
++     !memcmp(version + 10, "9916R", 5) && version[18] == 0 &&
++     version[19] == 0x80 && version[20] == 2 && version[21] == 0x94;
++ uint8_t length[2];
++ if (!mt_read(0x10070, length, 2)) return false;
++ unsigned len = mt_le16(length);
++ if (len < 34 || len >= MT_MAX || !mt_read(0x10070, mt_info, len) || !mt_parse_info(mt_info, len)) {
++  printf("MARBLE TOUCH: IC-info/checksum/report geometry unsupported; withheld\n"); return false;
++ }
++ return true;
++}
++static void
++mt_thread(void *arg, wait_result_t result)
++{
++ (void)arg; (void)result;
++ mt_wait(60000); /* keep boot critical path short; all work on one thread */
++ if (mt_probe()) {
++  if (mt_diag) printf("MARBLE TOUCH: polling active, inherited controller config, 10 contacts\n");
++  for (;;) {
++   if (!(mt_rd(mt_tlmm, 0x15004) & 1)) {
++    uint8_t frame[90];
++    if (!mt_read(mt_event, frame, 8)) break;
++    unsigned count = frame[2] & 15;
++    if (!mt_checksum(frame, 8) || !(frame[0] & 0x80) || (frame[0] & 0x60) || count > MT_FINGERS) {
++     printf("MARBLE TOUCH: unsupported/checksum/request frame status=%#x; no firmware/config upload\n", frame[0]); break;
++    }
++    unsigned len = 8 + count * 8 + 2;
++    if ((count && !mt_read(mt_event + 8, frame + 8, count * 8 + 2)) || !mt_frame(frame, len) || !mt_ack()) {
++     printf("MARBLE TOUCH: invalid frame or ACK failure; stopped\n"); break;
++    }
++   }
++   mt_wait(10);
++  }
++ }
++ for (unsigned id = 0; id < MT_FINGERS; id++) if (mt_down[id]) marble_hid_touch(id, 0, mt_x[id], mt_y[id]);
++ (void)thread_terminate(current_thread());
++}
++void
++marble_touch_init(void)
++{
++ if (mt_started) return;
++ mt_started = true;
++ int enabled = 1;
++ PE_parse_boot_argn("marbletouch", &enabled, sizeof(enabled));
++ PE_parse_boot_argn("marbleguidiag", &mt_diag, sizeof(mt_diag));
++ if (!enabled) return;
++ thread_t thread;
++ kern_return_t kr = kernel_thread_start(mt_thread, NULL, &thread);
++ if (kr == KERN_SUCCESS) thread_deallocate(thread);
++ else printf("MARBLE TOUCH: thread failed %d\n", kr);
++}
++#endif

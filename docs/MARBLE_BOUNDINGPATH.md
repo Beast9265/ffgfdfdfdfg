@@ -4,7 +4,9 @@ Physical observation: SpringBoard repeatedly aborts with
 `NSInternalInconsistencyException`, reason:
 `Failed to load bounding path bitmap data from the asset manager for asset name: BoundingPathBitmap-1125x2436-375x812-3.00x`.
 The assertion is `_UIScreenComplexBoundingPathUtilities.m:326`.
-Setup has not been reached. This build is awaiting physical validation.
+Setup has not been reached. Physical validation now PASS: user reports animated iOS 16.7.16 Setup Hello
+(ciao / Scorri verso l'alto), status bar, home indicator and info button.
+Bounding-path lookup and GUI path are proven; physical input is the next blocker.
 
 ## Exact 20H392 code path
 
@@ -193,5 +195,5 @@ Only manual phone command for this test (no userdata reflash):
 fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
 ```
 
-Success requires the physical assertion to disappear and SpringBoard to stay
-alive toward Setup. That has **not** yet been demonstrated.
+Physical user test subsequently demonstrated Setup Hello. Preserve the named
+`hello-known-good-marble-xnu.img` checkpoint; input work is tracked separately.

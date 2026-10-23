@@ -1,7 +1,74 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
 
-## Active handoff: MARBLE UIKit bounding-path asset investigation (2026-10-23)
+## Active handoff: MARBLE real input bring-up (2026-10-23)
+
+🎉 MILESTONE: iOS 16.7.16 Setup.app Hello screen rendered on Xiaomi POCO F5 / marble.
+USER PHYSICAL observation: animated ciao, Scorri verso l'alto, home indicator,
+status/battery/info button and rounded/notched iPhone layout. XNU,launchd,
+writable HFS,DataMigration wall,SpringBoard,backboardd,UIKit/CoreUI,
+BoundingPathBitmap,IOSurface,IOMobileFramebuffer,AppleCLCD CPUcopy,Setup Hello PASS.
+Physical buttons/touch events FAIL: input is the next blocker. Do not skip Setup.
+Read AGENTS and NOTES/history;local/remote marble independently verified
+at d819d883da348c631ca513cc07536cbddebd2bed before edits. Preserve preexisting
+sparse-script mode change/untracked bootstrap doc. No device commands.
+
+HELLO-SCREEN-KNOWN-GOOD (all artifacts rehashed before changes):
+kernel462dc21b476550949aaebdd335c5e6584f120c3481bfbda2cae92958398160d9
+ADT35f0bff762c339e86a0e67392267ed148ae06b24703b682ce2327c9296ed84e3
+payload823706ba303643c4880d235abac8aaa2145983c23258c2af119f0019f3f0906c
+boot789377d9cc9de5027038b074e3c0c61121f2229594e7895282933a44b1eb6242
+Named copy shim/out/marble-xnu/hello-known-good-marble-xnu.img verified equal.
+Root setup-fast raw7ca8c990f98875d892ffa38f769f4a8bb5af23bdbabb4ee50d69d2df13822798
+sparsecec3daf08e3236065d14c3939c48051430c7737f798c2b7d8affb475c3f4aa01.
+No userdata changes planned;preserve /product,graphics,geometry3x,10Hz,cpus1.
+Input source audit/local controlled stages underway;no physical success claimed.
+
+
+Input local milestone: actual Hello Mach-O has all0058 HID classes/hooks but
+its KernelConfigTables lacks the SWEET-only personalities.0082 now shares
+ONLY Buttons/Touch personalities, not battery. Apple IOHIDEvent/queue/userclient
+sources unchanged;MARBLE wrappers and bounded logs/selftest in SweetHID.cpp.
+SWEET/BCM2837/T8103 preprocessedtokens identical (__LINE__ normalized).
+
+Hardware evidence docs/MARBLE_INPUT_HW.md: local liveDTS and Android dmesg,
+localpmaportsmarblepatch;publicMiCode48952ed36228217531482b39d5bef13e7fd808ec.
+Keys PMK8350 SID0 PON1310 bits7power/6voldown assertedhigh;PM8350 SID1GPIO6
+RT8d10 bit0activelow;v7SPMI corec400000/configc42d000/obsc440000,
+APIDtable2000,stride20. Newmarble_keys.c observer-only20mspoll,identitygates,
+1msreadtimeouts,quarantineonfailure,noPMICconfig/IRQ/resetwrites.
+Touch liveGT9916S-compatible SPI SE4@990000 CS0,NOTSWEETI2C. SavedactualROM
+BERLIN,PID9916R,VID00800294,sensor255,die22,ICinfolen191,event10308,head8/point8.
+ResetGPIO20,IRQ21low,SPI16..19functionqup4. CAPETLMM nodef000000 PLUSbank100000
+=>f100000,perpin1000. iovddPM8350Cldoc2=1800mV,avddldoc9=3224mV.
+Newmarble_touch.c inheritsonlyvalidatedidleSPI/FIFO/clock/mux/resethighstate;
+oneworkerafter60s,5msduplextimeout/1msCS,1032Bmaxtransfer,opcode3duplex,
+8/9CS,packing7f8fe/ffefe. NoGPIO/GCC/RPMh/reset/firmware/configwrites.
+NoABLstate/powermeasurementyet:unsafe/uninitializedstateexplicitread-onlySTOP.
+Version/ICinfo checksum/PID/schema/rangevalidation;BerlinDreports8bytehead+
+8bytecontacts,sum16checksums,IDs<10,uniqueness,atomicframes,onlyzeroeventACK.
+DynamichighresrangeorEXACTcapturedlegacyFWtupleusespmaportsproven10x;
+physical1080x2400 -> cropoffset22/18 ->1125x2436. Existing0071edgeflag48px
+retainedthroughrelease. Multitouch10supported.NoRPMhvotejustifiedbeforetest.
+
+MARBLEsynthetic marblehidtest=N (offdefault,60..600s):servicesopened+Setupalive,
+10ssettle,onevolupdown/up100ms,5swait,oneinfo-areatap1040,2320 down/up100ms,
+thenstop. Atmost6readinessretries10sapart. PlannedhidtestimageN300 and
+marblekeys=0 marbletouch=0. Realimageusesdefaultphysicaldrivers,testoff.
+Diagnosticsmarbleguidiag:2registrationlines,16open,64HIDkeys,32touch,64driverkey
+transitionlines/boot,saturatingbudgets;hardwareinitial/probeonce;noeventpollspam.
+
+Localvalidation: full0001..0082reverse/replay,strictaddedsourcewhitespace,
+exactcompiled-sourceequality PASS;4arm64unitsactualCIheaders PASS;symbolclosure
+againstoldkernel/newobjects PASS. Allother0082sectionsbyte-identical.
+10existingunit+repovalidation PASS. tools/test-marble-input.py extractsactual
+FIFO/parsercode:ASan/UBSan1032lengths,order,opcodes,busy/impossiblecount/timeouts,
+ICinfoschemas/checksums,10xmapping/downmoveup,duplicateatomicrejection,
+100000malformed/truncations PASS. No physicalinput/ABLinheritanceclaimyet.
+.gitattributes ignoresunifiedpatchcontextwhitespaceonly;strictgitapplyvalidates
+realnewsource. Nextcommit/push/exactMARBLE13.5DEVELOPMENTCI+twoimagepackage.
+
+## Previous handoff: MARBLE UIKit bounding-path asset investigation (2026-10-23)
 
 Read full AGENTS.md and NOTES.md/history before changes;remote refs/heads/marble
 independently checked=f4c14cc2b8afcb760a770e1fd3d2cdbbcfda89ca,local HEAD matches.
