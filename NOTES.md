@@ -3,6 +3,13 @@
 
 ## Active handoff: MARBLE touch/USB v3 hardware initialization (2026-10-23)
 
+CI39945823888 FAILED before BSD compilation: an overly broad build-list
+replacement changed existing optional sweet_hfs selectors to invalid tokens.
+Corrected by restoring the exact original bsd/conf/files bytes and appending
+only the two new standard entries. Added host grammar validation. CI39946308005
+952053e had the same build list and is superseded/cancelled. Neither artifact
+will be packaged. This was a build-list editing error, not a hardware result.
+
 Source a89da84f3399879f54cef8874ffac0d5a4d9dc60 pushed; CI39945823888
 started with matchingheadSha. Superseded by final diagnostic review: retain
 SPMI failed status/address and allow full overlay header. No artifact from the

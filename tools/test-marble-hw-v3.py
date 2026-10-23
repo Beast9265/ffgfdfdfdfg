@@ -157,3 +157,12 @@ assert not __import__('re').search(r'(?<!sn)printf\(', t.function(d,'mh_format')
 assert 'VNODE_LOOKUP_NOFOLLOW' in d and 'vnode_vtype(vp) != VREG' in d and 'mh.file_attempts++ >= 16' in d
 assert 'vn_rdwr(UIO_WRITE' in d and 'VNOP_FSYNC' in d and 'vnode_close' in d
 print('PASS VFS source audit: no-follow, regular-file check, bounded text/write count, close/fsync, no raw disk access')
+
+conf=(r/'bsd/conf/files').read_text()
+for line in conf.splitlines():
+    line=line.split('#',1)[0].strip()
+    if line and not line.startswith('options/'):
+        fields=line.split()
+        assert len(fields)>1 and fields[1] in ('standard','optional'), line
+assert conf.count('bsd/dev/marble_hwdiag.c')==1 and conf.count('bsd/dev/marble_usb_hw.c')==1
+print('PASS BSD build-file grammar: all existing standard/optional selectors preserved')
