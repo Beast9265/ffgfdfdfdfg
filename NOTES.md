@@ -1,7 +1,40 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+Active-init implementation milestone: touch-only source is now represented in
+0082 (marble_touch.c, new marble_touch_power.c, BSD files entry). Added tests
+for actual extracted power/confirm/event/TCS functions. Complete82-patch replay
+and CI-header arm64 compiles pass; ASan/UBSan suites pass including100000
+malformed/truncated cases. Keys/HID and every other0082 section are byte-identical.
+Physical gate/state and rail/confirm results remain UNKNOWN until next boot.
+Dedicated image will use marbletouchinit=1; old images/root/known-good ADT kept.
+See docs/MARBLE_INPUT_HW.md active-init section for exact safety and provenance.
+Next: final review, commit/push, exact MARBLE CI, touchinit-only packaging;
+remote-debug audit AFTER artifact. No physical device commands.
 
-## Active handoff: MARBLE real input bring-up (2026-10-23)
+
+## Active handoff: MARBLE GT9916 active initialization (2026-10-23)
+
+USER PHYSICAL RESULTS: GUI/Setup Hello/SpringBoard/backboardd/UIKit/display PASS.
+Physical side buttons PASS. Synthetic volume event PASS;synthetic touch down/up
+PASS; touch HID service PASS enough for hardware work. Physical GT9916R touch FAIL.
+Exact user synthetic log:
+MARBLE HIDTEST: one volume-up then info tap
+MARBLE HID: key 0xe9 down
+MARBLE HID: key 0xe9 up
+MARBLE TOUCH: id=0 down x=1040 y=2320 edge
+MARBLE TOUCH: id=0 up x=1040 y=2320 edge
+MARBLE HIDTEST: complete, injection disabled
+
+Freeze marble_keys.c,Buttons,Touch,HIDEvent/queue/userclient,normalization/edge,
+graphics/product/root/migration/sandbox/AKS/UFS/cpus1. Only hardware-side touch
+bring-up changes authorized. Known currentimages/ADT rehashed and preserved.
+Local/remote marble=a0bfd1485527c4834cda12063cf344cb76ba41c3 verified.
+Exact inherited touch register/refusal output NOT supplied; cannot claim exact
+prior physical failure reason. Leading hypothesis: inherited-only assumptions
+omit power/reset/device-confirm. Asked user for existing MARBLE TOUCH logs;
+source-backed active-init work proceeds independently. No phone commands.
+
+## Previous handoff: MARBLE real input bring-up (2026-10-23)
 
 🎉 MILESTONE: iOS 16.7.16 Setup.app Hello screen rendered on Xiaomi POCO F5 / marble.
 USER PHYSICAL observation: animated ciao, Scorri verso l'alto, home indicator,

@@ -14057,13 +14057,14 @@ diff --git a/iokit/Kernel/arm/hid/SweetHID.cpp b/iokit/Kernel/arm/hid/SweetHID.c
 diff --git a/bsd/conf/files b/bsd/conf/files
 --- a/bsd/conf/files
 +++ b/bsd/conf/files
-@@ -648,3 +648,6 @@
+@@ -648,3 +648,7 @@
  bsd/skywalk/packet/pbufpool.c			optional skywalk
  bsd/skywalk/packet/pbufpool_kern.c		optional skywalk
  bsd/dev/cpu_copy_in_cksum_gen.c			optional skywalk
 +
 +bsd/dev/marble_keys.c			standard
 +bsd/dev/marble_touch.c			standard
++bsd/dev/marble_touch_power.c		standard
 diff --git a/bsd/dev/marble_keys.c b/bsd/dev/marble_keys.c
 new file mode 100644
 --- /dev/null
@@ -14216,14 +14217,9 @@ diff --git a/bsd/dev/marble_touch.c b/bsd/dev/marble_touch.c
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/marble_touch.c
-@@ -0,0 +1,317 @@
-+/*
-+ * MARBLE: inherited GENI SE4 SPI0 / Goodix GT9916S (Berlin-D).
-+ * Original small FIFO transport + bounded protocol parser; register/protocol
-+ * references in docs/MARBLE_INPUT_HW.md. No reset, rail/clock vote, firmware
-+ * upload or config write. Only controller write: zero event ACK after a fully
-+ * validated event. Uncertain bus state is quarantined, never reset/retried.
-+ */
+@@ -0,0 +1,479 @@
++/* MARBLE Berlin-D active initialization; references and ownership in
++ * docs/MARBLE_INPUT_HW.md. No firmware/config upload or Berlin-A operations. */
 +#if defined(ARM64_BOARD_CONFIG_MARBLE)
 +#include <sys/param.h>
 +#include <sys/systm.h>
@@ -14236,6 +14232,9 @@ new file mode 100644
 +extern kern_return_t thread_terminate(thread_t);
 +extern void marble_hid_touch(int, int, int, int);
 +void marble_touch_init(void);
++extern int marble_touch_power_prepare(void);
++extern int marble_touch_power_vote(const char *, unsigned);
++static int mt_active;
 +
 +#define MT_MAX 1024u
 +#define MT_FINGERS 10u
@@ -14275,6 +14274,114 @@ new file mode 100644
 + uint64_t deadline; clock_interval_to_deadline(ms, NSEC_PER_MSEC, &deadline);
 + (void)assert_wait_deadline(&mt_chan, THREAD_UNINT, deadline);
 + thread_block(THREAD_CONTINUE_NULL);
++}
++
++static bool
++mt_stop(const char *gate)
++{
++ printf("MARBLE TOUCH: STOP gate=%s\n", gate); return false;
++}
++static void
++mt_store(vm_offset_t base, unsigned off, uint32_t value)
++{
++ __asm__ volatile("dmb oshst" ::: "memory");
++ *(volatile uint32_t *)(base + off) = value;
++ __asm__ volatile("dsb osh" ::: "memory");
++}
++static bool
++mt_mask(vm_offset_t base, unsigned off, uint32_t mask, uint32_t value)
++{
++ uint32_t old = mt_rd(base, off);
++ if (old == 0xffffffffu) return false;
++ mt_store(base, off, (old & ~mask) | value);
++ return (mt_rd(base, off) & mask) == value;
++}
++static void
++mt_dump(const char *name, const uint8_t *data, unsigned n)
++{
++ /* At most 64 bytes, including partial final row; used once per failed probe. */
++ for (unsigned i = 0; i < n && i < 64; i += 16) {
++  char line[49]; unsigned used = 0;
++  for (unsigned j = i; j < n && j < i + 16 && j < 64; j++)
++   used += snprintf(line + used, sizeof(line) - used, "%02x ", data[j]);
++  printf("MARBLE TOUCH: %s[%u] %s\n", name, i, line);
++ }
++}
++static bool
++mt_reset(bool released)
++{
++ /* GPIO20 active-low: physical LOW asserts, HIGH releases. Latch first. */
++ if (!mt_mask(mt_tlmm, 0x14004, 2, released ? 2 : 0) ||
++     !mt_mask(mt_tlmm, 0x14000, 0x3ff, (1u << 9) | (3u << 6) | 3))
++  return mt_stop("GPIO20 reset readback");
++ printf("MARBLE TOUCH: reset %s physical=%u latch=%#x input=%u\n",
++     released ? "released" : "asserted", released, mt_rd(mt_tlmm, 0x14004),
++     mt_rd(mt_tlmm, 0x14004) & 1);
++ return true;
++}
++static bool
++mt_power_on(void)
++{
++ int error = marble_touch_power_prepare();
++ if (error) return mt_stop("command DB / ACTIVE TCS prepare");
++ if (!mt_reset(false)) return false;
++ for (unsigned pin = 16; pin <= 19; pin++) {
++  uint32_t config = (1u << 2) | ((pin == 19 ? 7u : 2u) << 6) | (pin == 19 ? 3u : 0u);
++  if (!mt_mask(mt_tlmm, pin * 0x1000, 0x1ff, config)) return mt_stop("SPI pinctrl readback");
++ }
++ if (!mt_mask(mt_tlmm, 0x15000, 0x3ff, (3u << 6) | 3)) return mt_stop("IRQ pinctrl readback");
++ for (unsigned pin = 16; pin <= 21; pin++)
++  printf("MARBLE TOUCH: configured GPIO%u cfg=%#x io=%#x\n", pin,
++      mt_rd(mt_tlmm, pin * 0x1000), mt_rd(mt_tlmm, pin * 0x1000 + 4));
++ mt_wait(2);
++ error = marble_touch_power_vote("ldoc2", 1800);
++ printf("MARBLE TOUCH: VDDIO ldoc2 1800000 vote %s errno=%d\n", error ? "FAILED" : "OK", error);
++ if (error) return mt_stop("VDDIO vote");
++ mt_wait(3);
++ error = marble_touch_power_vote("ldoc9", 3224);
++ printf("MARBLE TOUCH: AVDD ldoc9 3224000 vote %s errno=%d\n", error ? "FAILED" : "OK", error);
++ if (error) return mt_stop("AVDD vote");
++ mt_wait(15);
++ if (!mt_reset(true)) return false;
++ mt_wait(4); return true;
++}
++static bool
++mt_clocks(void)
++{
++ /* Captured SE4 branch/vote offsets, SM8450 GCC family. Own bits only. */
++ const uint32_t votes = (1u << 6) | (1u << 7) | (1u << 14);
++ if (!mt_mask(mt_gcc, 0x62008, votes, votes)) return mt_stop("GCC vote readback");
++ for (unsigned i = 0; i < 1000; i++) {
++  if (!((mt_rd(mt_gcc, 0x274dc) | mt_rd(mt_gcc, 0x27004) |
++      mt_rd(mt_gcc, 0x27008)) & (1u << 31))) return true;
++  delay(1);
++ }
++ return mt_stop("GCC SE4/AHB branch timeout");
++}
++static bool
++mt_spi_clock(void)
++{
++ /* Select existing XO 19.2MHz DFS level, or program only this engine's RCG.
++  * Divider2 gives <=9.6MHz, below captured 15MHz controller maximum. */
++ uint32_t dfs = mt_rd(mt_gcc, 0x274f8);
++ unsigned level = 0;
++ if (dfs & 1) {
++  for (; level < 8; level++) {
++   uint32_t cfg = mt_rd(mt_gcc, 0x27500 + level * 4);
++   if ((cfg & 0x371f) == 1) break;
++  }
++  if (level == 8) return mt_stop("no inherited XO DFS level; no PLL/DFS table writes");
++ } else {
++  if (!mt_mask(mt_gcc, 0x274e8, 0x371f, 1)) return mt_stop("SE4 RCG config readback");
++  mt_store(mt_gcc, 0x274e4, mt_rd(mt_gcc, 0x274e4) | 1);
++  unsigned i;
++  for (i = 0; i < 1000 && (mt_rd(mt_gcc, 0x274e4) & 1); i++) delay(1);
++  if (i == 1000) return mt_stop("SE4 RCG update timeout");
++ }
++ mt_wr(0x7c, level); mt_wr(0x48, (2u << 4) | 1);
++ printf("MARBLE TOUCH: SE4 XO clock DFS=%#x level=%u MCLK=%#x sel=%#x\n",
++     dfs, level, mt_rd(mt_se, 0x48), mt_rd(mt_se, 0x7c));
++ return mt_rd(mt_se, 0x48) == 0x21 && mt_rd(mt_se, 0x7c) == level ? true : mt_stop("SE4 clock readback");
 +}
 +
 +/* CS assert/deassert, only when the previous command is known idle. */
@@ -14363,6 +14470,27 @@ new file mode 100644
 + return mt_exchange(6); /* only permitted IC write: event status = 0 */
 +}
 +
++static bool
++mt_confirm(void)
++{
++ for (unsigned attempt = 1; attempt <= 3; attempt++) {
++  /* Berlin-D device confirm only; no arbitrary register write interface. */
++  const uint8_t command[13] = {0xf0, 0, 1, 0, 0, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa};
++  memcpy(mt_tx, command, sizeof(command));
++  printf("MARBLE TOUCH: device confirm write/read @0x10000 attempt=%u\n", attempt);
++  if (!mt_exchange(sizeof(command))) return mt_stop("device confirm write transport");
++  uint8_t data[8];
++  if (!mt_read(0x10000, data, sizeof(data))) return mt_stop("device confirm read transport");
++  bool match = true;
++  for (unsigned i = 0; i < sizeof(data); i++) match &= data[i] == 0xaa;
++  printf("MARBLE TOUCH: device confirm %s attempt=%u rx=%02x %02x %02x %02x %02x %02x %02x %02x\n",
++      match ? "PASS" : "FAILED", attempt, data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]);
++  if (match) return true;
++  if (attempt < 3) mt_wait(5);
++ }
++ return mt_stop("device confirm mismatch after 3 attempts");
++}
++
 +/* Decode packed IC-info with five variable-length frequency lists. No casts
 + * to untrusted packed structs. Require exact supported report and aspect. */
 +static bool
@@ -14385,8 +14513,8 @@ new file mode 100644
 + if (pos + 122 + 20 + 2 == len) {
 +  x = mt_le16(data + pos + 122 + 16); y = mt_le16(data + pos + 122 + 18);
 + } else if (pos + 114 + 2 == len && mt_legacy_range && data[4] == 0x22) {
-+  /* Stock goodix_berlin_driver has no screen_max extension. This exact
-+   * 9916R ROM/FW + die22 is captured locally; postmarketOS's on-board
++  /* Stock goodix_berlin_driver has no screen_max extension. Berlin-D
++   * 9916 ROM + die22 is captured locally; postmarketOS's on-board
 +   * measurements establish 10800x24000 (10x) for this controller. */
 +  x = 10800; y = 24000;
 + } else return false;
@@ -14426,58 +14554,75 @@ new file mode 100644
 + mt_se = ml_io_map(0x00990000, 0x4000);
 + mt_tlmm = ml_io_map(0x0f100000, 0x16000) /* CAPE TLMM REG_BASE=0x100000 */;
 + mt_gcc = ml_io_map(0x00100000, 0x70000);
-+ if (!mt_se || !mt_tlmm || !mt_gcc) return false;
++ if (!mt_se || !mt_tlmm || !mt_gcc) return mt_stop("MMIO mappings");
++ printf("MARBLE TOUCH: MMIO mappings successful; active-init=%d\n", mt_active);
++ printf("MARBLE TOUCH: initial GCC vote=%#x branches=%#x/%#x/%#x RCG=%#x/%#x DFS=%#x\n",
++     mt_rd(mt_gcc, 0x62008), mt_rd(mt_gcc, 0x274dc), mt_rd(mt_gcc, 0x27004),
++     mt_rd(mt_gcc, 0x27008), mt_rd(mt_gcc, 0x274e4), mt_rd(mt_gcc, 0x274e8), mt_rd(mt_gcc, 0x274f8));
++ for (unsigned pin = 16; pin <= 21; pin++) printf("MARBLE TOUCH: initial GPIO%u cfg=%#x io=%#x\n",
++     pin, mt_rd(mt_tlmm, pin * 0x1000), mt_rd(mt_tlmm, pin * 0x1000 + 4));
++ printf("MARBLE TOUCH: initial reset physical=%u IRQ physical=%u\n",
++     mt_rd(mt_tlmm, 0x14004) & 1, mt_rd(mt_tlmm, 0x15004) & 1);
++ if (mt_active && !mt_clocks()) return false;
++ printf("MARBLE TOUCH: raw GENI FW=%#x SFW=%#x status=%#x DMA=%#x\n",
++     mt_rd(mt_se, 0x68), mt_rd(mt_se, 0x6c), mt_rd(mt_se, 0x40), mt_rd(mt_se, 0x258));
 + uint32_t fw = mt_rd(mt_se, 0x68), status = mt_rd(mt_se, 0x40), dma = mt_rd(mt_se, 0x258);
 + uint32_t hwtx = mt_rd(mt_se, 0xe24), hwrx = mt_rd(mt_se, 0xe28);
 + mt_depth = (hwtx >> 16) & 63; mt_rxdepth = (hwrx >> 16) & 63;
 + if (mt_diag) {
 +  printf("MARBLE TOUCH: SPI SE4@990000 CS0 fw=%#x proto%u status=%#x DMA=%#x FIFO=%#x/%#x clock=%#x sel=%#x\n",
 +      fw, (fw >> 8) & 255, status, dma, hwtx, hwrx, mt_rd(mt_se, 0x48), mt_rd(mt_se, 0x7c));
-+  printf("MARBLE TOUCH: inherited GCC vote=%#x SE4=%#x mAHB=%#x sAHB=%#x RCG=%#x/%#x; no clock writes\n",
++  printf("MARBLE TOUCH: inherited GCC vote=%#x SE4=%#x mAHB=%#x sAHB=%#x RCG=%#x/%#x; before configuration\n",
 +      mt_rd(mt_gcc, 0x62008), mt_rd(mt_gcc, 0x274dc), mt_rd(mt_gcc, 0x27004),
 +      mt_rd(mt_gcc, 0x27008), mt_rd(mt_gcc, 0x274e4), mt_rd(mt_gcc, 0x274e8));
 +  for (unsigned pin = 16; pin <= 21; pin++) printf("MARBLE TOUCH: GPIO%u cfg=%#x io=%#x\n",
 +      pin, mt_rd(mt_tlmm, pin * 0x1000), mt_rd(mt_tlmm, pin * 0x1000 + 4));
-+  printf("MARBLE TOUCH: rails expected PM8350C ldoc2=1800mV ldoc9=3224mV; voltage not measured, no RPMh writes\n");
++  printf("MARBLE TOUCH: rails expected PM8350C ldoc2=1800mV ldoc9=3224mV; voltage not measured\n");
 + }
-+ if (((fw >> 8) & 255) != 1 || (status & 0x1001) || (dma & 1) ||
-+     ((hwtx >> 24) & 63) != 32 || ((hwrx >> 24) & 63) != 32 ||
-+     mt_depth < 4 || mt_rxdepth < 4 || !(mt_rd(mt_se, 0x48) & 1) ||
-+     (mt_rd(mt_gcc, 0x274dc) & (1u << 31)) ||
-+     (mt_rd(mt_gcc, 0x27004) & (1u << 31)) || (mt_rd(mt_gcc, 0x27008) & (1u << 31))) {
-+  printf("MARBLE TOUCH: inherited SPI FIFO/clock state not validated; read-only stop\n"); return false;
++ if (((fw >> 8) & 255) != 1) return mt_stop("resident SPI protocol firmware absent; no loader");
++ if ((status & 0x1001) || (mt_rd(mt_se, 0x800) & 0xfffffff) ||
++     (mt_rd(mt_se, 0x804) & 0x1ffffff)) return mt_stop("GENI busy or FIFO not empty");
++ if (((hwtx >> 24) & 63) != 32 || ((hwrx >> 24) & 63) != 32 ||
++     mt_depth < 4 || mt_rxdepth < 4) return mt_stop("unsupported FIFO geometry");
++ if (mt_active) {
++  if ((dma & 1) && (mt_rd(mt_se, 0xc54) || mt_rd(mt_se, 0xd54)))
++   return mt_stop("outstanding DMA transaction");
++  if (!mt_spi_clock() || !mt_power_on()) return false;
++  mt_wr(0x258, dma & ~1u); mt_wr(0xe18, 0); mt_wr(0xe1c, 0);
++  mt_wr(0x28, mt_rd(mt_se, 0x28) | 0x7f);
++  mt_wr(0xe30, mt_rd(mt_se, 0xe30) | 0xf);
++  mt_wr(0x24, 0x7f); mt_wr(0x20, 1);
++ } else {
++  if ((dma & 1) || !(mt_rd(mt_se, 0x48) & 1) ||
++      ((mt_rd(mt_gcc, 0x274dc) | mt_rd(mt_gcc, 0x27004) |
++       mt_rd(mt_gcc, 0x27008)) & (1u << 31))) return mt_stop("inherited FIFO/clock state");
++  for (unsigned pin = 16; pin <= 19; pin++)
++   if (((mt_rd(mt_tlmm, pin * 0x1000) >> 2) & 15) != 1) return mt_stop("inherited SPI pinmux");
++  if ((mt_rd(mt_tlmm, 0x14000) & 0x23c) != 0x200 ||
++      !(mt_rd(mt_tlmm, 0x14004) & 2) || (mt_rd(mt_tlmm, 0x15000) & 0x23c))
++   return mt_stop("inherited reset/IRQ state");
 + }
-+ for (unsigned pin = 16; pin <= 19; pin++) if (((mt_rd(mt_tlmm, pin * 0x1000) >> 2) & 15) != 1) {
-+  printf("MARBLE TOUCH: inherited SPI pin mux invalid; no pin writes\n"); return false;
-+ }
-+ if (((mt_rd(mt_tlmm, 0x14000) >> 2) & 15) ||
-+     !(mt_rd(mt_tlmm, 0x14000) & (1u << 9)) ||
-+     !(mt_rd(mt_tlmm, 0x14004) & 2) || /* reset output must remain high */
-+     ((mt_rd(mt_tlmm, 0x15000) >> 2) & 15) ||
-+     (mt_rd(mt_tlmm, 0x15000) & (1u << 9)) ||
-+     (mt_rd(mt_se, 0x800) & 0xfffffff) || (mt_rd(mt_se, 0x804) & 0x1ffffff)) {
-+  printf("MARBLE TOUCH: reset/IRQ mux or FIFO state not inherited safely; withheld\n"); return false;
-+ }
-+ /* Only own SE configuration after validating idle SPI state. Never turn on
-+  * clocks/power or switch firmware/protocol/DMA. Same Linux 8-bit MSB packing. */
 + mt_wr(0x614, 0); /* polled local sequencer, no GIC interrupt enabled */
 + mt_wr(0x260, 0x7f8fe); mt_wr(0x264, 0xffefe);
 + mt_wr(0x284, 0x7f8fe); mt_wr(0x288, 0xffefe); mt_wr(0x254, 0);
 + mt_wr(0x268, 4); mt_wr(0x224, 0); mt_wr(0x230, 0); mt_wr(0x22c, 0);
 + mt_wr(0x24c, 0); mt_wr(0x250, 0);
-+ uint8_t version[28];
++ printf("MARBLE TOUCH: SPI SE4 mode0 8-bit MSB CS0 FIFO ready\n");
++ if (mt_active) { if (!mt_confirm()) return false; mt_wait(100); }
++ printf("MARBLE TOUCH: version read @0x10014 bytes=28\n");
++ uint8_t version[28] = {0};
 + if (!mt_read(0x10014, version, sizeof(version)) || !mt_checksum(version, sizeof(version)) ||
 +     memcmp(version + 10, "9916", 4)) {
-+  printf("MARBLE TOUCH: GT9916 version probe failed; no config/firmware/reset fallback\n"); return false;
++  mt_dump("version", version, sizeof(version)); return mt_stop("version transport/checksum/PID9916");
 + }
 + if (mt_diag) printf("MARBLE TOUCH: identified GT%.8s ROM%.6s FW=%02x.%02x.%02x.%02x sensor%u\n",
 +     version + 10, version, version[18], version[19], version[20], version[21], version[23]);
-+ mt_legacy_range = !memcmp(version, "BERLIN", 6) &&
-+     !memcmp(version + 10, "9916R", 5) && version[18] == 0 &&
-+     version[19] == 0x80 && version[20] == 2 && version[21] == 0x94;
++ mt_legacy_range = !memcmp(version, "BERLIN", 6) && !memcmp(version + 10, "9916", 4);
++ printf("MARBLE TOUCH: IC-info length read @0x10070\n");
 + uint8_t length[2];
-+ if (!mt_read(0x10070, length, 2)) return false;
++ if (!mt_read(0x10070, length, 2)) return mt_stop("IC-info length transport");
 + unsigned len = mt_le16(length);
++ printf("MARBLE TOUCH: IC-info length=%u read @0x10070\n", len);
 + bool info_read = len >= 34 && len < MT_MAX && mt_read(0x10070, mt_info, len);
 + if (!info_read || !mt_parse_info(mt_info, len)) {
 +  printf("MARBLE TOUCH: IC-info/checksum/report geometry unsupported len%u; withheld\n", len);
@@ -14489,34 +14634,51 @@ new file mode 100644
 +        mt_info[i+8], mt_info[i+9], mt_info[i+10], mt_info[i+11],
 +        mt_info[i+12], mt_info[i+13], mt_info[i+14], mt_info[i+15]);
 +  }
-+  return false;
++  return mt_stop("IC-info length/transport/checksum/layout/geometry");
 + }
 + return true;
++}
++/* One coherent initial snapshot as upstream Berlin: header + two points + CRC.
++ * Invalid packets are never ACKed; three consecutive malformed snapshots stop. */
++static int
++mt_poll_event(void)
++{
++ uint8_t frame[90];
++ if (!mt_read(mt_event, frame, 26)) { mt_stop("event initial26 transport"); return -2; }
++ if (!frame[0]) return 0;
++ if (!mt_checksum(frame, 8)) return -1;
++ if (frame[0] & 0x60) { mt_stop("unsupported firmware/config/gesture request"); return -2; }
++ unsigned count = frame[2] & 15;
++ if (!(frame[0] & 0x80) || count > MT_FINGERS) return -1;
++ if (count > 2 && !mt_read(mt_event + 26, frame + 26, (count - 2) * 8)) {
++  mt_stop("event remaining contacts transport"); return -2;
++ }
++ if (!mt_frame(frame, 8 + count * 8 + 2)) return -1;
++ if (!mt_ack()) { mt_stop("accepted event ACK transport"); return -2; }
++ return 1;
 +}
 +static void
 +mt_thread(void *arg, wait_result_t result)
 +{
 + (void)arg; (void)result;
-+ mt_wait(60000); /* keep boot critical path short; all work on one thread */
++ printf("MARBLE TOUCH: worker started; probe after 60s active-init=%d\n", mt_active);
++ mt_wait(60000);
 + if (mt_probe()) {
-+  if (mt_diag) printf("MARBLE TOUCH: polling active, inherited controller config, 10 contacts\n");
++  printf("MARBLE TOUCH: polling active, 10 contacts, 10ms\n");
++  unsigned bad = 0;
 +  for (;;) {
 +   if (!(mt_rd(mt_tlmm, 0x15004) & 1)) {
-+    uint8_t frame[90];
-+    if (!mt_read(mt_event, frame, 8)) break;
-+    unsigned count = frame[2] & 15;
-+    if (!mt_checksum(frame, 8) || !(frame[0] & 0x80) || (frame[0] & 0x60) || count > MT_FINGERS) {
-+     printf("MARBLE TOUCH: unsupported/checksum/request frame status=%#x; no firmware/config upload\n", frame[0]); break;
-+    }
-+    unsigned len = 8 + count * 8 + 2;
-+    if ((count && !mt_read(mt_event + 8, frame + 8, count * 8 + 2)) || !mt_frame(frame, len) || !mt_ack()) {
-+     printf("MARBLE TOUCH: invalid frame or ACK failure; stopped\n"); break;
-+    }
++    int result = mt_poll_event();
++    if (result == -2) break;
++    if (result == -1) {
++     if (++bad >= 3) { mt_stop("three consecutive malformed snapshots; no invalid ACK"); break; }
++    } else bad = 0;
 +   }
 +   mt_wait(10);
 +  }
 + }
 + for (unsigned id = 0; id < MT_FINGERS; id++) if (mt_down[id]) marble_hid_touch(id, 0, mt_x[id], mt_y[id]);
++ printf("MARBLE TOUCH: worker stopped; no reset/retry\n");
 + (void)thread_terminate(current_thread());
 +}
 +void
@@ -14524,6 +14686,7 @@ new file mode 100644
 +{
 + if (mt_started) return;
 + mt_started = true;
++ PE_parse_boot_argn("marbletouchinit", &mt_active, sizeof(mt_active));
 + int enabled = 1;
 + PE_parse_boot_argn("marbletouch", &enabled, sizeof(enabled));
 + PE_parse_boot_argn("marbleguidiag", &mt_diag, sizeof(mt_diag));
@@ -14534,3 +14697,377 @@ new file mode 100644
 + else printf("MARBLE TOUCH: thread failed %d\n", kr);
 +}
 +#endif
+diff --git a/bsd/dev/marble_touch_power.c b/bsd/dev/marble_touch_power.c
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/marble_touch_power.c
+@@ -0,0 +1,369 @@
++/*
++ * MARBLE PM8350C touchscreen rails, resolved from command DB.
++ * Single touch worker owns these transactions; no other MARBLE RSC writer.
++ * No sleep/wake programming, SPMI writes, GIC handler, or timeout recovery.
++ */
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <sys/errno.h>
++#include <kern/clock.h>
++#include <machine/machine_routines.h>
++
++extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
++int marble_touch_power_vote(const char *res, unsigned mv);
++int marble_touch_power_prepare(void);
++static uint32_t rh_vddio, rh_avdd;
++static bool rh_ready;
++
++/* Captured MARBLE live.dts: apps_rsc DRV2, offset d00, reserved cmd-db. */
++#define RH_RSC_PA       0x17a20000u
++#define RH_TCS_PA       0x17a20d00u
++#define RH_TCS_SIZE     0x3000u
++#define RH_DRV          2u
++#define RH_ACTIVE_N     3u       /* MARBLE DT: ACTIVE3, SLEEP2, WAKE2, FAST1 */
++#define RH_NORMAL_N     8u       /* hidden CONTROL TCS is not in this bank */
++#define RH_TCS_STRIDE   0x2a0u
++static unsigned rh_cmd_stride, rh_wait, rh_control, rh_status, rh_enable;
++static unsigned rh_msgid, rh_addr, rh_data, rh_cmd_status;
++#define RH_CMD_STRIDE rh_cmd_stride
++#define RH_IRQ_EN       0x00u
++#define RH_IRQ_STATUS   0x04u
++#define RH_IRQ_CLEAR    0x08u
++#define RH_WAIT rh_wait
++#define RH_CONTROL rh_control
++#define RH_STATUS rh_status
++#define RH_ENABLE rh_enable
++#define RH_MSGID rh_msgid
++#define RH_ADDR rh_addr
++#define RH_DATA rh_data
++#define RH_CMD_STATUS rh_cmd_status
++#define RH_AMC_EN       (1u << 16)
++#define RH_TRIGGER      (1u << 24)
++#define RH_ISSUED       (1u << 8)
++#define RH_COMPLETE     (1u << 16)
++#define RH_WRITE_ACK    (8u | (1u << 8) | (1u << 16))
++#define RH_DB_MAGIC     0x0c0330dbu
++#define RH_DB_HEADER    144u
++#define RH_DB_ENTRY     24u
++#define RH_DB_MAX       0x100000u /* policy bound, not a DT size */
++#define RH_VRM          4u
++#define RH_TIMEOUT_US   100000u
++
++static vm_offset_t rh_rsc, rh_tcs, rh_db;
++static uint32_t rh_db_size;
++static unsigned rh_ncpt;
++static unsigned rh_lock;
++static bool rh_poisoned;
++
++static uint32_t
++rh_read(vm_offset_t base, uint32_t off)
++{
++	uint32_t v = *(volatile uint32_t *)(base + off);
++	__asm__ volatile("dmb oshld" ::: "memory");
++	return v;
++}
++
++static void
++rh_write(vm_offset_t base, uint32_t off, uint32_t value)
++{
++	__asm__ volatile("dmb oshst" ::: "memory");
++	*(volatile uint32_t *)(base + off) = value;
++	__asm__ volatile("dsb osh" ::: "memory");
++}
++
++static bool
++rh_sync(uint32_t off, uint32_t value)
++{
++	rh_write(rh_tcs, off, value);
++	for (unsigned i = 0; i < 1000; ++i) {
++		if (rh_read(rh_tcs, off) == value) {
++			return true;
++		}
++		delay(1);
++	}
++	printf("MARBLE RPMH: readback timeout off=%#x want=%#x got=%#x\n",
++	    off, value, rh_read(rh_tcs, off));
++	return false;
++}
++
++/* DB is little endian; avoid packed structs and unaligned Device loads. */
++static uint16_t
++rh_db16(uint32_t off)
++{
++	uint32_t v = rh_read(rh_db, off & ~3u);
++	return (uint16_t)(v >> (8u * (off & 3u)));
++}
++
++static bool
++rh_range(uint32_t off, uint32_t size)
++{
++	return off <= rh_db_size && size <= rh_db_size - off;
++}
++
++static int
++rh_map(void)
++{
++	if (!rh_rsc) {
++		rh_rsc = ml_io_map(RH_RSC_PA, 0x100);
++	}
++	if (!rh_tcs) {
++		rh_tcs = ml_io_map(RH_TCS_PA, RH_TCS_SIZE);
++	}
++	if (!rh_rsc || !rh_tcs) {
++		printf("MARBLE RPMH: RSC mapping failed\n");
++		return ENOMEM;
++	}
++	uint32_t id = rh_read(rh_rsc, 0);
++	uint32_t solver = rh_read(rh_rsc, 4);
++	uint32_t config = rh_read(rh_rsc, 0x0c);
++	unsigned major = (id >> 16) & 0xffu;
++	unsigned count = (config >> (6u * RH_DRV)) & 0x3fu;
++	rh_ncpt = (config >> 27) & 0x1fu;
++	printf("MARBLE RPMH: rsc=%#x tcs=%#x DRV=%u id=%#x solver=%#x config=%#x TCS=%u ncpt=%u\n",
++	    RH_RSC_PA, RH_TCS_PA, RH_DRV, id, solver, config, count, rh_ncpt);
++	/* Both Linux register layouts; unknown future revisions fail closed. */
++ if (major == 1 || major == 2) {
++  rh_cmd_stride=20; rh_wait=0x10; rh_control=0x14; rh_status=0x18;
++  rh_enable=0x1c; rh_msgid=0x30; rh_addr=0x34; rh_data=0x38; rh_cmd_status=0x3c;
++ } else if (major == 3) {
++  rh_cmd_stride=24; rh_wait=0x20; rh_control=0x24; rh_status=0x28;
++  rh_enable=0x2c; rh_msgid=0x34; rh_addr=0x38; rh_data=0x3c; rh_cmd_status=0x40;
++ }
++	if ((major != 1 && major != 2 && major != 3) || config == 0xffffffffu ||
++	    solver == 0xffffffffu || count < RH_NORMAL_N ||
++	    count > RH_TCS_SIZE / RH_TCS_STRIDE || rh_ncpt < 3 || rh_ncpt > 16) {
++		printf("MARBLE RPMH: unsupported RSC geometry/revision\n");
++		return ENODEV;
++	}
++	if (!rh_db) {
++  /* Fixed reserved region from this phone's captured DT, not SWEET's locator. */
++  uint32_t pa = 0x80860000u, size = 0x20000u;
++  printf("MARBLE RPMH: cmd-db reserved pa=%#x size=%#x\n", pa, size);
++		rh_db = ml_io_map(pa, size);
++		if (!rh_db) {
++   printf("MARBLE RPMH: cmd-db mapping failed\n");
++			return ENOMEM;
++		}
++		rh_db_size = size;
++	}
++	uint32_t db_version = rh_read(rh_db, 0);
++	uint32_t magic = rh_read(rh_db, 4);
++	uint32_t flags = rh_read(rh_db, 140);
++	printf("MARBLE RPMH: cmd-db version=%#x magic=%#x checksum=%#x flags=%#x\n",
++	    db_version, magic, rh_read(rh_db, 136), flags);
++	/* Linux only checks magic; version 1 is an intentionally stricter policy. */
++	if (magic != RH_DB_MAGIC || db_version != 1 || (flags & 1u)) {
++		printf("MARBLE RPMH: unsupported/standalone cmd-db\n");
++		return EINVAL;
++	}
++	return 0;
++}
++
++static int
++rh_lookup(const char *res, uint32_t *address)
++{
++	uint32_t key[2] = {0, 0};
++	for (unsigned i = 0; i < 8 && res[i]; ++i) {
++		key[i / 4] |= (uint32_t)(uint8_t)res[i] << (8u * (i % 4));
++	}
++	unsigned matches = 0;
++	for (unsigned i = 0; i < 8; ++i) {
++		uint32_t h = 8u + 16u * i;
++		unsigned slave = rh_db16(h);
++		if (!slave) {
++			break;
++		}
++		uint32_t entries = RH_DB_HEADER + rh_db16(h + 2);
++		uint32_t aux = RH_DB_HEADER + rh_db16(h + 4);
++		unsigned count = rh_db16(h + 6);
++		if (slave < 3 || slave > 5 || (entries & 3u) ||
++		    !rh_range(entries, count * RH_DB_ENTRY) || !rh_range(aux, 0)) {
++			printf("MARBLE RPMH: malformed cmd-db slave header %u\n", i);
++			return EINVAL;
++		}
++		for (unsigned j = 0; j < count; ++j) {
++			uint32_t e = entries + RH_DB_ENTRY * j;
++			if (rh_read(rh_db, e) != key[0] || rh_read(rh_db, e + 4) != key[1]) {
++				continue;
++			}
++			uint32_t addr = rh_read(rh_db, e + 16);
++			if (slave != RH_VRM || (addr >> 16) != RH_VRM || (addr & 15u) ||
++			    !rh_range(aux + rh_db16(e + 22), rh_db16(e + 20))) {
++				printf("MARBLE RPMH: invalid VRM entry for %s\n", res);
++				return EINVAL;
++			}
++			*address = addr;
++			++matches;
++			printf("MARBLE RPMH: %s addr=%#x slave=%u aux-version=%#x priority=%#x:%#x\n",
++			    res, addr, slave, rh_db16(h + 8),
++			    rh_read(rh_db, e + 8), rh_read(rh_db, e + 12));
++		}
++	}
++	if (matches != 1) {
++		printf("MARBLE RPMH: %s lookup matches=%u; refusing\n", res, matches);
++		return ENODEV;
++	}
++	return 0;
++}
++
++static bool
++rh_free(unsigned t)
++{
++	uint32_t b = t * RH_TCS_STRIDE;
++	/* Idle alone is insufficient: a sleep/wake payload can be armed and idle. */
++	return rh_read(rh_tcs, b + RH_STATUS) != 0 &&
++	    rh_read(rh_tcs, b + RH_STATUS) != 0xffffffffu &&
++	    (rh_read(rh_tcs, b + RH_CONTROL) & ~RH_AMC_EN) == 0 &&
++	    rh_read(rh_tcs, b + RH_ENABLE) == 0 &&
++	    rh_read(rh_tcs, b + RH_WAIT) == 0 &&
++	    !(rh_read(rh_tcs, RH_IRQ_STATUS) & (1u << t));
++}
++
++static int
++rh_send(uint32_t address, unsigned mv)
++{
++	int chosen = -1;
++	for (unsigned t = 0; t < RH_ACTIVE_N; ++t) {
++		uint32_t b = t * RH_TCS_STRIDE;
++		uint32_t enabled = rh_read(rh_tcs, b + RH_ENABLE);
++		printf("MARBLE RPMH: ACTIVE TCS%u idle=%#x control=%#x enable=%#x wait=%#x\n",
++		    t, rh_read(rh_tcs, b + RH_STATUS), rh_read(rh_tcs, b + RH_CONTROL),
++		    enabled, rh_read(rh_tcs, b + RH_WAIT));
++		if (enabled & ~((1u << rh_ncpt) - 1u)) {
++			return EIO;
++		}
++		for (unsigned c = 0; c < rh_ncpt; ++c) {
++			if ((enabled & (1u << c)) &&
++			    (rh_read(rh_tcs, b + RH_ADDR + c * RH_CMD_STRIDE) & ~15u) == address) {
++				printf("MARBLE RPMH: conflicting inherited touch-rail request in TCS%u\n", t);
++				return EBUSY;
++			}
++		}
++		if (chosen < 0 && rh_free(t)) {
++			chosen = (int)t;
++		}
++	}
++	if (chosen < 0) {
++		printf("MARBLE RPMH: no empty idle ACTIVE TCS; leaving inherited state intact\n");
++		return EBUSY;
++	}
++	unsigned t = (unsigned)chosen;
++	uint32_t b = t * RH_TCS_STRIDE, bit = 1u << t;
++	uint32_t irq_en = rh_read(rh_tcs, RH_IRQ_EN);
++	if (irq_en == 0xffffffffu || !rh_free(t)) {
++		return EBUSY;
++	}
++	/* Only this TCS's source is masked. Other sources/CPU IRQs remain intact. */
++	if (!rh_sync(RH_IRQ_EN, irq_en & ~bit)) {
++		rh_poisoned = true;
++		return EIO;
++	}
++	if (!rh_free(t)) {
++		/* No payload was touched. Do not acknowledge somebody else's IRQ. */
++		if (!rh_sync(RH_IRQ_EN, (rh_read(rh_tcs, RH_IRQ_EN) & ~bit) | (irq_en & bit))) {
++			rh_poisoned = true;
++		}
++		return EBUSY;
++	}
++ uint32_t saved_control = rh_read(rh_tcs, b + RH_CONTROL), saved[3][3];
++ const unsigned registers[3] = {RH_MSGID, RH_ADDR, RH_DATA};
++ for (unsigned c = 0; c < 3; c++)
++  for (unsigned r = 0; r < 3; r++)
++   saved[c][r] = rh_read(rh_tcs, b + c * RH_CMD_STRIDE + registers[r]);
++	/* From here an uncertain write/timeout quarantines our slot for this boot. */
++	rh_poisoned = true;
++	/* HPM (raw 7) is supported by this PMIC5 LDO; enable comes last. */
++	const uint32_t offsets[3] = {0, 8, 4};
++	const uint32_t values[3] = {mv, 7, 1};
++	printf("MARBLE RPMH: TCS%u ACTIVE %u mV mode=7 enable=1 irq-enable=%#x\n", t, mv, irq_en);
++	for (unsigned c = 0; c < 3; ++c) {
++		uint32_t cmd = b + c * RH_CMD_STRIDE;
++		if (!rh_sync(cmd + RH_MSGID, RH_WRITE_ACK) ||
++		    !rh_sync(cmd + RH_ADDR, address + offsets[c]) ||
++		    !rh_sync(cmd + RH_DATA, values[c])) {
++			return EIO;
++		}
++	}
++	if (!rh_sync(b + RH_WAIT, 7) || !rh_sync(b + RH_ENABLE, 7) ||
++	    !rh_sync(b + RH_CONTROL, 0) || !rh_sync(b + RH_CONTROL, RH_AMC_EN)) {
++		return EIO;
++	}
++	rh_write(rh_tcs, b + RH_CONTROL, RH_AMC_EN | RH_TRIGGER);
++	uint32_t irq = 0, idle = 0, status[3] = {0, 0, 0};
++	bool done = false, progress = false;
++	for (unsigned us = 0; us < RH_TIMEOUT_US; ++us) {
++		irq = rh_read(rh_tcs, RH_IRQ_STATUS);
++		idle = rh_read(rh_tcs, b + RH_STATUS);
++		bool complete = true;
++		for (unsigned c = 0; c < 3; ++c) {
++			status[c] = rh_read(rh_tcs, b + RH_CMD_STATUS + c * RH_CMD_STRIDE);
++			complete &= status[c] != 0xffffffffu &&
++			    (status[c] & (RH_ISSUED | RH_COMPLETE)) == (RH_ISSUED | RH_COMPLETE);
++		}
++		/* A fresh IRQ or observed execution transition excludes stale CMD_STATUS. */
++		progress |= idle == 0 || !complete;
++		if (idle && idle != 0xffffffffu && irq != 0xffffffffu &&
++		    ((irq & bit) || progress) && complete) {
++			done = true;
++			break;
++		}
++		delay(1);
++	}
++	printf("MARBLE RPMH: TCS%u done=%d irq=%#x idle=%#x control=%#x cmd-status=%#x/%#x/%#x\n",
++	    t, done, irq, idle, rh_read(rh_tcs, b + RH_CONTROL), status[0], status[1], status[2]);
++	if (!done) {
++		printf("MARBLE RPMH: timeout; TCS quarantined, IRQ remains masked; no reset/retry\n");
++		return ETIMEDOUT;
++	}
++	/* Proven completion: clear trigger before mode, then free only our commands. */
++	if (!rh_sync(b + RH_CONTROL, RH_AMC_EN) || !rh_sync(b + RH_CONTROL, 0) ||
++	    !rh_sync(b + RH_ENABLE, 0) || !rh_sync(b + RH_WAIT, 0)) {
++		return EIO;
++	}
++ /* Restore inactive payload and AMC mode only after proven completion. */
++ for (unsigned c = 0; c < 3; c++)
++  for (unsigned r = 0; r < 3; r++)
++   if (!rh_sync(b + c * RH_CMD_STRIDE + registers[r], saved[c][r])) return EIO;
++ if (!rh_sync(b + RH_CONTROL, saved_control)) return EIO;
++	rh_write(rh_tcs, RH_IRQ_CLEAR, bit); /* W1C: never clear other TCS bits */
++	if ((rh_read(rh_tcs, RH_IRQ_STATUS) & bit) ||
++	    !rh_sync(RH_IRQ_EN, (rh_read(rh_tcs, RH_IRQ_EN) & ~bit) | (irq_en & bit))) {
++		return EIO;
++	}
++	rh_poisoned = false;
++	printf("MARBLE RPMH: touch-rail ACTIVE vote complete (rail voltage requires hardware verification)\n");
++	return 0;
++}
++
++int
++marble_touch_power_prepare(void)
++{
++ if (__atomic_exchange_n(&rh_lock, 1, __ATOMIC_ACQUIRE)) return EBUSY;
++ int error = EIO;
++ if (!rh_poisoned) {
++  error = rh_map();
++  if (!error) error = rh_lookup("ldoc2", &rh_vddio);
++  if (!error) error = rh_lookup("ldoc9", &rh_avdd);
++  if (!error && rh_vddio == rh_avdd) error = EINVAL;
++  rh_ready = !error;
++ }
++ if (error) printf("MARBLE RPMH: prepare refused errno=%d (no rail transaction)\n", error);
++ __atomic_store_n(&rh_lock, 0, __ATOMIC_RELEASE);
++ return error;
++}
++
++int
++marble_touch_power_vote(const char *res, unsigned mv)
++{
++ if (!res || !((!strcmp(res, "ldoc2") && mv == 1800) ||
++     (!strcmp(res, "ldoc9") && mv == 3224))) return EINVAL;
++ if (__atomic_exchange_n(&rh_lock, 1, __ATOMIC_ACQUIRE)) return EBUSY;
++ int error = EIO;
++ if (rh_ready && !rh_poisoned)
++  error = rh_send(!strcmp(res, "ldoc2") ? rh_vddio : rh_avdd, mv);
++ if (error) printf("MARBLE RPMH: %s vote refused/failed errno=%d\n", res, error);
++ __atomic_store_n(&rh_lock, 0, __ATOMIC_RELEASE);
++ return error;
++}
++#endif /* ARM64_BOARD_CONFIG_MARBLE */

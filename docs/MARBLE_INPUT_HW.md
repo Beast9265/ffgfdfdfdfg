@@ -1,5 +1,28 @@
 # MARBLE real-input bring-up — 2026-10-23
 
+## Current physical result — 2026-10-23
+
+Physical buttons PASS. Synthetic volume event PASS. Synthetic touch down/up
+PASS; touch HID service is proven sufficiently for hardware bring-up.
+Physical GT9916R touchscreen FAIL. The Apple-facing HID/backend, key driver,
+normalization and edge classification are frozen. GUI and Setup Hello PASS.
+
+Exact reported synthetic log:
+
+```text
+MARBLE HIDTEST: one volume-up then info tap
+MARBLE HID: key 0xe9 down
+MARBLE HID: key 0xe9 up
+MARBLE TOUCH: id=0 down x=1040 y=2320 edge
+MARBLE TOUCH: id=0 up x=1040 y=2320 edge
+MARBLE HIDTEST: complete, injection disabled
+```
+
+No actual inherited SPI/GPIO/power/refusal dump was supplied with this result.
+The active-init hypothesis is source-backed, but the precise old failing gate
+or electrical state remains unknown. Historical sections below describe the
+previous conservative build; active-init changes are recorded separately.
+
 ## Proven checkpoint and scope
 
 User physically observed iOS 16.7.16 Setup Hello (animated ciao / Scorri verso
@@ -373,3 +396,114 @@ fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
 No userdata flash is needed. The next physical success criterion is retained
 Hello rendering, HID service opens by backboardd, key transitions and contact
 down/move/up reaching iOS, then a real bottom-edge swipe advancing Hello.
+
+## Active Berlin-D test — 2026-10-23
+
+This section supersedes the inherited-only hardware policy above. Keys and
+Apple-facing HID sources remain byte-identical. Dedicated image argument:
+`marbletouchinit=1`; default remains inherited-only. No root change.
+
+The precise previous failure is **unknown**: no physical startup/refusal logs
+were captured. Missing active initialization is the leading hypothesis, not a
+proven electrical diagnosis. Synthetic contacts are not SPI reports.
+
+Additional pinned primary references:
+
+- [Current Linux Berlin core](https://github.com/torvalds/linux/blob/734bef548a96e8774d6eef5dfa2026c6edc4e80b/drivers/input/touchscreen/goodix_berlin_core.c)
+  and [SPI](https://github.com/torvalds/linux/blob/734bef548a96e8774d6eef5dfa2026c6edc4e80b/drivers/input/touchscreen/goodix_berlin_spi.c):
+  power sequence, confirm, 26-byte initial event snapshot.
+- [Goodix guide](https://github.com/goodix/goodix_ts_berlin/blob/6c4b81587d43cf4ebf59cc63fe2916d77e4e8ce2/docs/Porting_Guide.md):
+  GT9916 is Berlin-D; no Berlin-A reset-after register operations are used.
+- [Linux RSC](https://github.com/torvalds/linux/blob/734bef548a96e8774d6eef5dfa2026c6edc4e80b/drivers/soc/qcom/rpmh-rsc.c),
+  [command DB](https://github.com/torvalds/linux/blob/734bef548a96e8774d6eef5dfa2026c6edc4e80b/drivers/soc/qcom/cmd-db.c),
+  [regulator votes](https://github.com/torvalds/linux/blob/734bef548a96e8774d6eef5dfa2026c6edc4e80b/drivers/regulator/qcom-rpmh-regulator.c),
+  [GCC](https://github.com/torvalds/linux/blob/734bef548a96e8774d6eef5dfa2026c6edc4e80b/drivers/clk/qcom/gcc-sm8450.c),
+  [DFS/RCG](https://github.com/torvalds/linux/blob/734bef548a96e8774d6eef5dfa2026c6edc4e80b/drivers/clk/qcom/clk-rcg2.c).
+  Captured DTS supplies board addresses and ownership, rather than SWEET.
+
+Hardware remains SPI SE4 `0x00990000`, CS0, mode0, 8-bit MSB first; no I2C.
+CAPE TLMM bank `0x0f100000`: GPIO16–18 qup4/function1/no-pull/6mA;
+GPIO19 CS qup4/function1/pull-up/16mA; GPIO20 reset GPIO output/pull-up/8mA;
+GPIO21 IRQ GPIO input/pull-up/8mA. Only those six configurations are changed.
+**Reset asserted = physical LOW; released = physical HIGH.** GPIO20's latch
+is set before output enable. Upstream logical GPIO0 releases its active-low
+reset descriptor; copying logical constants into raw TLMM would invert reset.
+
+Captured reserved command DB is `0x80860000`, size `0x20000`; apps RSC DRV2
+is `0x17a20000`, TCS offset `0xd00`. Captured ordering is ACTIVE3, SLEEP2,
+WAKE2, CONTROL0, FAST1. Resolve both `ldoc2` and `ldoc9` before any vote:
+validate DB magic/version/header/entry/aux bounds, unique VRM resources and
+address alignment. Resource addresses are never guessed. Only an empty idle
+ACTIVE TCS0–2 can be borrowed; sleep/wake/FAST slots remain untouched.
+Known RSC revisions1/2 and3 select their respective Linux register layouts.
+Vote voltage in mV, PMIC5 LDO HPM mode7, then enable1, with ACK completion.
+Each transaction has a 100ms maximum; uncertain writes/timeouts quarantine
+that slot for the boot, with no reset/retry. On proven completion restore the
+inactive command payload, control mode and own IRQ-enable bit. Other IRQ
+bits and inherited payloads are preserved. No SPMI/PMIC direct writes.
+
+Sequence: resident SPI firmware/idle geometry check; command DB preparation;
+assert reset once; configure owned pins; wait2ms; VDDIO ldoc2 1800000uV vote,
+wait3ms; AVDD ldoc9 3224000uV vote, wait15ms; release reset, wait4ms; configure
+FIFO; confirm at `0x10000` by writing eight AA bytes and reading all eight.
+At most3 comparison attempts, 5ms apart; a transport failure stops immediately.
+Then wait100ms, read version28 bytes at `0x10014`, checksum and PID9916;
+read length/IC-info at `0x10070`. No firmware/config upload or calibration.
+
+GCC `0x00100000`: preserve votes at `0x62008`, add only bits6/7/14 for
+master/slave AHB and SE4. Branches `0x27004/0x27008/0x274dc` must clear
+CLK_OFF within1ms. Select an existing XO DFS level or set this engine's RCG
+`0x274e4/0x274e8` to XO19.2MHz; divider2 gives at most9.6MHz, below the
+captured15MHz limit. No PLL or DFS-table changes. No resident SPI protocol
+firmware means STOP, not a firmware loader. Busy sequencers, nonempty FIFO,
+unsupported32-bit FIFO geometry or outstanding DMA also stop. Idle DMA can
+be switched to polled FIFO with local GSI/IRQ delivery disabled, using Linux
+GENI I/O initialization. FIFO packing and transfer code are unchanged.
+
+Version VID is no longer an exact whitelist. Checksummed Berlin/9916 and
+structural IC-info validation admit compatible firmware revisions. Stock
+legacy layout still requires captured die0x22 and uses the independently
+measured10800x24000 range; extended layout reads its actual range. Both
+require header8/point8, bounded event address, ten contacts maximum, supported
+customer/version fields, and the matching panel aspect/coordinate scale.
+
+Event reads now start with26 bytes. Counts0–2 use that snapshot; larger counts
+read only `(count-2)*8` additional bytes at event+26. Full header/contact
+checksums, unique IDs and coordinate bounds precede any HID delivery/ACK.
+Status0 is harmless. A malformed frame is dropped without ACK; three
+consecutive malformed snapshots quarantine the worker. Transport or unsupported
+firmware/config/gesture requests stop immediately. This intentionally retains
+the user's stricter no-invalid-ACK rule, rather than upstream's bad-frame ACK.
+Polling remains10ms; normalization/edge classification are unchanged.
+
+Diagnostics are one-shot per worker/probe stage: worker start before60s delay,
+MMIO success, initial GCC and GPIO16–21 registers/physical reset+IRQ, GENI
+FW/SFW/protocol/status/DMA/FIFO, DB lookup, each vote, reset and configured pins,
+SPI ready, each confirm's eight returned bytes, version and IC-info reads.
+Any refusing probe prints its gate or stage-specific failure. Failed version
+prints28 raw bytes; failed IC-info prints at most64 bytes. Confirm is at most3
+attempts; two rail transactions; malformed packets produce only final stop.
+Existing shared HID contact logs retain their32-event budget. No poll logging.
+Clock failure prevents unsafe unclocked GENI reads; its branch gate is explicit.
+
+Expected success sequence (all hardware results still UNTESTED):
+
+```text
+MARBLE TOUCH: worker started; probe after 60s active-init=1
+MARBLE TOUCH: MMIO mappings successful; active-init=1
+MARBLE TOUCH: VDDIO ldoc2 1800000 vote OK errno=0
+MARBLE TOUCH: AVDD ldoc9 3224000 vote OK errno=0
+MARBLE TOUCH: reset released ...
+MARBLE TOUCH: SPI SE4 mode0 8-bit MSB CS0 FIFO ready
+MARBLE TOUCH: device confirm PASS attempt=1 rx=aa aa aa aa aa aa aa aa
+MARBLE TOUCH: identified GT9916R ...
+MARBLE TOUCH: IC-info len... event=... head8 point8 range10800x24000 factor10
+MARBLE TOUCH: polling active, 10 contacts, 10ms
+```
+
+Local validation includes complete82-patch replay/source equality, CI-header
+arm64 compiles and ASan/UBSan tests of existing FIFO/parser fuzz cases plus
+power/reset ordering and failures, confirm framing/retries, initial26 contact
+snapshots0/1/2/3/10, invalid/no-ACK behavior, command DB bounds/duplicates,
+v2/v3 ACTIVE-only ownership, inherited payload preservation and timeout
+quarantine. Tests model hardware; they do not establish voltage or touch works.

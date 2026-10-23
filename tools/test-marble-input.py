@@ -133,6 +133,8 @@ int main(void) {
         subprocess.run(['clang', '-std=gnu11', '-O1', '-g', '-fsanitize=address,undefined',
                         '-fno-omit-frame-pointer', str(c), '-o', str(binary)], check=True)
         subprocess.run([str(binary)], check=True)
+    subprocess.run([__import__("sys").executable, str(Path(__file__).with_name("test-marble-touchinit.py")), str(args.tree)], check=True)
+    subprocess.run([__import__("sys").executable, str(Path(__file__).with_name("test-marble-touch-power.py")), str(args.tree)], check=True)
 
 
 if __name__ == '__main__':
