@@ -124,14 +124,14 @@ boundaries modeled: exact Qualcomm TRE vectors; eight EE address assertions;
 static tuple decode; ring capacity/wrap; dedicated page tables/unmapped guard;
 translated SID/free-bank/ASID leases; wildcard/duplicate/busy refusal; EXID
 publication; noncontiguous allocation; register/ATS/TLBI faults; command and
-transfer timeouts; internal loopback; full-duplex/TX-only transfers;200 wraps;
+transfer timeouts; internal loopback; full-duplex/TX-only transfers through
+1032bytes;200 transfers exercising ring wrap;
 malformed events and strict GPII0-only writes. Actual Goodix functions prove
 Berlin-D offset8 and exact confirm bytes. Existing parser/FIFO/power/clock
 tests and diagnostic bounds tests remain enabled. Physical success awaits
 the user's boot.
 
-Final source/CI/artifact hashes and validation results will be appended after
-the exact CI artifact is verified and packaged. No root image rebuild.
+No root image rebuild. Final artifact results follow below.
 
 Local release validation passed: full82-patch replay, strict0082 and all89
 generated files equal the tested work tree; actual CI-header compilation of
@@ -141,3 +141,58 @@ the linked v4 kernel plus new definitions. Sixteen preprocessing comparisons
 for SWEET/VMAPPLE/BCM2837/T8103 pass; all generated frozen-component sources
 are byte-identical to v4. ASan/UBSan actual-source tests above, retained
 Goodix/FIFO/power/clock and diagnostic-bound tests, and10Python unit tests pass.
+
+## Exact CI and preserved package
+
+Implementation source `c1ae515efec3c59f34cf8ed056739bb0a3adce23` passed
+[CI39988871978](https://github.com/Beast9265/ios-marble/actions/runs/39988871978).
+Verified xnu.yml /marble/workflow_dispatch, exactheadSha, success. All89 CI
+generated source sections byte-match the tested replay. Four new/modified
+units compiled in CI; full linked arm64 Mach-O has zero undefined symbols.
+New transport, SMMU init/table/TLBI and diagnostic bodies are present in the
+linked kernel. The documentation follow-up also adds an explicit maximum1032
+byte transfer case to the host test; it changes no kernel source.
+
+| Artifact | Bytes | SHA256 |
+|---|---:|---|
+| kernel.development.marble | 17861560 | `89e1c087e9fb16d1458e5c141f62f9ac36e247a5e4dfc5c058e8fb5238e60066` |
+| Exact Hello ADT | 6920 | `35f0bff762c339e86a0e67392267ed148ae06b24703b682ce2327c9296ed84e3` |
+| marble-xnu-touch-gpi-v6.payload | 17246912 | `fbc02940ca5f268dc66f30e9cc9263a7cb84a54b5437eb2abb66a389cbe40b64` |
+| latest-marble-xnu-touch-gpi-v6.img | 17334272 | `893ee666a4b94f3f594f31ebafd7f9278a05b6d6a056dedf10b5c5409c67e70b` |
+
+Kernel artifact directory: `xnu/out-marble-ci-39988871978`.
+Final image: `shim/out/marble-xnu/latest-marble-xnu-touch-gpi-v6.img`.
+Local manifest: `shim/out/marble-xnu/marble-touch-gpi-v6-39988871978.json`.
+All payload segments/fixups, exact ADT embedding, stock boot-v4 metadata,
+padding/footer/bounds, bootstrap code/stacks/tables/aliases/capacity and CPU0
+timer audit pass. Exact known-good shim bytes reused (SHA256
+`586713d3b4c5862f73443cb1e5f555e465a9ffa5f3e2662672d41fff1715ee05`).
+
+Payload command line:
+
+```text
+debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1 ufsrw=1 rootrw=1 launchd_unsecure_cache=1 marbleguidiag=1 marbletouchinit=1 marblehwdiag=1 marbleusb=0 marbleusblog=0
+```
+
+All eight prior boot images rehashed unchanged. Primary rollback remains
+`hello-known-good-marble-xnu.img`, SHA256
+`789377d9cc9de5027038b074e3c0c61121f2229594e7895282933a44b1eb6242`.
+V3 remains `bb9d52f1e14bfe438dfc4491fa2af53599f68b8bb8d233355bba867990003a31`;
+v4 remains `4a3096469c3099c0053ef3f4dbc08dc43d4e7fe25b9e87ce85c831c067890c34`.
+No phone operation, root rebuild, userdata change or retention cleanup.
+
+## Physical handoff
+
+Expected progression is clock/HWCG validation, GENI identity, power/reset,
+GPI SMMU/memory/event-ring/TX/RX/start, `GPI_LOOPBACK_OK`, confirm8xAA,
+version/IC-info, then physical IRQ/event delivery through the existing HID path.
+Physical success remains unverified. A capability/ownership or hardware
+completion failure stops safely with a specific stage/reason/gate.
+
+If blocked, return the full `/private/var/tmp/marble-hwdiag.txt`, especially
+failed_at/reason/errno/gate, GPI0 context0..7, scratch/IRQ/error state,
+SID SMR/S2CR and contextbank/SCTLR/TTBR/TCR/MAIR/FSR/FAR, last TREs/event/bytes,
+loopback and Goodix confirm/version/IC-info records. Automatic file snapshots
+start90s after worker startup and repeat at120/180/300s. The already stable
+overlay remains unchanged: both volume keys2s toggle, release,up/downpages,
+both2s returnsGUI. No physical boot command is supplied in this handoff.

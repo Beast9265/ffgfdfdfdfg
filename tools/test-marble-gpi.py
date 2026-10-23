@@ -214,12 +214,13 @@ int main(void){
  uint8_t tx[1032]={0xf1,0,1,0,0x14,255,255,255},rx[1032];
  init();assert(!marble_gpi_spi_init((uintptr_t)se_regs,0,2));assert(doorbells==2&&commands==5&&mg.ready&&!mg.loopback); /* internal loopback */
  for(unsigned i=0;i<200;i++){unsigned n=8+i%1025;assert(!marble_gpi_spi_xfer(tx,rx,n,true));for(unsigned b=8;b<n;b++)assert(rx[b]==0xaa);}
+ assert(!marble_gpi_spi_xfer(tx,rx,1032,true));for(unsigned b=8;b<1032;b++)assert(rx[b]==0xaa);
  tx[0]=0xf0;assert(!marble_gpi_spi_xfer(tx,0,13,false));assert(mg_available(mg.rp[0],mg.wp[0],64)==63);
  assert(marble_gpi_spi_xfer(tx,0,1033,false));
  for(unsigned f=2;f<=4;f++){init();assert(!marble_gpi_spi_init((uintptr_t)se_regs,0,2));fault=f;assert(marble_gpi_spi_xfer(tx,rx,16,true)&&reason&&mg.failed&&snapshots);}
  init();fault=1;assert(marble_gpi_spi_init((uintptr_t)se_regs,0,2)&&reason==MH_GPI_COMMAND_TIMEOUT&&!doorbells&&waited==500000);
  init();put(MC_CH(0)+0x4000,2u<<20);assert(marble_gpi_spi_init((uintptr_t)se_regs,0,2)&&reason==MH_GPI_OWNERSHIP&&!commands&&!doorbells);
- free(allocation);puts("PASS actual GPI init/loopback, command order and timeout, TX-only/full-duplex transfer rings, 200 wraps, exact event validation, no unrelated GPII writes, refusal before unsafe doorbells");
+ free(allocation);puts("PASS actual GPI init/loopback, command order and timeout, TX-only/full-duplex transfers through1032bytes, 200 transfers exercising wrap, exact event validation, no unrelated GPII writes, refusal before unsafe doorbells");
 }
 '''
 

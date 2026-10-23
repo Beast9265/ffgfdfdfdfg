@@ -1,41 +1,56 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
 
-## Active MARBLE GPI touch v6 — implementation/local validation
+## FINAL MARBLE GPI touch v6 — packaged; physical test pending
 
-New user task supersedes v5 packaging. Starting HEAD e545d4198f5a3baef4c2e5162889cf5e47be1845;
-v5 HWCG source passed exact CI39961658578, but was not packaged before redirect.
-No v5/v6 physical result is claimed. V4 overlay is physically confirmed fixed.
-Current task is touch transport only; USB sources/overlay/display/HID/keys/root
-remain unchanged. No phone operation or root retention cleanup.
+Source `c1ae515efec3c59f34cf8ed056739bb0a3adce23`; successful exact CI
+[39988871978](https://github.com/Beast9265/ios-marble/actions/runs/39988871978).
+Verified workflow xnu.yml, branchmarble, workflow_dispatch, headSha equal source.
+All89 generated source sections in that CI buildtree byte-match tested replay.
+Linked plainarm64 kernel has zero undefined symbols; GPI/SMMU bodies retained.
 
-Vendor cf63f539 five-cell arg4=2 selects STATIC GPII0,priority0, not dynamic
-GPII/priority2. This corrects earlier v4 research/test decoding. New modular
-marble_gpi.c/h and marble_gpi_smmu.c implement GPII0 TX0/RX1/EV0,SE4/SPI,
-64-TRE rings/256-event ring, bounded polled commands/completions, source-backed
-CONFIG0/GO/DMA and one-time internal loopback. FIFO-disabled now selects GPI;
-tested FIFO fallback and Goodix framing/power/HID path remain. Version checksum
-retries follow brl_read_version; uncertain DMA stays quarantined.
+| Artifact | Bytes | SHA256 |
+|---|---:|---|
+| Kernel | 17861560 | `89e1c087e9fb16d1458e5c141f62f9ac36e247a5e4dfc5c058e8fb5238e60066` |
+| Exact Hello ADT | 6920 | `35f0bff762c339e86a0e67392267ed148ae06b24703b682ce2327c9296ed84e3` |
+| V6 payload | 17246912 | `fbc02940ca5f268dc66f30e9cc9263a7cb84a54b5437eb2abb66a389cbe40b64` |
+| V6 boot | 17334272 | `893ee666a4b94f3f594f31ebafd7f9278a05b6d6a056dedf10b5c5409c67e70b` |
 
-SID5b6 uses private4K stage1 tables mapping only five owned data pages inside
-IOVA100000..104fff. Dedicated96KiB allocation, physical verification, free
-unreferenced disabled bank/ASID proof, exact stream lease/readbacks, cache/TLBI/
-ATS+guard validation precede publication. Shared/wildcard/busy/unknown ownership
-refuses before doorbells. Other DT-enabled GPIIs are checked read-only solely
-to establish SID quiescence; only GPII0 is programmed. No global SMMU changes,
-identity mapping, QUP SID5a3 changes, SE-local DMA or firmware upload.
+Image: `/home/beast/ios-marble/shim/out/marble-xnu/latest-marble-xnu-touch-gpi-v6.img`.
+Payload arguments retain known GUI/root/cpus1 settings plus marbletouchinit=1,
+marblehwdiag=1,marbleusb=0,marbleusblog=0; no synthetic touch. Exact known-good
+ADT and shim586713d3...1715ee05 reused; no shim or root rebuild. All eight prior
+boot-image hashes unchanged (Hello789377d9...1eb6242,v3bb9d52f1...003a31,
+v4 4a309646...890c34). No phone command or retention cleanup.
 
-Local ASan/UBSan actual-source GPI/SMMU models, TRE/address/ring/table tests,
-EXID/TLBI/ATS/fault tests, actual offset8/confirm framing, original Goodix/FIFO/
-power/clock tests pass. Four modifiedunits compile with CIheaders to arm64.
-Diagnostic IDs appended;512records/64KiB/file/overlay preserved; terminal
-snapshots reserve64tail slots. Strict82patch replay and all89generated-file
-equality PASS; fourmodified/new Cunits actualCIheader arm64objectcompile and
-symbolclosure PASS.16nonMARBLEpreprocess checks(SWEET/VMAPPLE/BCM2837/T8103)
-PASS; allothergeneratedsource byte-identical to v4;10Pythonunit tests PASS.
-Details and pinned ledger:docs/MARBLE_TOUCH_GPI_V6.md. Pending commit/CI/package.
-New image target will be
-latest-marble-xnu-touch-gpi-v6.img with exact known-good ADT and USB disabled.
+V6 fixes the vendor five-cell decoding: arg4=2 selects STATIC GPII0,priority0.
+Only GPII0 TX0/RX1/EV0,SE4/SPI is programmed. FIFO-disabled now uses GPI with
+64-TRE/256-event rings, bounded polled commands/events, CONFIG0/GO/DMA and a
+source-backed internal loopback before Goodix. SID5b6 gets private4K tables
+mapping five dedicated owned pages atIOVA100000..104fff. Free disabled-bank/
+ASID proof, exact SID lease, readbacks/cache/TLBI/ATS+guard precede publication.
+Shared/wildcard/busy/unknown state refuses precisely; other DT-enabled GPIIs
+are checked read-only for SID quiescence. No global SMMU/identity/bypass/QUP
+SID5a3/SE-local-DMA change. No firmware/config upload. Goodix framing/power,
+parser/ACK/HID and all USB/display/overlay/key/UFS source behavior preserved.
+
+PASS: full82patch strict replay,89file source equality locally+CI,4actualCIheader
+arm64objectcompiles+closure+CIfulllink;16nonMARBLEpreprocess comparisons;
+ASan/UBSan GPI/SMMU actual-source fault models, exact TRE/EE/tuple/ring/table/
+EXID/TLBI/ATS/ownership tests, transfers through1032bytes and200 transfers with
+wrap, actual Berlin-D offset8/confirm tests; retained Goodix/FIFO/power/clock/
+diagnostic tests and10Pythonunit tests. Payload/segments/fixups,bootv4metadata/
+padding/footer,bootstrap/stacks/tables/aliases/capacity andCPU0timer audit PASS.
+
+Physical v6 success is NOT claimed. Expected: GPI SMMU -> event/TX/RX/start ->
+GPI_LOOPBACK_OK -> AA confirm -> validversion/ICinfo -> IRQ/events/RUNNING.
+Return full `/private/var/tmp/marble-hwdiag.txt` if blocked. Format staysv4;
+TOUCH_TRANSPORT_BUILD/IRQ=6/276 identifiesv6. Existing stableoverlay bothvolume
+keys2s toggles; release,up/downpages,both2sGUI. Fixed512records/64KiB preserved,
+terminal snapshots reserve64tail slots. Detailed source ledger/design/results:
+docs/MARBLE_TOUCH_GPI_V6.md. Existing unrelated sparse-script mode/bootstrapdoc/
+logs preserved and excluded. User redirected from v5 after its successful CI;
+no v5 image was packaged. StartingHEAD e545d4198f5a3baef4c2e5162889cf5e47be1845.
 
 
 ## Active MARBLE touch v5 — local implementation and validation
