@@ -68,7 +68,8 @@ cec3daf08e3236065d14c3939c48051430c7737f798c2b7d8affb475c3f4aa01.
 No userdata reflash. No phone operations performed. NEXTmanualtestONLY:
 fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
 Pending physical criterion:assertion disappears,SpringBoard staysalive toward
-Setup/Hello. Do not claim fixed until tested. Sourcecommit recorded after commit.
+Setup/Hello. Do not claim fixed until tested. Implementation/source commit1553b44 (marble: restore D22AP artwork traits for
+bounding-path lookup). No newCI;reused exact39888158542 diagnostic artifact.
 
 ## Previous handoff: MARBLE diagnostic-first Setup investigation (2026-10-23)
 
