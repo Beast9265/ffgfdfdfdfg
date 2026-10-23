@@ -102,3 +102,27 @@ Keep the installed setup-fast userdata. Boot only the new kernel image;
   synchronous wait; it is not an automatic diagnosis of every possible stall.
 
 No functional fix or physical success is claimed. No phone commands were run.
+
+## Verified build
+
+Source `b16c741d2aca33367b8976d745f8eb6b36f10f89`, exact successful
+[Actions 39888158542](https://github.com/Beast9265/ios-marble/actions/runs/39888158542).
+The initial 39887730292 run was cancelled and its artifacts were not used.
+Full patch replay, three actual-header arm64 compiles, non-MARBLE preprocessing
+equality, sanitizer budget tests and root-retention fixtures passed. Exact CI
+link has zero undefined symbols. Linked budgets, all payload segments, boot-v4
+packing and sparse bootstrap mapping were independently verified. Final source
+contains no framebuffer/UFS/AKS/policy changes; existing setup-fast hashes match.
+
+| Artifact | SHA256 |
+| --- | --- |
+| kernel.development.marble | `462dc21b476550949aaebdd335c5e6584f120c3481bfbda2cae92958398160d9` |
+| marble-xnu.payload | `29ffac6cd2cb7b4c27b2e1e390977116ef809295e4b8d3a7b580d195812dbea8` |
+| latest-marble-xnu.img | `7a33592720145044eabc889f0d3194529f230a7f28f822ce3a6c41af9236f0b6` |
+
+```sh
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
+```
+
+This command is for the user to execute. No userdata reflash or phone command
+was performed by automation. The Setup blocker remains unknown until new evidence.

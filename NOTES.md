@@ -76,8 +76,44 @@ superseded: final review found exit-reason embedded newlines could turn one
 record into multiple physical lines. Added bounded512-byte ASCII sanitization;
 ASan/UBSan actual-hook multiline test PASS; full replay/3 arm64 compiles and
 all9 non-MARBLE equivalence checks rerun PASS. Cancellation requested for
-39887730292; do not use its artifact. Next: commit/push final revision and
-exact MARBLE workflow,then linked/hash verification. Physical blocker NOT fixed.
+39887730292; do not use its artifact. Final source commit
+b16c741d2aca33367b8976d745f8eb6b36f10f89 pushed origin marble; exact Actions
+39888158542 SUCCESS(13.5/DEVELOPMENT/MARBLE/keep_going=true),headSha independently
+matches. Fresh exact xnu/out-marble-ci-39888158542 artifact SHA256SUMS PASS;
+full link zero undefined symbols. Actual CI applies0082 and compiles all3
+changed units without CONFIG_EXT_RESOLVER. Superseded39887730292 CANCELLED.
+Helper /tmp/setup-diag-final-pipeline.log;CI/run logs /tmp/setup-diag-final-{ci.log,
+run.json}. Independent linked/payload/boot/bootstrap audit PASS:
+/tmp/setup-diag-final-audit.py and .log,linked disassemblies setup-diag-linked-*.
+Linked proc_prepareexit0xfffffe00077ef00c calls full-name allowlist and saturating
+reservations4/name,32/boot;512-byte sanitized reason loop and SIG5/6 heap gate.
+Linked mmrw0xfffffe00074eb1cc inlines CAS caps64/name,512boot,256B chunk.
+Heap inlined into marble_crash_strings0xfffffe00073274d0:ReportCrash excluded,
+4scan gate,4096regions,16MiB strict copy clamp,64strings retained.
+marble_gui_diag_take0xfffffe00074eb49c uses saturating LSE CAS.
+All payload segments match exact rebased CI kernel,no RAMDisk,exact old args
+including cpus=1/marbleguidiag=1;ADT gic+disp0,1125x2436,scale3 unchanged.
+Shim BOARD=marble-xnu hash586713d3...1715ee05 unchanged;clean stock boot_a
+repack/inspect and independent header/bounds/padding/footer/content PASS.
+Sparse bootstrap160-page arena[842154000,8423d4000),code/stacks/tables/aliases
+PASS. Four executable sections:zero physical CNTP instructions,one CNTV_CTL MSR
+atfffffe00074939e0. SWEET sampler/task symbols remain absent for MARBLE.
+Kernel SHA256
+462dc21b476550949aaebdd335c5e6584f120c3481bfbda2cae92958398160d9
+Payload SHA256
+29ffac6cd2cb7b4c27b2e1e390977116ef809295e4b8d3a7b580d195812dbea8
+Boot SHA256
+7a33592720145044eabc889f0d3194529f230a7f28f822ce3a6c41af9236f0b6
+Final shim/out/marble-xnu/latest-marble-xnu.img.
+Physical blocker NOT fixed/known;new diagnostic image physical behavior pending.
+Next USER MANUAL command ONLY;keep installed setup-fast userdata,no reflash:
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
+Capture exec backboardd/SpringBoard/Setup,CRASH reason,|name| stderr,STR text.
+No new root,no current-root cleanup,no physical phone operations.
+Local setup-fast artifacts independently rehashed during this task:raw
+7ca8c990f98875d892ffa38f769f4a8bb5af23bdbabb4ee50d69d2df13822798;
+sparse cec3daf08e3236065d14c3939c48051430c7737f798c2b7d8affb475c3f4aa01,
+both match prior handoff. /tmp/setup-diag-root-hashes.txt.
 No phone operations. Pre-existing iosroot-sparse.sh executable-mode change and
 untracked MARBLE_BOOTSTRAP_BREADCRUMBS.md preserved,not staged.
 
