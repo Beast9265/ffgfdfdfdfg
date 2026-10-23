@@ -16,7 +16,7 @@ No downloaded kernel/vendor firmware or device dumps enter git.
 
 | Source | Commit | File/function and fact | Confidence / consequence |
 |---|---|---|---|
-| Captured stock DT | local `marble-dump/live.dts`; hash below | `spi@990000`, `m16t-touch@0`; SE4, GPIO16..21, 15MHz, L2C/L9C | Highest board evidence; retain bus/pins/rails |
+| Captured stock DT | local `marble-dump/live.dts`; SHA256`404b5d14a0bdd34ef7f5aab5af366a2766e219a164451cab2df0b55fd8ded287` | `spi@990000`, `m16t-touch@0`; SE4, GPIO16..21, 15MHz, L2C/L9C | Highest board evidence; retain bus/pins/rails |
 | Captured stock log | prior input handoff | ROM BERLIN, PID9916R, VID00800294, sensor255, die22, IC-info191/event10308 | Actual resident FW identity; no new hardware measurement |
 | Pzqqt current | `cf63f53980e17b503e595501b359697595fe8b24` | `goodix_9916r/goodix_brl_hw.c`: `brl_power_on`176, `brl_dev_confirm`284, `brl_reset`315, `brl_read_version`678, `brl_get_ic_info`948, `goodix_touch_handler`1136, `brl_event_handler`1242, `brl_after_event_handler`1311 | Direct device-derived driver; regulator settling30/15ms, normal reset100ms |
 | Pzqqt adaptation | `f552724a9d07693e8651fe15cafc87554528fe39`; parent `fe4da7d72a7f36027a8b6baaa8f9161816c563c8` | `goodix_ts_core.c/.h`, panel selection and TM filenames; commit explicitly attributes stock reverse engineering | High; do not import another panel's firmware |
@@ -233,3 +233,45 @@ Build/hash/CI details are appended after exact-commit CI and packaging. Existing
 rollback images and exact Hello ADT are preserved. No physical phone command is
 executed by the agent. This is an attempted hardware fix, **not a claim that
 physical touchscreen or USB enumeration now works**.
+
+
+## Final artifact verification
+
+Source `d5adb94de8e1a02442e844bcd5a5ebe7af890000`, successful [CI39946450245](https://github.com/Beast9265/ios-marble/actions/runs/39946450245).
+ExactheadSha verified. Downloaded CI source matches all86patch sections against
+local replay;10changed units remotely compiled;full link has zero undefined.
+All20non-MARBLE preprocessing checks pass, including VMAPPLE. Final BSD build
+list retains the original prefix exactly and appends only new standard units.
+
+| Artifact | SHA256 |
+|---|---|
+| Kernel | `6f257d21a0f51616da06d486f91cd3fddbd7f8ac0196249bc5e378cf1e92bee7` |
+| ADT | `35f0bff762c339e86a0e67392267ed148ae06b24703b682ce2327c9296ed84e3` |
+| Payload | `1b223eb080dbaf3d9f5a971a2969688cfca0752acf9473eef716bec9b08cb800` |
+| Boot image | `bb9d52f1e14bfe438dfc4491fa2af53599f68b8bb8d233355bba867990003a31` |
+
+Image: `shim/out/marble-xnu/latest-marble-xnu-touchusb-v3.img`.
+Boot arguments: `debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1 ufsrw=1 rootrw=1 launchd_unsecure_cache=1 marbleguidiag=1 marbleusb=2 marbleusblog=1 marbletouchinit=1 marblehwdiag=1`.
+Arm64/16K/bootstrap/page aliases/timer, everyrebasedsegment, boot-v4 wrapper/
+stockmetadata/footer/bounds/padding checks pass. Exact known-good ADT retained.
+Preservedrollback hashes reverified after packaging:
+
+- `hello-known-good-marble-xnu.img`: `789377d9cc9de5027038b074e3c0c61121f2229594e7895282933a44b1eb6242`
+- `latest-marble-xnu.img`: `a9dfc2ef7fe7990411a6403a7503694ec55fbcbdc8383a91b77c9ecc5a0cb3e8`
+- `latest-marble-xnu-hidtest.img`: `dd2ef2d1355a7f1ca71ddd43c8a4ce1d78b4d4fed087a52298c287b7b8821236`
+- `latest-marble-xnu-touchinit.img`: `4c57ea14c85e47d16db710758db9d54a564c3c5308d8b2fa29c1ec81f386ba25`
+- `latest-marble-xnu-usblog.img`: `68b47e27a79339f3f707ee3f96a2362d05d457302077b0cedbf19e2f34f4fdb3`
+- `latest-marble-xnu-touch-usblog.img`: `d68c7b333aee6ac9bf75927346cae9514834a5e05d9835cf18a1f32d1dc7d9eb`
+
+Stock captured DT SHA256`404b5d14a0bdd34ef7f5aab5af366a2766e219a164451cab2df0b55fd8ded287`;
+stock cleaned log SHA256`a2c0a60f650a055d39f6cafea747fb1f2dab31cb11bba7a69dd7c7d1135c7b41`.
+Its lines4502/4503 explicitly lack rail-enable GPIOs (use regulators),4525
+identifies9916R before4529optional config ENOENT. The captured older module
+uses default`goodix_cfg_group.bin`; adapted vendor sources select TM-specific
+names. Neither absence nor updater existence justifies flashing resident FW.
+
+Runs39945823888/39946308005 are superseded. First run exposed an accidental
+broad replacement in BSD build selectors; originalselectors were restored and
+a host grammar regression check added. Only39946450245was packaged.
+No physical test has been performed by the agent. GPI-only or translatedSID0
+operation remains an explicit refusal, not a claimed implemented capability.

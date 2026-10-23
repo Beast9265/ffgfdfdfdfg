@@ -1,6 +1,62 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
 
+## FINAL MARBLE touch/USB v3 — packaged, physical test pending
+
+Kernel source `d5adb94de8e1a02442e844bcd5a5ebe7af890000`; exact successful
+CI [39946450245](https://github.com/Beast9265/ios-marble/actions/runs/39946450245).
+headSha independently verified; macos13.5/DEVELOPMENT/MARBLE/keep_going=true.
+Prior39945823888 FAILED BSD build-list grammar; fixed by restoring original
+selectors.39946308005 superseded/cancelled. Neither old artifact was used.
+
+| Artifact | SHA256 |
+|---|---|
+| Kernel | `6f257d21a0f51616da06d486f91cd3fddbd7f8ac0196249bc5e378cf1e92bee7` |
+| Exact Hello ADT | `35f0bff762c339e86a0e67392267ed148ae06b24703b682ce2327c9296ed84e3` |
+| marble-xnu-touchusb-v3.payload | `1b223eb080dbaf3d9f5a971a2969688cfca0752acf9473eef716bec9b08cb800` |
+| latest-marble-xnu-touchusb-v3.img | `bb9d52f1e14bfe438dfc4491fa2af53599f68b8bb8d233355bba867990003a31` |
+
+All86sections of0082 in exact CI buildtree byte-match locally tested replay.
+All10modifiedtranslationunits compiled in CI, arm64/full-link zero undefined;
+artifactSHA256SUMS, everypayloadsegment/fixups, boot-v4 stockmetadata/padding/
+footer/content, bootstrap code/stacks/table/alias/capacity and CPU0 timer audit
+PASS.20shared preprocessor checks include SWEET/VMAPPLE/BCM2837/T8103.
+Original bsd/conf/files prefix now byte-identical plusonlytwo new entries;
+newbuild-listgrammar test PASS. ASan/UBSan realSPMI GPIO7/ownership/readback/
+timeoutpoison, allPHYwritefailures,clock/rail/reset/UTMI,screen/filebounds,
+100000touch+100000EP0fuzz,protocol/FIFO/TCS/SMMUtests and10unit tests PASS.
+
+Final image `/home/beast/ios-marble/shim/out/marble-xnu/latest-marble-xnu-touchusb-v3.img`.
+Command line: `debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1 ufsrw=1 rootrw=1 launchd_unsecure_cache=1 marbleguidiag=1 marbleusb=2 marbleusblog=1 marbletouchinit=1 marblehwdiag=1`.
+No synthetic touch. Exact HelloADT reused, not regenerated. Sixprior images
+rehash unchanged, including Hello789377d9...1eb6242,USB-only68b47e27...f4fdb3,
+combinedd68c7b33...dc7d9eb. No root image changes/retention cleanup/mount writes,
+phone interaction,adb or fastboot executed by agent. Existing unrelated local
+sparse-script mode/bootstrapdoc/logs preserved and excluded from commits.
+
+USER MANUAL ONLY:
+```sh
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu-touchusb-v3.img
+```
+Connect to Linux; use `dmesg -w` and `lsusb`: first objective is a USB attach,
+then1209:0001/EP0. Only if ECM appears use tools/marble-usbnet.sh. On Hello,
+tap info,drag,try bottom-edge swipe. Physical success is NOT claimed.
+For non-scrolling diagnostics hold BOTH volume keys2seconds,release;
+up=nextpage,down=previous,both2s=returnGUI. Static page includes both failure
+stages/gates and register records. Best-effort file after90/120/180/300seconds:
+`/private/var/tmp/marble-hwdiag.txt`,<=64KiB/<=16attempts; errors remaininRAM.
+
+Remaining explicit limitations: FIFO-disabled SE4 still refuses GPI because
+ownedrings/context/SID5b6 mapping is not established. USB translated/faulted/
+ambiguous SID0 likewise refuses PA DMA; no translated domain implementation.
+These gates now persist instead of disappearing with console text. Successful
+register programming/CI is NOT physical touch or USB enumeration proof.
+Source ledger and exactdifferences: docs/MARBLE_TOUCH_USB_V3_RESEARCH.md.
+Local evidence `/tmp/marble-v3-{final-ci.log,package.log,release-tests.log,
+equivalence.log,success.json,boot-inspect.txt}`, release source replay
+`/tmp/marble-v3-release-replay`; exactCIbuildtree`/tmp/marble-v3-ci-buildtree`.
+
+
 ## Active handoff: MARBLE touch/USB v3 hardware initialization (2026-10-23)
 
 CI39945823888 FAILED before BSD compilation: an overly broad build-list
