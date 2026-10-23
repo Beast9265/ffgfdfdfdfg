@@ -54,7 +54,8 @@ def d22ap_product(path=D22AP_ADT):
     if not os.path.exists(path):
         print(f'warning: {path} missing, no /product node', file=sys.stderr)
         return None
-    root, _ = adt.parse(open(path, 'rb').read())
+    with open(path, 'rb') as source:
+        root, _ = adt.parse(source.read())
     for c in root.children:
         if dict((k, v) for k, f, v in c.props).get('name') == b'product\0':
             return [(k, v) for k, f, v in c.props if not f and k not in ('name', 'AAPL,phandle')]
@@ -224,6 +225,19 @@ def build(seed=None, qemu=False, highmem=False, marble=False):
     ])
 
     product_props = d22ap_product()
+    if marble:
+        # CoreUI dataWithName: gets ArtworkTraits from IODeviceTree:/product,
+        # independently of the display geometry. Without its phone idiom,
+        # the real iPhone X bounding-path DATA rendition cannot match.
+        required = {
+            'artwork-device-idiom': cstr('phone'),
+            'artwork-device-subtype': u32(2436),
+            'artwork-scale-factor': u32(3),
+        }
+        actual = dict(product_props or [])
+        if any(actual.get(key) != value for key, value in required.items()):
+            raise ValueError('MARBLE requires the original D22AP /product artwork metadata; '
+                             f'restore {D22AP_ADT} from the pinned 20H392 DeviceTree')
     product = [node('product', [ph()] + product_props)] if product_props else []
 
     # Identity of the iPhone X whose userland runs here: compatible[0] is

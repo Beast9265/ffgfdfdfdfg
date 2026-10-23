@@ -1,6 +1,7 @@
 """Offline MARBLE ADT/payload contract; no hardware or private fixtures."""
 import struct
 import unittest
+from unittest.mock import patch
 import adt
 import mkadt
 import mkpayload
@@ -8,7 +9,12 @@ import mkpayload
 
 class MarbleTreeTests(unittest.TestCase):
     def test_marble_roundtrip(self):
-        blob = adt.serialize(mkadt.build(seed=bytes(64), marble=True))
+        # Synthetic metadata fixture: tests never require an Apple artifact.
+        product_props = [('artwork-device-idiom', mkadt.cstr('phone')),
+                         ('artwork-device-subtype', mkadt.u32(2436)),
+                         ('artwork-scale-factor', mkadt.u32(3))]
+        with patch.object(mkadt, 'd22ap_product', return_value=product_props):
+            blob = adt.serialize(mkadt.build(seed=bytes(64), marble=True))
         root, end = adt.parse(blob)
         self.assertEqual(end, len(blob))
         child = lambda n, name: next(c for c in n.children if c.name == name)
@@ -23,6 +29,10 @@ class MarbleTreeTests(unittest.TestCase):
         self.assertEqual(len(cpus), 1)
         self.assertEqual(u(cpus[0], 'reg'), 0)
         self.assertEqual(cpus[0].prop('compatible'), b'qcom,marble-cpu\0ARM,v8\0')
+        product = child(root, 'product')
+        self.assertEqual(product.prop('artwork-device-idiom'), b'phone\0')
+        self.assertEqual(u(product, 'artwork-device-subtype'), 2436)
+        self.assertEqual(u(product, 'artwork-scale-factor'), 3)
         io = child(root, 'arm-io')
         self.assertEqual([c.name for c in io.children], ['gic', 'disp0'])
         display = child(io, 'disp0')
@@ -43,6 +53,12 @@ class MarbleTreeTests(unittest.TestCase):
         ufs = child(root, 'marble-ufs')
         self.assertEqual(struct.unpack('<2Q', ufs.prop('reg')), (0x01d84000, 0x3000))
         self.assertEqual(ufs.prop('compatible'), b'qcom,ufshc\0')
+
+    def test_marble_rejects_missing_or_incompatible_artwork_metadata(self):
+        for props in (None, [], [('artwork-device-idiom', mkadt.cstr('pad'))]):
+            with self.subTest(props=props), patch.object(mkadt, 'd22ap_product', return_value=props):
+                with self.assertRaisesRegex(ValueError, 'D22AP /product artwork metadata'):
+                    mkadt.build(seed=bytes(64), marble=True)
 
     def test_modes_are_exclusive_and_sweet_remains_default(self):
         for kwargs in ({'qemu': True}, {'highmem': True}):

@@ -38,7 +38,8 @@ inside the resolved repository's `shim/out/marble-xnu/`. The implementation
 further restricts generation characters to ASCII letters/digits/dot/underscore/
 hyphen. Symlink directory components or matching symlink/nonregular entries
 abort cleanup. A lock serializes finalizers; device/inode/size/mtime are checked
-again before deletion. The complete KEEP/DELETE plan prints first, then
+again before deletion. The complete plan labels KEEP latest raw, KEEP latest sparse, KEEP fallback
+sparse, DELETE old raw and DELETE old sparse print first, then
 `rm --` receives only exact individually checked paths. No recursion or shell
 glob expansion is used for removal. Producers must not concurrently replace
 artifacts outside this lock.

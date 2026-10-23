@@ -97,7 +97,15 @@ def prune(directory, records, keep_all=False):
     keep = current | {fallback}
     deletes = []
     for name, (path, identity) in sorted(candidates.items()):
-        print(f'{"KEEP" if name in keep else "DELETE"} {path}', flush=True)
+        if name == newest['raw']:
+            role = 'KEEP latest raw'
+        elif name == newest['sparse']:
+            role = 'KEEP latest sparse'
+        elif name == fallback:
+            role = 'KEEP fallback sparse'
+        else:
+            role = 'DELETE old raw' if path.suffix == '.img' else 'DELETE old sparse'
+        print(f'{role}: {path}', flush=True)
         if name not in keep:
             deletes.append((name, path, identity))
     # Recheck the complete plan before the first unlink. No wildcard/rm recursion.

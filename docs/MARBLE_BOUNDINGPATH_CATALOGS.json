@@ -1,0 +1,574 @@
+[
+  {
+    "path": "/System/Library/PrivateFrameworks/UIKitCore.framework/Artwork.bundle/Assets.car",
+    "size": 2648184,
+    "sha256": "37dce5a704f78a6ed11cd6b16183841b551fdc9847c484589428568e60c9fcfb",
+    "uid": 0,
+    "gid": 0,
+    "mode": "0o644",
+    "inode": 289126,
+    "nlink": 1,
+    "xattrs": [
+      "osx.com.apple.FinderInf"
+    ],
+    "sources": {
+      "OS": {
+        "size": 2648184,
+        "sha256": "37dce5a704f78a6ed11cd6b16183841b551fdc9847c484589428568e60c9fcfb",
+        "byte_identical": true
+      },
+      "SystemOS": null,
+      "AppOS": null
+    }
+  },
+  {
+    "path": "/System/Library/PrivateFrameworks/UIKitCore.framework/BoundingPathData.bundle/Assets.car",
+    "size": 101768,
+    "sha256": "0a53453f1e096f70ccb38618b0b8c32fa950f71dc3b559c4ce556825517aa04d",
+    "uid": 0,
+    "gid": 0,
+    "mode": "0o644",
+    "inode": 289212,
+    "nlink": 1,
+    "xattrs": [
+      "osx.com.apple.FinderInf"
+    ],
+    "sources": {
+      "OS": {
+        "size": 101768,
+        "sha256": "0a53453f1e096f70ccb38618b0b8c32fa950f71dc3b559c4ce556825517aa04d",
+        "byte_identical": true
+      },
+      "SystemOS": null,
+      "AppOS": null
+    }
+  },
+  {
+    "path": "/System/Library/PrivateFrameworks/UIKitCore.framework/CarPlayArtwork.bundle/Assets.car",
+    "size": 208360,
+    "sha256": "5a172de9c8f047ebe0054f61d1ca50ed4ef2d2d41f9c10fee52987d5a4674afb",
+    "uid": 0,
+    "gid": 0,
+    "mode": "0o644",
+    "inode": 289216,
+    "nlink": 1,
+    "xattrs": [
+      "osx.com.apple.FinderInf"
+    ],
+    "sources": {
+      "OS": {
+        "size": 208360,
+        "sha256": "5a172de9c8f047ebe0054f61d1ca50ed4ef2d2d41f9c10fee52987d5a4674afb",
+        "byte_identical": true
+      },
+      "SystemOS": null,
+      "AppOS": null
+    }
+  },
+  {
+    "path": "/System/Library/PrivateFrameworks/UIKitCore.framework/TextEffectsCatalog.bundle/TextEffects.car",
+    "size": 24264,
+    "sha256": "a80b666f6d8cd6bec5797f364d708ff9d66a7e6ff503b1dd606ccdb6ea953e32",
+    "uid": 0,
+    "gid": 0,
+    "mode": "0o644",
+    "inode": 289221,
+    "nlink": 1,
+    "xattrs": [
+      "osx.com.apple.FinderInf"
+    ],
+    "sources": {
+      "OS": {
+        "size": 24264,
+        "sha256": "a80b666f6d8cd6bec5797f364d708ff9d66a7e6ff503b1dd606ccdb6ea953e32",
+        "byte_identical": true
+      },
+      "SystemOS": null,
+      "AppOS": null
+    }
+  },
+  {
+    "path": "/System/Library/PrivateFrameworks/CoreUI.framework/DesignLibrary-iOS.bundle/CarPlayRepositories/DarkIncreasedContrast.car",
+    "size": 13544,
+    "sha256": "580bca34ac263ce8514b7ed405d78825c9db4f5ed6c747e317881e89ec3f0651",
+    "uid": 0,
+    "gid": 0,
+    "mode": "0o644",
+    "inode": 223517,
+    "nlink": 1,
+    "xattrs": [
+      "osx.com.apple.FinderInf"
+    ],
+    "sources": {
+      "OS": {
+        "size": 13544,
+        "sha256": "580bca34ac263ce8514b7ed405d78825c9db4f5ed6c747e317881e89ec3f0651",
+        "byte_identical": true
+      },
+      "SystemOS": null,
+      "AppOS": null
+    }
+  },
+  {
+    "path": "/System/Library/PrivateFrameworks/CoreUI.framework/DesignLibrary-iOS.bundle/CarPlayRepositories/DarkStandard.car",
+    "size": 18264,
+    "sha256": "fb5c1bdda3fa2191330aa0c12c674be2db51981eebb40734500d15d8fef92447",
+    "uid": 0,
+    "gid": 0,
+    "mode": "0o644",
+    "inode": 223519,
+    "nlink": 1,
+    "xattrs": [
+      "osx.com.apple.FinderInf"
+    ],
+    "sources": {
+      "OS": {
+        "size": 18264,
+        "sha256": "fb5c1bdda3fa2191330aa0c12c674be2db51981eebb40734500d15d8fef92447",
+        "byte_identical": true
+      },
+      "SystemOS": null,
+      "AppOS": null
+    }
+  },
+  {
+    "path": "/System/Library/PrivateFrameworks/CoreUI.framework/DesignLibrary-iOS.bundle/CarPlayRepositories/LightIncreasedContrast.car",
+    "size": 13544,
+    "sha256": "1594991eab893fad80ce1c1d196eac9002acb7aa5361e9de912f1145ea231ce7",
+    "uid": 0,
+    "gid": 0,
+    "mode": "0o644",
+    "inode": 223563,
+    "nlink": 1,
+    "xattrs": [
+      "osx.com.apple.FinderInf"
+    ],
+    "sources": {
+      "OS": {
+        "size": 13544,
+        "sha256": "1594991eab893fad80ce1c1d196eac9002acb7aa5361e9de912f1145ea231ce7",
+        "byte_identical": true
+      },
+      "SystemOS": null,
+      "AppOS": null
+    }
+  },
+  {
+    "path": "/System/Library/PrivateFrameworks/CoreUI.framework/DesignLibrary-iOS.bundle/CarPlayRepositories/LightStandard.car",
+    "size": 17976,
+    "sha256": "20c424e909cf85b38e66394dba00a06ae51cd1653f7528c1ef98da730cdabd5a",
+    "uid": 0,
+    "gid": 0,
+    "mode": "0o644",
+    "inode": 223564,
+    "nlink": 1,
+    "xattrs": [
+      "osx.com.apple.FinderInf"
+    ],
+    "sources": {
+      "OS": {
+        "size": 17976,
+        "sha256": "20c424e909cf85b38e66394dba00a06ae51cd1653f7528c1ef98da730cdabd5a",
+        "byte_identical": true
+      },
+      "SystemOS": null,
+      "AppOS": null
+    }
+  },
+  {
+    "path": "/System/Library/PrivateFrameworks/CoreUI.framework/DesignLibrary-iOS.bundle/iOSRepositories/DarkIncreasedContrast.car",
+    "size": 27016,
+    "sha256": "67e2396a4fe9cb80e20dd1ea3af303485dfb595cf7f5f356f74a51fcd6b8992b",
+    "uid": 0,
+    "gid": 0,
+    "mode": "0o644",
+    "inode": 223566,
+    "nlink": 1,
+    "xattrs": [
+      "osx.com.apple.FinderInf"
+    ],
+    "sources": {
+      "OS": {
+        "size": 27016,
+        "sha256": "67e2396a4fe9cb80e20dd1ea3af303485dfb595cf7f5f356f74a51fcd6b8992b",
+        "byte_identical": true
+      },
+      "SystemOS": null,
+      "AppOS": null
+    }
+  },
+  {
+    "path": "/System/Library/PrivateFrameworks/CoreUI.framework/DesignLibrary-iOS.bundle/iOSRepositories/DarkStandard.car",
+    "size": 29064,
+    "sha256": "9e17a6e9fefb9bedadf0295f7645fec92653255aa4804b703f359f41dc15c403",
+    "uid": 0,
+    "gid": 0,
+    "mode": "0o644",
+    "inode": 223567,
+    "nlink": 1,
+    "xattrs": [
+      "osx.com.apple.FinderInf"
+    ],
+    "sources": {
+      "OS": {
+        "size": 29064,
+        "sha256": "9e17a6e9fefb9bedadf0295f7645fec92653255aa4804b703f359f41dc15c403",
+        "byte_identical": true
+      },
+      "SystemOS": null,
+      "AppOS": null
+    }
+  },
+  {
+    "path": "/System/Library/PrivateFrameworks/CoreUI.framework/DesignLibrary-iOS.bundle/iOSRepositories/DarkVibrantStandard.car",
+    "size": 22936,
+    "sha256": "b7c63d340563ff4a290e052ea72e4805edecd50871fb1536de46555747349ee4",
+    "uid": 0,
+    "gid": 0,
+    "mode": "0o644",
+    "inode": 223568,
+    "nlink": 1,
+    "xattrs": [
+      "osx.com.apple.FinderInf"
+    ],
+    "sources": {
+      "OS": {
+        "size": 22936,
+        "sha256": "b7c63d340563ff4a290e052ea72e4805edecd50871fb1536de46555747349ee4",
+        "byte_identical": true
+      },
+      "SystemOS": null,
+      "AppOS": null
+    }
+  },
+  {
+    "path": "/System/Library/PrivateFrameworks/CoreUI.framework/DesignLibrary-iOS.bundle/iOSRepositories/LightIncreasedContrast.car",
+    "size": 22936,
+    "sha256": "39930470d8cd0f9fddad2d2437dd43242834477ea1df2b28a93d2b054bd69eb2",
+    "uid": 0,
+    "gid": 0,
+    "mode": "0o644",
+    "inode": 223569,
+    "nlink": 1,
+    "xattrs": [
+      "osx.com.apple.FinderInf"
+    ],
+    "sources": {
+      "OS": {
+        "size": 22936,
+        "sha256": "39930470d8cd0f9fddad2d2437dd43242834477ea1df2b28a93d2b054bd69eb2",
+        "byte_identical": true
+      },
+      "SystemOS": null,
+      "AppOS": null
+    }
+  },
+  {
+    "path": "/System/Library/PrivateFrameworks/CoreUI.framework/DesignLibrary-iOS.bundle/iOSRepositories/LightStandard.car",
+    "size": 29960,
+    "sha256": "d4cf37b1d43edb942504a18792b429bbd4f8a2531fb25abc84e9f6627b5bde2b",
+    "uid": 0,
+    "gid": 0,
+    "mode": "0o644",
+    "inode": 223570,
+    "nlink": 1,
+    "xattrs": [
+      "osx.com.apple.FinderInf"
+    ],
+    "sources": {
+      "OS": {
+        "size": 29960,
+        "sha256": "d4cf37b1d43edb942504a18792b429bbd4f8a2531fb25abc84e9f6627b5bde2b",
+        "byte_identical": true
+      },
+      "SystemOS": null,
+      "AppOS": null
+    }
+  },
+  {
+    "path": "/System/Library/PrivateFrameworks/CoreUI.framework/DesignLibrary-iOS.bundle/iOSRepositories/LightVibrantStandard.car",
+    "size": 23240,
+    "sha256": "7439cfdffd750644b0882b848a484f0f5aba95ff235fe9eb9326e53d5f2a662c",
+    "uid": 0,
+    "gid": 0,
+    "mode": "0o644",
+    "inode": 223571,
+    "nlink": 1,
+    "xattrs": [
+      "osx.com.apple.FinderInf"
+    ],
+    "sources": {
+      "OS": {
+        "size": 23240,
+        "sha256": "7439cfdffd750644b0882b848a484f0f5aba95ff235fe9eb9326e53d5f2a662c",
+        "byte_identical": true
+      },
+      "SystemOS": null,
+      "AppOS": null
+    }
+  },
+  {
+    "path": "/System/Library/PrivateFrameworks/CoreUI.framework/DesignLibrary-iOS.bundle/tvOSRepositories/DarkIncreasedContrast.car",
+    "size": 21176,
+    "sha256": "9d3305e72770780cb784379bb855d2d4988950e4fb9d902223097d79dc7ed107",
+    "uid": 0,
+    "gid": 0,
+    "mode": "0o644",
+    "inode": 223572,
+    "nlink": 1,
+    "xattrs": [
+      "osx.com.apple.FinderInf"
+    ],
+    "sources": {
+      "OS": {
+        "size": 21176,
+        "sha256": "9d3305e72770780cb784379bb855d2d4988950e4fb9d902223097d79dc7ed107",
+        "byte_identical": true
+      },
+      "SystemOS": null,
+      "AppOS": null
+    }
+  },
+  {
+    "path": "/System/Library/PrivateFrameworks/CoreUI.framework/DesignLibrary-iOS.bundle/tvOSRepositories/DarkStandard.car",
+    "size": 19432,
+    "sha256": "46de3d71e1df72a41bcbcf7637b9190aa39af9c0770be4cfd8fbb82346667ae3",
+    "uid": 0,
+    "gid": 0,
+    "mode": "0o644",
+    "inode": 223573,
+    "nlink": 1,
+    "xattrs": [
+      "osx.com.apple.FinderInf"
+    ],
+    "sources": {
+      "OS": {
+        "size": 19432,
+        "sha256": "46de3d71e1df72a41bcbcf7637b9190aa39af9c0770be4cfd8fbb82346667ae3",
+        "byte_identical": true
+      },
+      "SystemOS": null,
+      "AppOS": null
+    }
+  },
+  {
+    "path": "/System/Library/PrivateFrameworks/CoreUI.framework/DesignLibrary-iOS.bundle/tvOSRepositories/DarkVibrantStandard.car",
+    "size": 22936,
+    "sha256": "489595cb9a7a1b89cd7153393746eb6e836418dd73febed8f92ca2111b2c7b46",
+    "uid": 0,
+    "gid": 0,
+    "mode": "0o644",
+    "inode": 223574,
+    "nlink": 1,
+    "xattrs": [
+      "osx.com.apple.FinderInf"
+    ],
+    "sources": {
+      "OS": {
+        "size": 22936,
+        "sha256": "489595cb9a7a1b89cd7153393746eb6e836418dd73febed8f92ca2111b2c7b46",
+        "byte_identical": true
+      },
+      "SystemOS": null,
+      "AppOS": null
+    }
+  },
+  {
+    "path": "/System/Library/PrivateFrameworks/CoreUI.framework/DesignLibrary-iOS.bundle/tvOSRepositories/LightIncreasedContrast.car",
+    "size": 21176,
+    "sha256": "abcc08d146608cea78ae63218f6b82bbf1507013cd02d527fc11109ebb6656da",
+    "uid": 0,
+    "gid": 0,
+    "mode": "0o644",
+    "inode": 223575,
+    "nlink": 1,
+    "xattrs": [
+      "osx.com.apple.FinderInf"
+    ],
+    "sources": {
+      "OS": {
+        "size": 21176,
+        "sha256": "abcc08d146608cea78ae63218f6b82bbf1507013cd02d527fc11109ebb6656da",
+        "byte_identical": true
+      },
+      "SystemOS": null,
+      "AppOS": null
+    }
+  },
+  {
+    "path": "/System/Library/PrivateFrameworks/CoreUI.framework/DesignLibrary-iOS.bundle/tvOSRepositories/LightStandard.car",
+    "size": 19432,
+    "sha256": "d5ea871d4e6b5884ab1b2be5e0935a856c6b59bcc42631a63b140ef02c0e8d69",
+    "uid": 0,
+    "gid": 0,
+    "mode": "0o644",
+    "inode": 223576,
+    "nlink": 1,
+    "xattrs": [
+      "osx.com.apple.FinderInf"
+    ],
+    "sources": {
+      "OS": {
+        "size": 19432,
+        "sha256": "d5ea871d4e6b5884ab1b2be5e0935a856c6b59bcc42631a63b140ef02c0e8d69",
+        "byte_identical": true
+      },
+      "SystemOS": null,
+      "AppOS": null
+    }
+  },
+  {
+    "path": "/System/Library/PrivateFrameworks/CoreUI.framework/DesignLibrary-iOS.bundle/tvOSRepositories/LightVibrantStandard.car",
+    "size": 13544,
+    "sha256": "c3d538b5dd2409fd33391991cad5cc09d4298445af22bd25a989c8f063d0f007",
+    "uid": 0,
+    "gid": 0,
+    "mode": "0o644",
+    "inode": 223577,
+    "nlink": 1,
+    "xattrs": [
+      "osx.com.apple.FinderInf"
+    ],
+    "sources": {
+      "OS": {
+        "size": 13544,
+        "sha256": "c3d538b5dd2409fd33391991cad5cc09d4298445af22bd25a989c8f063d0f007",
+        "byte_identical": true
+      },
+      "SystemOS": null,
+      "AppOS": null
+    }
+  },
+  {
+    "path": "/System/Library/PrivateFrameworks/CoreUI.framework/DesignLibrary-iOS.bundle/watchOSRepositories/DarkIncreasedContrast.car",
+    "size": 19144,
+    "sha256": "9b0c09b4fbe39e7713cfad6a53cd46bdd91d70442ab8af376de9366eb26b79b3",
+    "uid": 0,
+    "gid": 0,
+    "mode": "0o644",
+    "inode": 223578,
+    "nlink": 1,
+    "xattrs": [
+      "osx.com.apple.FinderInf"
+    ],
+    "sources": {
+      "OS": {
+        "size": 19144,
+        "sha256": "9b0c09b4fbe39e7713cfad6a53cd46bdd91d70442ab8af376de9366eb26b79b3",
+        "byte_identical": true
+      },
+      "SystemOS": null,
+      "AppOS": null
+    }
+  },
+  {
+    "path": "/System/Library/PrivateFrameworks/CoreUI.framework/DesignLibrary-iOS.bundle/watchOSRepositories/DarkStandard.car",
+    "size": 27016,
+    "sha256": "b46ba5443f7ec3a80fc8e4ea1bea141de9d4bf75d22f19eda90970dc0fe53263",
+    "uid": 0,
+    "gid": 0,
+    "mode": "0o644",
+    "inode": 223579,
+    "nlink": 1,
+    "xattrs": [
+      "osx.com.apple.FinderInf"
+    ],
+    "sources": {
+      "OS": {
+        "size": 27016,
+        "sha256": "b46ba5443f7ec3a80fc8e4ea1bea141de9d4bf75d22f19eda90970dc0fe53263",
+        "byte_identical": true
+      },
+      "SystemOS": null,
+      "AppOS": null
+    }
+  },
+  {
+    "path": "/System/Library/PrivateFrameworks/SpringBoard.framework/Assets.car",
+    "size": 22184,
+    "sha256": "118758f5a474780ea211a914f0eb3df0cb49c1565dfff91e513eecd003de160e",
+    "uid": 0,
+    "gid": 0,
+    "mode": "0o644",
+    "inode": 285056,
+    "nlink": 1,
+    "xattrs": [
+      "osx.com.apple.FinderInf"
+    ],
+    "sources": {
+      "OS": {
+        "size": 22184,
+        "sha256": "118758f5a474780ea211a914f0eb3df0cb49c1565dfff91e513eecd003de160e",
+        "byte_identical": true
+      },
+      "SystemOS": null,
+      "AppOS": null
+    }
+  },
+  {
+    "path": "/System/Library/PrivateFrameworks/SpringBoardUIServices.framework/Assets.car",
+    "size": 29160,
+    "sha256": "678e188f9fd2bb588293bfebfe1c190c345ec18f04d20e6e464e6be426f02213",
+    "uid": 0,
+    "gid": 0,
+    "mode": "0o644",
+    "inode": 285269,
+    "nlink": 1,
+    "xattrs": [
+      "osx.com.apple.FinderInf"
+    ],
+    "sources": {
+      "OS": {
+        "size": 29160,
+        "sha256": "678e188f9fd2bb588293bfebfe1c190c345ec18f04d20e6e464e6be426f02213",
+        "byte_identical": true
+      },
+      "SystemOS": null,
+      "AppOS": null
+    }
+  },
+  {
+    "path": "/System/Library/PrivateFrameworks/SpringBoardHome.framework/Assets.car",
+    "size": 88344,
+    "sha256": "ba78add62b9c61f2e3635d360cef22820154e1994682f0bae417fb3cb7bd50c2",
+    "uid": 0,
+    "gid": 0,
+    "mode": "0o644",
+    "inode": 285172,
+    "nlink": 1,
+    "xattrs": [
+      "osx.com.apple.FinderInf"
+    ],
+    "sources": {
+      "OS": {
+        "size": 88344,
+        "sha256": "ba78add62b9c61f2e3635d360cef22820154e1994682f0bae417fb3cb7bd50c2",
+        "byte_identical": true
+      },
+      "SystemOS": null,
+      "AppOS": null
+    }
+  },
+  {
+    "path": "/System/Library/CoreServices/SpringBoard.app/Assets.car",
+    "size": 152216,
+    "sha256": "dc9b7dee94f35fe27a7a81587d2870fc0edf591dd5f7e60a1f9a68dd0614af01",
+    "uid": 0,
+    "gid": 0,
+    "mode": "0o644",
+    "inode": 144675,
+    "nlink": 1,
+    "xattrs": [
+      "osx.com.apple.FinderInf"
+    ],
+    "sources": {
+      "OS": {
+        "size": 152216,
+        "sha256": "dc9b7dee94f35fe27a7a81587d2870fc0edf591dd5f7e60a1f9a68dd0614af01",
+        "byte_identical": true
+      },
+      "SystemOS": null,
+      "AppOS": null
+    }
+  }
+]

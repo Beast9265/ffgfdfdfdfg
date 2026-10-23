@@ -1,7 +1,76 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
 
-## Active handoff: MARBLE diagnostic-first Setup investigation (2026-10-23)
+## Active handoff: MARBLE UIKit bounding-path asset investigation (2026-10-23)
+
+Read full AGENTS.md and NOTES.md/history before changes;remote refs/heads/marble
+independently checked=f4c14cc2b8afcb760a770e1fd3d2cdbbcfda89ca,local HEAD matches.
+Pre-existing iosroot-sparse.sh executable mode and untracked bootstrap doc kept.
+
+NEW USER PHYSICAL RESULT on latest diagnostic kernel: first real iOS pixels PASS;
+historical Apple migration UI PASS;fairplayd.H2 flood FIXED;setup-fast physically
+loaded PASS;later userspace PASS. SpringBoard repeatedly launches and aborts.
+SpringBoard display configuration PASS;UIKit startup PASS;screen bounding-path
+lookup REACHED. Requested asset BoundingPathBitmap-1125x2436-375x812-3.00x
+matches intended1125x2436 pixels,375x812 points,scale3. Asset lookup/load FAIL;
+SpringBoard SIGABRT loop;Setup.app not reached.
+Exact user-visible exception:
+|SpringBoard| *** Assertion failure in -[_UIScreenComplexBoundingPathUtilities _loadBitmapForScreen:type:], _UIScreenComplexBoundingPathUtilities.m:326
+|SpringBoard| *** Terminating app due to uncaught exception 'NSInternalInconsistencyException', reason: 'Failed to load bounding path bitmap data from the asset manager for asset name: BoundingPathBitmap-1125x2436-375x812-3.00x'
+libc++abi: terminating due to uncaught exception of type NSException;
+CRASH SpringBoard[...] sig6 code0x0 sub0x0. Observed approximately1969-12-31
+16:21:27 pid192 and16:21:40 pid201:stable/reproducible crash loop.
+Primary blocker now exact UIKit asset-manager lookup failure,NOT unrelated
+nanotimekitcompaniond/maintenanced/ReportCrash/contextstored/coreduetd/searchpartyd.
+Initial root cause was unknown; completed source comparison and correction below.
+Keep graphics/geometry/scale/throttle,cpus1,root suppressions/current MobileGestalt.
+No root mutation during analysis;no fastboot/adb;no speculative XNU rebuild.
+
+
+Investigation milestone (source-backed, physical confirmation still pending):
+See docs/MARBLE_BOUNDINGPATH.md and catalog inventory JSON for exact20H392
+addresses, catalog metadata/source comparisons and limits. Actual catalog is
+UIKitCore.framework/BoundingPathData.bundle/Assets.car,101768bytes,SHA256
+0a53453f1e096f70ccb38618b0b8c32fa950f71dc3b559c4ce556825517aa04d.
+Root==OS source byte-for-byte;absent SystemOS/AppOS;44 dyld cache files match
+SystemOS byte-for-byte. No overlay skew. Exact rendition EXISTS,phone idiom1;
+DATA export/plist decode passes1125x2436. Physical failure precedes unarchiving.
+CoreUI dataWithName: uses its own MG ArtworkTraits from IODeviceTree:/product,
+not the screen geometry/manager idiom. Tested MARBLE ADT has NO /product;
+missing artwork idiom leaves CoreUI0,where rendition requiresphone1.
+Chosen ONE primary fix:restore original20H392D22AP /product61properties in
+ADT only;no kernel/root/catalog/graphics changes. FutureMARBLE mkadt rejects
+missing/wrong originalphone/subtype2436/scale3 metadata. Restorehelper preserves
+all existing nodes/seed/UUID/bootargs;removing addednode byte-matches oldADT.
+OriginalDeviceTree IM4PSHA256480e8b0888949b4128b7aa2cd254497581c69e1bafa596a760b2fa955a8a6368;
+decodedSHA2569e670987c80493bd69aba7be62e3179c04663324d9249b0973675baac175dbf1.
+Appleartifact remains ignored research/ipsw-x/d22ap.adt,not committed.
+SWEETcomparison reconstructed only:no survivingworkingroot available. Same
+source/seed SWEETgenerator byte-identical;historicalhomehad original/product.
+Localsetup-fast has no MGcacheplist;phone persistedcache uninspected;no deletion.
+Sourceidentitydefects (marble target,POCOproduct,iOS HW_MACHINE iPad8,6) noted
+but deliberately not combined with primaryfix;runtimeanswers not captured.
+
+Packaging milestone:exact existingkernel sourceb16c741,CI39888158542 reused;
+NOnew XNU CI/build. kernelSHA256
+462dc21b476550949aaebdd335c5e6584f120c3481bfbda2cae92958398160d9.
+ADT35f0bff762c339e86a0e67392267ed148ae06b24703b682ce2327c9296ed84e3;
+payload823706ba303643c4880d235abac8aaa2145983c23258c2af119f0019f3f0906c;
+boot789377d9cc9de5027038b074e3c0c61121f2229594e7895282933a44b1eb6242.
+Final shim/out/marble-xnu/latest-marble-xnu.img. Same shim,cpus1,marbleguidiag1,
+complete priorcmdline/geometry/throttle/root.10unit+7retentionfixturetests PASS;
+repovalidation PASS;independentbootv4/payload/fullkernel/link/bootstrapaudits PASS.
+No newroot/no currentrootcleanup. Existing automaticcleanup gated by all
+validation,exactcanonicaldirectory/names,nosymlinks,hashes,fullsparsecompare;
+planlabels clarified;MARBLE_KEEP_ROOTS=all;fixturetestsonly.
+Setup-fastraw/sparse rehashed unchanged7ca8c990f98875d892ffa38f769f4a8bb5af23bdbabb4ee50d69d2df13822798 /
+cec3daf08e3236065d14c3939c48051430c7737f798c2b7d8affb475c3f4aa01.
+No userdata reflash. No phone operations performed. NEXTmanualtestONLY:
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
+Pending physical criterion:assertion disappears,SpringBoard staysalive toward
+Setup/Hello. Do not claim fixed until tested. Sourcecommit recorded after commit.
+
+## Previous handoff: MARBLE diagnostic-first Setup investigation (2026-10-23)
 
 USER PHYSICAL RESULT (overnight, supersedes all pending setup-fast claims):
 setup-fast root flashed and booted successfully PASS. First real iOS pixels
