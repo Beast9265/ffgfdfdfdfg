@@ -428,6 +428,9 @@ GPIO21 IRQ GPIO input/pull-up/8mA. Only those six configurations are changed.
 **Reset asserted = physical LOW; released = physical HIGH.** GPIO20's latch
 is set before output enable. Upstream logical GPIO0 releases its active-low
 reset descriptor; copying logical constants into raw TLMM would invert reset.
+The captured vendor DTS itself uses legacy goodix,reset-gpio flags0, and its
+legacy driver drives raw GPIO1 to release; this is not a captured active-low
+gpiod descriptor. Both references agree on the physical low/high sequence.
 
 Captured reserved command DB is `0x80860000`, size `0x20000`; apps RSC DRV2
 is `0x17a20000`, TCS offset `0xd00`. Captured ordering is ACTIVE3, SLEEP2,
@@ -507,3 +510,35 @@ power/reset ordering and failures, confirm framing/retries, initial26 contact
 snapshots0/1/2/3/10, invalid/no-ACK behavior, command DB bounds/duplicates,
 v2/v3 ACTIVE-only ownership, inherited payload preservation and timeout
 quarantine. Tests model hardware; they do not establish voltage or touch works.
+
+## Packaged active-init checkpoint — physical test pending
+
+Source `efb27bc77c45dca4443167dc347c0c14d1eb0ea0`, successful MARBLE DEVELOPMENT CI [39903264776](https://github.com/Beast9265/ios-marble/actions/runs/39903264776).
+Supersedes cancelled intermediate39903081131. Exact successful artifact only.
+
+| Artifact | SHA256 |
+|---|---|
+| Kernel | `0686533d463d808f125c0e8151a9f2ce23ef0514eed69d5f5e5de4fcddb6b822` |
+| Exact Hello ADT | `35f0bff762c339e86a0e67392267ed148ae06b24703b682ce2327c9296ed84e3` |
+| marble-xnu-touchinit.payload | `b2258a3dc047499959c7cf4f7878cd73eb7cfbaa5d566ebb7da57176de92a34d` |
+| latest-marble-xnu-touchinit.img | `4c57ea14c85e47d16db710758db9d54a564c3c5308d8b2fa29c1ec81f386ba25` |
+
+Arm64/full-link zero undefined, artifact SHA256SUMS, boot-v4 metadata/padding,
+payload segments/chained fixups/footer, bootstrap capacity/alias attributes,
+CPU0 timer audit all pass. Command line is unchanged plus `marbletouchinit=1`,
+with cpus=1 and marbleguidiag=1; synthetic injection remains off.
+All three previous images retained and rehashed unchanged, including Hello
+rollback789377d9...1eb6242. setup-fast raw/sparse rehashed unchanged; no mount
+writes, root generation, retention cleanup or phone commands. Keys/HID/display
+sources untouched. Rail votes, actual inherited registers, confirm/version
+results and physical touch remain UNTESTED.
+
+Read [MARBLE_REMOTE_DEBUG.md](MARBLE_REMOTE_DEBUG.md) for the subsequent
+documentation-only USB/SSH/TrollVNC audit. USB device/mux and IOSurfaceAccelerator
+are missing from the linked MARBLE implementation; no remote service installed.
+
+Manual physical test:
+
+```sh
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu-touchinit.img
+```
