@@ -1,32 +1,46 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
 
-## Active MARBLE v4 — local validation complete, CI/package next
+## FINAL MARBLE v4 — packaged; physical test pending
 
-User physically tested v3: Hello/keys pass; touch fails at MT_MMIO clock gate,
-USB fails after successful QSCRATCH. Persistent VFS file works (error0/writes4).
-See docs/MARBLE_TOUCH_USB_V4.md for exact physical results and pinned ledger.
-Starting HEAD5448620036ce4a7e8ca4a2bc6489fea6c0de872d; unrelated sparse-script
-mode/bootstrap doc/logs preserved. Live OEM DTS inspected read-only, not staged.
+Source `8eb1e2c4cd359c4db0f0b10ce16691bebd302ace`; successful exact CI
+[39957557772](https://github.com/Beast9265/ios-marble/actions/runs/39957557772).
+CI headSha independently verified equal source; workflow inputs
+macos13.5/DEVELOPMENT/MARBLE/keep_going=true. No older artifact used.
+All86 generated patch sections in that CI buildtree byte-match tested replay.
+Full linked plainarm64 Mach-O has zero undefined symbols; manifest verified.
 
-V4 prepares S4 parent before separate M_AHB/S_AHB/S4 votes/polls; preserves DFS
-ownership and adds exact per-clock diagnostics. FIFO refusal snapshots OEM
-GPII1..6 and SID5b6 read-only; no GPI/SMMU writes or unsafe DMA added.
-USB successful hardware prepare and touch power files remain byte-identical.
-Post-QSCRATCH clock/map/ID/role/PHY failures are specific; recognized DWC3/31/32
-identity and version recorded before writes. Actual physical v3 ID unknown.
-Overlay uses console LSB-first font, one vsync render path, changed-cell cache;
-normal inactive display geometry/presentation unchanged. VFS writer retained.
+| Artifact | SHA256 |
+|---|---|
+| Kernel | `0b0091485ce693c813048090a638fa6db26048baef391f3a9915a0c344b8185a` |
+| Exact Hello ADT | `35f0bff762c339e86a0e67392267ed148ae06b24703b682ce2327c9296ed84e3` |
+| V4 payload | `66ca1e2aa867be11b87277cf770506dfe44217d5749cfe4f462d303bb3a417a2` |
+| V4 boot image | `4a3096469c3099c0053ef3f4dbc08dc43d4e7fe25b9e87ce85c831c067890c34` |
 
-Local PASS: all82 patches replay, strict0082, all86generated files equal tested
-tree; fourmodified units compile actual CIheaders to arm64MachO; symbolclosure
-against linkedv3kernel+newobjects;20nonMARBLEpreprocessingchecks (SWEET/VMAPPLE/
-BCM2837/T8103); ASan/UBSan extracted clock/core faulttests, original Goodix/
-FIFO/power/USB100000-case fuzztests, V3 PHY/SPMI/diagnosticbounds including
-fontorientation/cacheguard,10Pythonunit tests. No phone operation executed.
-Next: commit/push exactsource, MARBLECI, verifyheadSha/buildtree/full-link,
-package new touchusb-v4 image with exact existing ADT; preserve alloldimages.
-Physical success NOT claimed. No root image/retention changes.
+Image: `/home/beast/ios-marble/shim/out/marble-xnu/latest-marble-xnu-touchusb-v4.img`.
+Arguments unchanged from v3: `debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1 ufsrw=1 rootrw=1 launchd_unsecure_cache=1 marbleguidiag=1 marbleusb=2 marbleusblog=1 marbletouchinit=1 marblehwdiag=1`.
+No synthetic touch. No ADT regeneration, root rebuild or retention cleanup.
+Rebuilt shim differs with current GCC16.2; packaging stopped on hash mismatch.
+Instead reused exact verified shim bytes from preservedv3 (identical toHello),
+SHA256586713d3b4c5862f73443cb1e5f555e465a9ffa5f3e2662672d41fff1715ee05.
+No new shim behavior is shipped. Allseven prior image hashes unchanged.
+
+Local/CI checks: strict82patch replay;86files equal tested+CI source; four
+modifiedunits actualCIheader arm64objectcompile; local symbolclosure+CI full
+link;20nonMARBLEpreprocesschecks; ASan/UBSan clock/corefaulttests and retained
+Goodix/FIFO/power/USBfuzztests; V3PHY/SPMI/diagnosticbounds/font/cachetests;
+10Pythonunittests; allpayloadsegments/fixups, bootv4metadata/padding/footer,
+bootstrap/stacks/tables/aliases/capacity and CPU0timerinstructionaudit PASS.
+
+Persistent file `/private/var/tmp/marble-hwdiag.txt` retained (V4 header).
+Automatic write starts90s after worker startup; later120/180/300s snapshots.
+Bothvolume keys2s toggles staticoverlay, release;up/downpages;both2sreturnsGUI.
+File is main evidence. V4 touch/USB/overlay physical success is NOT claimed.
+No physical phone operation executed. User manually boots dedicatedv4image.
+Unresolved safety gates: FIFO-disabled GPI ownership/domain and translated USB
+SID0 mapping; read-only snapshots identify them; no unsafe DMA/SMMU writes.
+Source ledger, changes and full preservation hashes:docs/MARBLE_TOUCH_USB_V4.md.
+Existing unrelated sparse-script mode/bootstrapdoc/logs preserved, not staged.
 
 
 ## FINAL MARBLE touch/USB v3 — packaged, physical test pending

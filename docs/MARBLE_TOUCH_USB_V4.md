@@ -149,3 +149,55 @@ pass. Ten Python unit tests pass. Physical v4 test remains user-only.
 Unresolved safety gates: FIFO-disabled GPI needs owned rings/channel/domain;
 translated USB SID0 needs an owned mapping. V4 reports these and never forces
 bypass. No claim of touch contact, USB attach or enumeration before testing.
+
+
+## Final CI and package
+
+Source `8eb1e2c4cd359c4db0f0b10ce16691bebd302ace`; successful exact CI
+[39957557772](https://github.com/Beast9265/ios-marble/actions/runs/39957557772).
+CI headSha independently verified equal source; workflow inputs
+macos13.5/DEVELOPMENT/MARBLE/keep_going=true. No older artifact used.
+All86 generated patch sections in that CI buildtree byte-match tested replay.
+Full linked plainarm64 Mach-O has zero undefined symbols; manifest verified.
+
+| Artifact | SHA256 |
+|---|---|
+| Kernel | `0b0091485ce693c813048090a638fa6db26048baef391f3a9915a0c344b8185a` |
+| Exact Hello ADT | `35f0bff762c339e86a0e67392267ed148ae06b24703b682ce2327c9296ed84e3` |
+| V4 payload | `66ca1e2aa867be11b87277cf770506dfe44217d5749cfe4f462d303bb3a417a2` |
+| V4 boot image | `4a3096469c3099c0053ef3f4dbc08dc43d4e7fe25b9e87ce85c831c067890c34` |
+
+Image: `/home/beast/ios-marble/shim/out/marble-xnu/latest-marble-xnu-touchusb-v4.img`.
+Arguments unchanged from v3: `debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1 ufsrw=1 rootrw=1 launchd_unsecure_cache=1 marbleguidiag=1 marbleusb=2 marbleusblog=1 marbletouchinit=1 marblehwdiag=1`.
+No synthetic touch. No ADT regeneration, root rebuild or retention cleanup.
+Rebuilt shim differs with current GCC16.2; packaging stopped on hash mismatch.
+Instead reused exact verified shim bytes from preservedv3 (identical toHello),
+SHA256586713d3b4c5862f73443cb1e5f555e465a9ffa5f3e2662672d41fff1715ee05.
+No new shim behavior is shipped. Allseven prior image hashes unchanged.
+
+Local/CI checks: strict82patch replay;86files equal tested+CI source; four
+modifiedunits actualCIheader arm64objectcompile; local symbolclosure+CI full
+link;20nonMARBLEpreprocesschecks; ASan/UBSan clock/corefaulttests and retained
+Goodix/FIFO/power/USBfuzztests; V3PHY/SPMI/diagnosticbounds/font/cachetests;
+10Pythonunittests; allpayloadsegments/fixups, bootv4metadata/padding/footer,
+bootstrap/stacks/tables/aliases/capacity and CPU0timerinstructionaudit PASS.
+
+
+All preserved rollback images rehashed unchanged:
+
+| Image | SHA256 |
+|---|---|
+| latest-marble-xnu-touchusb-v3.img | `bb9d52f1e14bfe438dfc4491fa2af53599f68b8bb8d233355bba867990003a31` |
+| hello-known-good-marble-xnu.img | `789377d9cc9de5027038b074e3c0c61121f2229594e7895282933a44b1eb6242` |
+| latest-marble-xnu.img | `a9dfc2ef7fe7990411a6403a7503694ec55fbcbdc8383a91b77c9ecc5a0cb3e8` |
+| latest-marble-xnu-hidtest.img | `dd2ef2d1355a7f1ca71ddd43c8a4ce1d78b4d4fed087a52298c287b7b8821236` |
+| latest-marble-xnu-touchinit.img | `4c57ea14c85e47d16db710758db9d54a564c3c5308d8b2fa29c1ec81f386ba25` |
+| latest-marble-xnu-usblog.img | `68b47e27a79339f3f707ee3f96a2362d05d457302077b0cedbf19e2f34f4fdb3` |
+| latest-marble-xnu-touch-usblog.img | `d68c7b333aee6ac9bf75927346cae9514834a5e05d9835cf18a1f32d1dc7d9eb` |
+
+Manual physical test: boot the dedicated v4 image, connect Linux USB and inspect
+`dmesg -w`/`lsusb`. First goal is attach and1209:0001 enumeration; only after
+ECM appears use marble-usbnet.sh. On Hello tap info, drag, try bottom-edge swipe.
+If blocked, obtain the V4 diagnostic file after90s (later snapshots120/180/300s),
+or toggle overlay with bothvolume keys2s,release;up/downpages;both2sreturnsGUI.
+Physical touch and USB success remain unverified. No phone operation executed.
