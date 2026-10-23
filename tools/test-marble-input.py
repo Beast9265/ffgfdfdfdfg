@@ -28,7 +28,7 @@ def main():
     parser.add_argument('tree', type=Path)
     args = parser.parse_args()
     source = (args.tree / 'bsd/dev/marble_touch.c').read_text()
-    names = ['mt_le16', 'mt_le32', 'mt_checksum', 'mt_cs', 'mt_exchange',
+    names = ['mt_le16', 'mt_le32', 'mt_checksum', 'mt_fifo_available', 'mt_exchange',
              'mt_read', 'mt_ack', 'mt_parse_info', 'mt_frame']
     body = '\n'.join(function(source, name) for name in names)
     harness = r'''
@@ -54,10 +54,10 @@ static unsigned txbytes,rxbytes,total,commands[4],cmdcount,waits,mode;
 static uint32_t mockirq;
 static void delay(unsigned n) {waits+=n;}
 static void mt_wr(unsigned off,uint32_t v) {
- if(off==0x26c || off==0x270) total=v;
+ if(off==0x26c) total=v;
  if(off==0x600) {
   assert(cmdcount<4);commands[cmdcount++]=v>>27;
-  if((v>>27)==3) mockirq=0;else mockirq=1;
+  assert(v==(3u<<27)||v==(1u<<27));mockirq=0;
  }
  if(off==0x700) {assert(txbytes<total);unsigned n=total-txbytes;n=n<4?n:4;
   for(unsigned b=0;b<n;b++) assert((uint8_t)(v>>(8*b))==mt_tx[txbytes+b]);
@@ -67,9 +67,10 @@ static void mt_wr(unsigned off,uint32_t v) {
 static uint32_t mt_rd(uintptr_t base,unsigned off) {
  (void)base;
  if(off==0x40) return mode==3?1:0;
- if(off==0x610) return mode==2?0:(mockirq?mockirq:(rxbytes==total?1:0));
+ if(off==0x610) return mode==2?0:(mockirq?mockirq:((mt_tx[0]==0xf0?txbytes:rxbytes)==total?1:0));
  if(off==0x800) return mode==4?17:0;
  if(off==0x804) {
+  if(mt_tx[0]==0xf0)return 0;
   if(mode==1)return 17;
   unsigned pending=txbytes-rxbytes,words=(pending+3)/4;
   uint32_t value=words;
@@ -92,11 +93,14 @@ static void u32(uint8_t *p,unsigned v) {u16(p,v);u16(p+2,v>>16);}
 static void reset(void) {txbytes=rxbytes=total=cmdcount=waits=mode=0;mt_bad=false;mockirq=0;}
 int main(void) {
  for(unsigned n=1;n<=1032;n++) {
-  reset();for(unsigned i=0;i<n;i++)mt_tx[i]=(uint8_t)(i*37);
+  reset();for(unsigned i=0;i<n;i++)mt_tx[i]=(uint8_t)(i*37);mt_tx[0]=0xf1;
   assert(mt_exchange(n));assert(rxbytes==n && txbytes==n);
-  assert(!memcmp(mt_tx,mt_rx,n));assert(cmdcount==3 && commands[0]==8 && commands[1]==3 && commands[2]==9);
+  assert(!memcmp(mt_tx,mt_rx,n));assert(cmdcount==1 && commands[0]==3);
  }
- for(unsigned m=1;m<=4;m++) {reset();mode=m;assert(!mt_exchange(24));assert(waits<=5000);}
+ for(unsigned n=1;n<=1032;n++) {reset();mt_tx[0]=0xf0;assert(mt_exchange(n));assert(txbytes==n&&rxbytes==0&&cmdcount==1&&commands[0]==1);}
+ reset();assert(mt_read(0x10014,mt_rx,4));assert(total==12&&!memcmp(mt_tx,"\xf1\x00\x01\x00\x14\xff\xff\xff",8));
+ reset();mt_event=0x10308;assert(mt_ack());assert(total==6&&!memcmp(mt_tx,"\xf0\x00\x01\x03\x08\x00",6)&&commands[0]==1);
+ for(unsigned m=1;m<=4;m++) {reset();mt_tx[0]=0xf1;mode=m;assert(!mt_exchange(24));assert(waits<=5000);}
  reset();assert(!mt_exchange(1033));assert(cmdcount==0);
  uint8_t data[1024]={0};unsigned pos=37,n=pos+144;
  u16(data,n);data[13]=1;u32(data+pos+44,0x10308);u16(data+pos+48,8);u16(data+pos+50,8);
@@ -123,7 +127,7 @@ int main(void) {
   unsigned flen=iter%91;memcpy(f,data,flen);if(flen>=8)checksum(f,8);
   (void)mt_frame(f,flen);
  }
- puts("PASS: 1032 FIFO lengths/order, command3/CS8/9, faults/timeouts, IC-info schemas, checksums, 10x mapping, down/move/up, atomic duplicate rejection, 100000 malformed/truncated cases");
+ puts("PASS: 1032 FIFO lengths/order, automatic CS, read3/write1 params0 and prefixes, faults/timeouts, IC-info schemas, checksums, 10x mapping, down/move/up, atomic duplicate rejection, 100000 malformed/truncated cases");
 }
 '''
     with tempfile.TemporaryDirectory(prefix='marble-input-test-') as directory:
@@ -135,6 +139,8 @@ int main(void) {
         subprocess.run([str(binary)], check=True)
     subprocess.run([__import__("sys").executable, str(Path(__file__).with_name("test-marble-touchinit.py")), str(args.tree)], check=True)
     subprocess.run([__import__("sys").executable, str(Path(__file__).with_name("test-marble-touch-power.py")), str(args.tree)], check=True)
+    subprocess.run([__import__("sys").executable, str(Path(__file__).with_name("test-marble-spi-linux.py")), str(args.tree)], check=True)
+    subprocess.run([__import__("sys").executable, str(Path(__file__).with_name("test-marble-usblog.py")), str(args.tree)], check=True)
 
 
 if __name__ == '__main__':

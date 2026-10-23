@@ -52,7 +52,7 @@ static bool mt_read(uint32_t addr,uint8_t *out,unsigned n){
 static bool mt_ack(void){acks++;return !io_fail;}
 static void marble_hid_touch(int id,int down,int x,int y){assert(id>=0&&id<10);(void)down;(void)x;(void)y;calls++;}
 '''
-body = '\n'.join(f(source, name) for name in ['mt_le16', 'mt_checksum', 'mt_reset', 'mt_power_on', 'mt_confirm', 'mt_frame', 'mt_poll_event'])
+body = '\n'.join(f(source, name) for name in ['mt_le16', 'mt_checksum', 'mt_reset', 'mt_spi_pin_mask', 'mt_spi_pin_value', 'mt_power_on', 'mt_confirm', 'mt_frame', 'mt_poll_event'])
 tests = r'''
 static void checksum(uint8_t *p,unsigned n){unsigned sum=0;for(unsigned i=0;i<n-2;i++)sum+=p[i];p[n-2]=sum;p[n-1]=sum>>8;}
 static void frame(unsigned count){
@@ -69,8 +69,8 @@ int main(void){
  clockms=0;assert(mt_confirm()&&attempts==1&&exchanges==1);
  mismatch=true;attempts=exchanges=clockms=0;assert(!mt_confirm()&&attempts==3&&exchanges==3&&clockms==10);
  io_fail=true;attempts=exchanges=0;assert(!mt_confirm()&&attempts==0&&exchanges==1);io_fail=false;
- unsigned counts[]={0,1,2,3,10};
- for(unsigned i=0;i<5;i++){frame(counts[i]);assert(mt_poll_event()==1&&acks==1&&reads==(counts[i]>2?2:1));}
+ unsigned counts[]={0,1,2,3,4,5,6,7,8,9,10};
+ for(unsigned i=0;i<11;i++){frame(counts[i]);assert(mt_poll_event()==1&&acks==1&&reads==(counts[i]>2?2:1));}
  frame(1);event[7]^=1;unsigned before=calls;assert(mt_poll_event()==-1&&acks==0&&calls==before);
  frame(1);event[9]^=1;assert(mt_poll_event()==-1&&acks==0&&calls==before);
  frame(2);event[16]=0;checksum(event+8,18);assert(mt_poll_event()==-1&&acks==0&&calls==before);

@@ -117,3 +117,14 @@ arm64 compiles, symbol closure,12 non-MARBLE equivalence checks, ASan/UBSan
 CDC descriptors/strings, RAM ring wrap, SMMU bypass/translation/fault/duplicate/
 EXID tests; logger bounds/no-print assertions; host shell/embedded Python
 syntax. No host interface configuration or phone commands were executed.
+
+## USB-only checkpoint packaged
+
+Source `cdc38016c5522fff9c6917c97bb29b15022bcfe9`, [CI39907701061 success](https://github.com/Beast9265/ios-marble/actions/runs/39907701061).
+Kernel `c4a96d7cdfda215069f1dce8168ebd8dd02a6f0516b22e6e43ca3e24db0c42f9`; exact Hello ADT `35f0bff762c339e86a0e67392267ed148ae06b24703b682ce2327c9296ed84e3`.
+Payload `ae83421e07a79f82ca1f07d6e7902a60337471b1e418a8a0ab6ec89af358f8a4`.
+Boot `latest-marble-xnu-usblog.img`: `68b47e27a79339f3f707ee3f96a2362d05d457302077b0cedbf19e2f34f4fdb3`.
+This standalone checkpoint was built/packaged before functional touch edits.
+It uses marbleusb=2 marbleusblog=1 marbletouch=0; buttons remain enabled and
+synthetic injection off. Exact artifact/full-link/bootstrap/footer/wrapper
+checks pass, all prior images preserved. Physical USB remains UNTESTED.

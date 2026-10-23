@@ -13606,7 +13606,7 @@ diff --git a/bsd/dev/marble_touch.c b/bsd/dev/marble_touch.c
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/marble_touch.c
-@@ -0,0 +1,475 @@
+@@ -0,0 +1,526 @@
 +/* MARBLE Berlin-D active initialization; references and ownership in
 + * docs/MARBLE_INPUT_HW.md. No firmware/config upload or Berlin-A operations. */
 +#if defined(ARM64_BOARD_CONFIG_MARBLE)
@@ -13708,6 +13708,64 @@ new file mode 100644
 +     mt_rd(mt_tlmm, 0x14004) & 1);
 + return true;
 +}
++/* Linux sm8450.dtsi: data/clock only set mux. CS explicitly6mA/no bias.
++ * Preserve unspecified data/clock drive/pull and all unrelated config bits. */
++static uint32_t
++mt_spi_pin_mask(unsigned pin)
++{
++ return pin == 19 ? 0x1ffu : 0x3cu;
++}
++static uint32_t
++mt_spi_pin_value(unsigned pin)
++{
++ return (1u << 2) | (pin == 19 ? ((6u / 2 - 1) << 6) : 0);
++}
++static bool
++mt_fifo_available(uint32_t disabled)
++{
++ return disabled != 0xffffffffu && !(disabled & 1u);
++}
++static void
++mt_mode_diag(void)
++{
++ uint32_t fw = mt_rd(mt_se, 0x68), disabled = mt_rd(mt_se, 0x64);
++ printf("MARBLE TOUCH: GENI mode: FW=%#x SFW=%#x proto=%u IF_DISABLE_RO=%#x fifo_disabled=%u DMA_MODE_EN=%#x status=%#x\n",
++     fw, mt_rd(mt_se, 0x6c), (fw >> 8) & 255, disabled, disabled & 1, mt_rd(mt_se, 0x258), mt_rd(mt_se, 0x40));
++ printf("MARBLE TOUCH: GENI FIFO TX=%#x RX=%#x counts=%#x/%#x M_IRQ=%#x DMA_TX=%#x DMA_RX=%#x clock=%#x sel=%#x\n",
++     mt_rd(mt_se, 0xe24), mt_rd(mt_se, 0xe28), mt_rd(mt_se, 0x800), mt_rd(mt_se, 0x804),
++     mt_rd(mt_se, 0x610), mt_rd(mt_se, 0xc40), mt_rd(mt_se, 0xd40), mt_rd(mt_se, 0x48), mt_rd(mt_se, 0x7c));
++ /* DTS cells identify SE4, not an inherited GPI instance owner. Do not read
++  * or mutate random GPI channel/event contexts or their SMMU mappings. */
++ printf("MARBLE TOUCH: GPI0@900000 SID5b6 ownership/IOVA unknown; channel registers not sampled\n");
++}
++static bool
++mt_select_fifo(void)
++{
++ /* Recheck immediately before mode writes; never force a disabled FIFO. */
++ if (!mt_fifo_available(mt_rd(mt_se, 0x64))) return mt_stop("FIFO_IF_DISABLE=1/invalid: Linux prefers GPI; no safe owned GPI/SMMU path");
++ uint32_t dma = mt_rd(mt_se, 0x258);
++ if ((mt_rd(mt_se, 0x40) & 0x1001) ||
++     (mt_rd(mt_se, 0x800) & 0xfffffff) || (mt_rd(mt_se, 0x804) & 0x1ffffff) ||
++     ((dma & 1) && (mt_rd(mt_se, 0xc54) || mt_rd(mt_se, 0xd54))))
++  return mt_stop("FIFO selection requires idle engine/FIFOs/DMA");
++ mt_wr(0x258, dma & ~1u); mt_wr(0xe18, 0); mt_wr(0xe1c, 0);
++ if (mt_rd(mt_se, 0x258) & 1) return mt_stop("FIFO mode readback");
++ printf("MARBLE TOUCH: selected GENI_SE_FIFO (IF enabled, DMA idle); automatic CS0\n");
++ return true;
++}
++static void
++mt_pack8(void)
++{
++ /* geni_se_config_packing(8,4,true,true,true): START5, DIR4, LEN1,
++  * STOP0, vector stride10. Four8-bit MSB-first protocol words per FIFO. */
++ uint32_t cfg[4];
++ for (unsigned i = 0; i < 4; i++) cfg[i] = ((7u + i * 8) << 5) | (1u << 4) | (7u << 1);
++ cfg[3] |= 1;
++ uint32_t cfg0 = cfg[0] | (cfg[1] << 10), cfg1 = cfg[2] | (cfg[3] << 10);
++ mt_wr(0x260, cfg0); mt_wr(0x264, cfg1); mt_wr(0x284, cfg0); mt_wr(0x288, cfg1);
++ mt_wr(0x254, 8u / 16); /* byte granularity0 */
++ mt_wr(0x268, 8u - 4); /* Linux MIN_WORD_LEN4 */
++}
 +static bool
 +mt_power_on(void)
 +{
@@ -13715,8 +13773,11 @@ new file mode 100644
 + if (error) return mt_stop("command DB / ACTIVE TCS prepare");
 + if (!mt_reset(false)) return false;
 + for (unsigned pin = 16; pin <= 19; pin++) {
-+  uint32_t config = (1u << 2) | ((pin == 19 ? 7u : 2u) << 6) | (pin == 19 ? 3u : 0u);
-+  if (!mt_mask(mt_tlmm, pin * 0x1000, 0x1ff, config)) return mt_stop("SPI pinctrl readback");
++  uint32_t before = mt_rd(mt_tlmm, pin * 0x1000);
++  if (!mt_mask(mt_tlmm, pin * 0x1000, mt_spi_pin_mask(pin), mt_spi_pin_value(pin)))
++   return mt_stop("SPI pinctrl readback");
++  printf("MARBLE TOUCH: Linux GPIO%u cfg before=%#x after=%#x mask=%#x\n",
++      pin, before, mt_rd(mt_tlmm, pin * 0x1000), mt_spi_pin_mask(pin));
 + }
 + if (!mt_mask(mt_tlmm, 0x15000, 0x3ff, (3u << 6) | 3)) return mt_stop("IRQ pinctrl readback");
 + for (unsigned pin = 16; pin <= 21; pin++)
@@ -13773,33 +13834,22 @@ new file mode 100644
 + return mt_rd(mt_se, 0x48) == 0x21 && mt_rd(mt_se, 0x7c) == level ? true : mt_stop("SE4 clock readback");
 +}
 +
-+/* CS assert/deassert, only when the previous command is known idle. */
-+static bool
-+mt_cs(unsigned opcode)
-+{
-+ if (mt_bad || (mt_rd(mt_se, 0x40) & 0x1001)) return false;
-+ mt_wr(0x618, mt_rd(mt_se, 0x610));
-+ mt_wr(0x600, opcode << 27);
-+ for (unsigned i = 0; i < 200; i++) {
-+  uint32_t irq = mt_rd(mt_se, 0x610);
-+  if (irq & MT_ERRORS) break;
-+  if ((irq & 1) && !(mt_rd(mt_se, 0x40) & 1)) { mt_wr(0x618, irq); return true; }
-+  delay(5);
-+ }
-+ mt_bad = true; return false;
-+}
-+
 +/* Little-endian CPU FIFO words; MSB-first bits within each 8-bit SPI word.
 + * All RX words/counts are validated; no DMA or physical address descriptors. */
 +static bool
 +mt_exchange(unsigned n)
 +{
 + if (n == 0 || n > sizeof(mt_tx) || mt_bad ||
++     !mt_fifo_available(mt_rd(mt_se, 0x64)) || (mt_rd(mt_se, 0x40) & 0x1001) ||
 +     (mt_rd(mt_se, 0x800) & 0xfffffff) || (mt_rd(mt_se, 0x804) & 0x1ffffff)) return false;
-+ if (!mt_cs(8)) return false;
-+ mt_wr(0x26c, n); mt_wr(0x270, n);
++ if (mt_tx[0] != 0xf1 && mt_tx[0] != 0xf0) return false;
++ bool receive = mt_tx[0] == 0xf1;
++ mt_wr(0x618, mt_rd(mt_se, 0x610));
++ mt_wr(0x26c, n); mt_wr(0x270, receive ? n : 0);
 + mt_wr(0x25c, mt_rd(mt_se, 0x25c) & ~1u); /* no CS toggle between words */
-+ mt_wr(0x600, (3u << 27) | 4); /* FULL_DUPLEX, fragmentation: retain CS until command9 */
++ /* Berlin sends one transfer/message with cs_change0: params0 releases CS
++  * automatically. Read TX|RX3, write TX1; no commands8/9 or fragmentation. */
++ mt_wr(0x600, (receive ? 3u : 1u) << 27);
 + unsigned tx = 0, rx = 0;
 + for (unsigned poll = 0; poll < 1000; poll++) {
 +  uint32_t irq = mt_rd(mt_se, 0x610);
@@ -13813,7 +13863,7 @@ new file mode 100644
 +  }
 +  uint32_t status = mt_rd(mt_se, 0x804);
 +  unsigned words = status & 0x1ffffff;
-+  if (words > mt_rxdepth) break;
++  if (words > mt_rxdepth || (!receive && words)) break;
 +  for (unsigned w = 0; w < words; w++) {
 +   unsigned bytes = 4;
 +   if (w + 1 == words && (status & (1u << 31))) {
@@ -13826,9 +13876,9 @@ new file mode 100644
 +   for (unsigned b = 0; b < bytes; b++) mt_rx[rx++] = (uint8_t)(word >> (8 * b));
 +  }
 +  if ((irq & 1) && !(mt_rd(mt_se, 0x40) & 1)) {
-+   if (tx != n || rx != n) break;
++   if (tx != n || rx != (receive ? n : 0)) break;
 +   mt_wr(0x618, mt_rd(mt_se, 0x610));
-+   return mt_cs(9);
++   return true;
 +  }
 +  /* Watermark/last flags only: never acknowledge an external GPIO/PMIC IRQ. */
 +  mt_wr(0x618, irq & 0x4c000000u);
@@ -13953,6 +14003,7 @@ new file mode 100644
 + printf("MARBLE TOUCH: initial reset physical=%u IRQ physical=%u\n",
 +     mt_rd(mt_tlmm, 0x14004) & 1, mt_rd(mt_tlmm, 0x15004) & 1);
 + if (mt_active && !mt_clocks()) return false;
++ mt_mode_diag();
 + printf("MARBLE TOUCH: raw GENI FW=%#x SFW=%#x status=%#x DMA=%#x\n",
 +     mt_rd(mt_se, 0x68), mt_rd(mt_se, 0x6c), mt_rd(mt_se, 0x40), mt_rd(mt_se, 0x258));
 + uint32_t fw = mt_rd(mt_se, 0x68), status = mt_rd(mt_se, 0x40), dma = mt_rd(mt_se, 0x258);
@@ -13969,6 +14020,8 @@ new file mode 100644
 +  printf("MARBLE TOUCH: rails expected PM8350C ldoc2=1800mV ldoc9=3224mV; voltage not measured\n");
 + }
 + if (((fw >> 8) & 255) != 1) return mt_stop("resident SPI protocol firmware absent; no loader");
++ if (!mt_fifo_available(mt_rd(mt_se, 0x64)))
++  return mt_stop("FIFO_IF_DISABLE=1/invalid: Linux prefers GPI; no safe owned GPI/SMMU path");
 + if ((status & 0x1001) || (mt_rd(mt_se, 0x800) & 0xfffffff) ||
 +     (mt_rd(mt_se, 0x804) & 0x1ffffff)) return mt_stop("GENI busy or FIFO not empty");
 + if (((hwtx >> 24) & 63) != 32 || ((hwrx >> 24) & 63) != 32 ||
@@ -13977,7 +14030,7 @@ new file mode 100644
 +  if ((dma & 1) && (mt_rd(mt_se, 0xc54) || mt_rd(mt_se, 0xd54)))
 +   return mt_stop("outstanding DMA transaction");
 +  if (!mt_spi_clock() || !mt_power_on()) return false;
-+  mt_wr(0x258, dma & ~1u); mt_wr(0xe18, 0); mt_wr(0xe1c, 0);
++  if (!mt_select_fifo()) return false;
 +  mt_wr(0x28, mt_rd(mt_se, 0x28) | 0x7f);
 +  mt_wr(0xe30, mt_rd(mt_se, 0xe30) | 0xf);
 +  mt_wr(0x24, 0x7f); mt_wr(0x20, 1);
@@ -13992,11 +14045,9 @@ new file mode 100644
 +   return mt_stop("inherited reset/IRQ state");
 + }
 + mt_wr(0x614, 0); /* polled local sequencer, no GIC interrupt enabled */
-+ mt_wr(0x260, 0x7f8fe); mt_wr(0x264, 0xffefe);
-+ mt_wr(0x284, 0x7f8fe); mt_wr(0x288, 0xffefe); mt_wr(0x254, 0);
-+ mt_wr(0x268, 4); mt_wr(0x224, 0); mt_wr(0x230, 0); mt_wr(0x22c, 0);
++ mt_pack8(); mt_wr(0x224, 0); mt_wr(0x230, 0); mt_wr(0x22c, 0);
 + mt_wr(0x24c, 0); mt_wr(0x250, 0);
-+ printf("MARBLE TOUCH: SPI SE4 mode0 8-bit MSB CS0 FIFO ready\n");
++ printf("MARBLE TOUCH: SPI transport ready: SE4 mode0 8-bit MSB automatic CS0 FIFO\n");
 + if (mt_active) { if (!mt_confirm()) return false; mt_wait(100); }
 + printf("MARBLE TOUCH: version read @0x10014 bytes=28\n");
 + uint8_t version[28] = {0};
