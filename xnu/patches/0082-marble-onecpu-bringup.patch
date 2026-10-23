@@ -13649,7 +13649,7 @@ diff --git a/bsd/dev/marble_touch.c b/bsd/dev/marble_touch.c
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/marble_touch.c
-@@ -0,0 +1,668 @@
+@@ -0,0 +1,690 @@
 +/* MARBLE Berlin-D active initialization; references and ownership in
 + * docs/MARBLE_INPUT_HW.md. No firmware/config upload or Berlin-A operations. */
 +#if defined(ARM64_BOARD_CONFIG_MARBLE)
@@ -13926,13 +13926,35 @@ new file mode 100644
 + return mt_clock_poll(off,1u<<31,0,reason,gate);
 +}
 +static bool
++mt_ahb_branch_clock(unsigned bit, unsigned off, unsigned stage,
++    enum mh_reason reason, const char *name, const char *gate)
++{
++ marble_hwdiag_stage(0,stage);
++ if (!mt_mask(mt_gcc,0x62008,1u<<bit,1u<<bit)) return mt_clock_fail(MH_READBACK,"QUP0 AHB vote readback");
++ uint32_t cbcr=mt_rd(mt_gcc,off); char key[32];
++ if (cbcr==0xffffffffu) {
++  snprintf(key,sizeof(key),"%s_CBCR_UNREADABLE",name);
++  marble_hwdiag_value(0,key,cbcr,cbcr);
++  return mt_clock_fail(MH_READBACK,key);
++ }
++ /* Qualcomm clk_branch_wait() accepts voted wrapper AHB branches while
++  * their declared HWCG bit is set. CLK_OFF may remain asserted in HWCG. */
++ if (cbcr&(1u<<1)) {
++  snprintf(key,sizeof(key),"%s_HWCG_ACCEPTED",name);
++  marble_hwdiag_value(0,key,cbcr,cbcr); return true;
++ }
++ if (!mt_clock_poll(off,1u<<31,0,reason,gate)) return false;
++ cbcr=mt_rd(mt_gcc,off); snprintf(key,sizeof(key),"%s_CLK_OFF_CLEAR",name);
++ marble_hwdiag_value(0,key,cbcr,cbcr); return true;
++}
++static bool
 +mt_clocks(void)
 +{
 + mt_clock_snapshot(false);
 + if (!mt_source_clock()) return false;
 + /* Exact vendor se_geni_clks_on order: M_AHB, S_AHB, then SE clock. */
-+ if (!mt_branch_clock(6,0x27004,MT_CLOCK_M_AHB,MH_M_AHB_BRANCH,"QUP0 M_AHB halt timeout") ||
-+     !mt_branch_clock(7,0x27008,MT_CLOCK_S_AHB,MH_S_AHB_BRANCH,"QUP0 S_AHB halt timeout") ||
++ if (!mt_ahb_branch_clock(6,0x27004,MT_CLOCK_M_AHB,MH_M_AHB_BRANCH,"M_AHB","QUP0 M_AHB halt timeout") ||
++     !mt_ahb_branch_clock(7,0x27008,MT_CLOCK_S_AHB,MH_S_AHB_BRANCH,"S_AHB","QUP0 S_AHB halt timeout") ||
 +     !mt_branch_clock(14,0x274dc,MT_CLOCK_S4,MH_S4_BRANCH,"S4 branch halt timeout")) return false;
 + if (mt_rcg_forced) {
 +  if (!mt_mask(mt_gcc,0x274e4,2,0)) return mt_clock_fail(MH_READBACK,"S4 RCG restore force-enable");

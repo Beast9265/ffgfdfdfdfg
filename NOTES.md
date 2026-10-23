@@ -1,6 +1,31 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
 
+## Active MARBLE touch v5 — local implementation and validation
+
+User physically tested v4: overlay is readable/stable, but touch failed at
+MT_CLOCK_S_AHB / MH_S_AHB_BRANCH with S_AHB CBCR `0x80000002` and unchanged
+vote `0x400283c0`. GENI and Goodix were not reached. Qualcomm vendor commit
+cf63f539 declares M_AHB/S_AHB HWCG bit1 and clk-branch.c accepts HWCG without
+waiting for CLK_OFF bit31. S4 has no HWCG declaration.
+
+V5 applies that rule only to wrapper M_AHB/S_AHB. It records HWCG acceptance,
+active CLK_OFF-clear state, unreadable CBCR, or the existing exact timeout.
+S4 remains strict. Goodix/FIFO/power/reset/GPI safety behavior is unchanged.
+USB, overlay, display, HID, keys, storage and SMMU sources remain byte-identical
+to v4. Dedicated v5 packaging will omit USB boot arguments.
+
+Focused ASan/UBSan tests pass for requested AHB values80000002/00000002/
+00000000/80000000/ffffffff, strict S4 states, parent/branch ordering and DFS;
+existing Goodix/FIFO/power/parser tests pass. Full82-patch replay with strict
+0082 applies cleanly; final generated marble_touch.c compiles with the actual
+CI headers to arm64 Mach-O. Non-MARBLE preprocessing matches v4 for SWEET,
+VMAPPLE,BCM2837 and T8103. Every other generated0082 source, including all USB
+and overlay sources, is byte-identical to v4. Physical success is not claimed.
+Details:docs/MARBLE_TOUCH_V5.md. Pending commit, exact CI, artifact/source
+verification and preserved-image packaging. No phone command.
+
+
 ## FINAL MARBLE v4 — packaged; physical test pending
 
 Source `8eb1e2c4cd359c4db0f0b10ce16691bebd302ace`; successful exact CI

@@ -11,10 +11,10 @@ common='''#include <stdint.h>
 #include <assert.h>
 typedef uintptr_t vm_offset_t;
 '''+(r/'bsd/dev/marble_hwdiag.h').read_text().replace('#include <sys/types.h>','')+'''
-static unsigned reason,stage,elapsed;static char gate[128];
+static unsigned reason,stage,elapsed;static char gate[128],last_value_name[64];
 void marble_hwdiag_stage(unsigned u,unsigned s){(void)u;if(!reason)stage=s;}
 void marble_hwdiag_fail(unsigned u,enum mh_reason r,int e,const char*g){(void)u;(void)e;if(!reason){reason=r;snprintf(gate,sizeof(gate),"%s",g);}}
-void marble_hwdiag_value(unsigned u,const char*n,uint32_t b,uint32_t a){(void)u;(void)n;(void)b;(void)a;}
+void marble_hwdiag_value(unsigned u,const char*n,uint32_t b,uint32_t a){(void)u;(void)b;(void)a;snprintf(last_value_name,sizeof(last_value_name),"%s",n);}
 static void delay(unsigned n){elapsed+=n;}
 '''
 clockmock='''
@@ -28,9 +28,9 @@ static bool mt_mask(uintptr_t b,unsigned o,uint32_t m,uint32_t v){
  return true;
 }
 '''
-clockbody='\n'.join(t.function(touch,n) for n in ['mt_clock_fail','mt_clock_snapshot','mt_clock_poll','mt_source_clock','mt_branch_clock','mt_clocks'])
+clockbody='\n'.join(t.function(touch,n) for n in ['mt_clock_fail','mt_clock_snapshot','mt_clock_poll','mt_source_clock','mt_branch_clock','mt_ahb_branch_clock','mt_clocks'])
 clocktests='''
-static void init(void){memset(regs,0,sizeof(regs));regs[0x274e4/4]=1u<<31;regs[0x27004/4]=regs[0x27008/4]=regs[0x274dc/4]=1u<<31;reason=stage=elapsed=fault=0;source_ready=false;}
+static void init(void){memset(regs,0,sizeof(regs));memset(gate,0,sizeof(gate));memset(last_value_name,0,sizeof(last_value_name));regs[0x274e4/4]=1u<<31;regs[0x27004/4]=regs[0x27008/4]=regs[0x274dc/4]=1u<<31;reason=stage=elapsed=fault=0;source_ready=false;}
 int main(void){
  init();assert(mt_clocks()&&source_ready&&!reason);assert(!(regs[0x274e4/4]&2));
  init();regs[0x274e8/4]=0x100001;regs[0x274e4/4]=0;source_ready=true;assert(mt_clocks());
@@ -40,7 +40,17 @@ int main(void){
  for(unsigned f=1;f<=4;f++){init();fault=f;assert(!mt_clocks()&&reason==expected[f-1]&&!strcmp(gate,names[f-1])&&elapsed==1000);}
  init();regs[0x274f8/4]=1;regs[0x27508/4]=1;source_ready=true;assert(mt_clocks()&&mt_clock_level==2);
  init();regs[0x274f8/4]=1;assert(!mt_clocks()&&reason==MH_PROTOCOL);
- puts("PASS S4 parent-before-votes, already-valid source/AHB, DFS ownership, independent RCG/M_AHB/S_AHB/S4 timeouts");}
+ /* Qualcomm BRANCH_HALT_VOTED: declared wrapper AHB HWCG bit1 bypasses
+  * CLK_OFF polling. S4 deliberately has no equivalent shortcut. */
+ init();source_ready=true;fault=2;regs[0x27004/4]=0x80000002;assert(mt_ahb_branch_clock(6,0x27004,MT_CLOCK_M_AHB,MH_M_AHB_BRANCH,"M_AHB","QUP0 M_AHB halt timeout")&&!strcmp(last_value_name,"M_AHB_HWCG_ACCEPTED")&&!elapsed);
+ init();source_ready=true;fault=2;regs[0x27004/4]=0x00000002;assert(mt_ahb_branch_clock(6,0x27004,MT_CLOCK_M_AHB,MH_M_AHB_BRANCH,"M_AHB","QUP0 M_AHB halt timeout")&&!strcmp(last_value_name,"M_AHB_HWCG_ACCEPTED")&&!elapsed);
+ init();source_ready=true;regs[0x27004/4]=0x00000000;assert(mt_ahb_branch_clock(6,0x27004,MT_CLOCK_M_AHB,MH_M_AHB_BRANCH,"M_AHB","QUP0 M_AHB halt timeout")&&!strcmp(last_value_name,"M_AHB_CLK_OFF_CLEAR")&&!elapsed);
+ init();source_ready=true;fault=2;regs[0x27004/4]=0x80000000;assert(!mt_ahb_branch_clock(6,0x27004,MT_CLOCK_M_AHB,MH_M_AHB_BRANCH,"M_AHB","QUP0 M_AHB halt timeout")&&reason==MH_M_AHB_BRANCH&&elapsed==1000);
+ init();source_ready=true;fault=2;regs[0x27004/4]=0xffffffff;assert(!mt_ahb_branch_clock(6,0x27004,MT_CLOCK_M_AHB,MH_M_AHB_BRANCH,"M_AHB","QUP0 M_AHB halt timeout")&&reason==MH_READBACK&&!strcmp(last_value_name,"M_AHB_CBCR_UNREADABLE")&&!elapsed);
+ init();source_ready=true;fault=3;regs[0x27008/4]=0x80000002;assert(mt_ahb_branch_clock(7,0x27008,MT_CLOCK_S_AHB,MH_S_AHB_BRANCH,"S_AHB","QUP0 S_AHB halt timeout")&&!strcmp(last_value_name,"S_AHB_HWCG_ACCEPTED")&&!elapsed);
+ init();source_ready=true;fault=4;regs[0x274dc/4]=0x80000002;assert(!mt_branch_clock(14,0x274dc,MT_CLOCK_S4,MH_S4_BRANCH,"S4 branch halt timeout")&&reason==MH_S4_BRANCH&&elapsed==1000);
+ init();source_ready=true;regs[0x274dc/4]=0;assert(mt_branch_clock(14,0x274dc,MT_CLOCK_S4,MH_S4_BRANCH,"S4 branch halt timeout"));
+ puts("PASS Qualcomm HWCG AHB acceptance, active/unreadable/timeout states, strict S4, parent-before-votes and DFS ownership");}
 '''
 usbmocks='''
 #define CBCR_CLK_OFF (1u<<31)
