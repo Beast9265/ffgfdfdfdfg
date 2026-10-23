@@ -13484,13 +13484,15 @@ diff --git a/iokit/Kernel/arm/hid/SweetHID.cpp b/iokit/Kernel/arm/hid/SweetHID.c
 diff --git a/bsd/conf/files b/bsd/conf/files
 --- a/bsd/conf/files
 +++ b/bsd/conf/files
-@@ -648,3 +648,10 @@
+@@ -648,3 +648,12 @@
  bsd/skywalk/packet/pbufpool.c			optional skywalk
  bsd/skywalk/packet/pbufpool_kern.c		optional skywalk
  bsd/dev/cpu_copy_in_cksum_gen.c			optional skywalk
 +
 +bsd/dev/marble_keys.c			standard
 +bsd/dev/marble_touch.c			standard
++bsd/dev/marble_gpi.c			standard
++bsd/dev/marble_gpi_smmu.c			standard
 +bsd/dev/marble_touch_power.c		standard
 +
 +bsd/dev/marble_hwdiag.c		standard
@@ -13649,13 +13651,14 @@ diff --git a/bsd/dev/marble_touch.c b/bsd/dev/marble_touch.c
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/marble_touch.c
-@@ -0,0 +1,690 @@
+@@ -0,0 +1,695 @@
 +/* MARBLE Berlin-D active initialization; references and ownership in
 + * docs/MARBLE_INPUT_HW.md. No firmware/config upload or Berlin-A operations. */
 +#if defined(ARM64_BOARD_CONFIG_MARBLE)
 +#include <sys/param.h>
 +#include "marble_hwdiag.h"
 +#include <sys/systm.h>
++#include "marble_gpi.h"
 +#include <kern/clock.h>
 +#include <kern/thread.h>
 +#include <kern/sched_prim.h>
@@ -13676,10 +13679,12 @@ new file mode 100644
 +static uint32_t mt_depth, mt_rxdepth, mt_event;
 +static unsigned mt_factor, mt_clock_level;
 +static bool mt_rcg_forced;
++static bool mt_use_gpi;
 +static bool mh_first_spi;
 +static bool mt_started, mt_bad, mt_legacy_range, mt_down[MT_FINGERS];
 +static int mt_x[MT_FINGERS], mt_y[MT_FINGERS], mt_chan, mt_diag;
 +static uint8_t mt_tx[MT_MAX + 8], mt_rx[MT_MAX + 8], mt_info[MT_MAX];
++static uint8_t mt_confirm_tx[13],mt_confirm_raw[8],mt_version_raw[28];
 +
 +static uint32_t
 +mt_rd(vm_offset_t base, unsigned off)
@@ -13714,6 +13719,9 @@ new file mode 100644
 +static bool
 +mt_stop(const char *gate)
 +{
++ if(mt_use_gpi) {
++  marble_hwdiag_failure_snapshot(0); marble_gpi_diag_snapshot();
++ }
 + marble_hwdiag_fail(0, strnstr(gate, "FIFO_IF_DISABLE", 128) ? MH_FIFO_DISABLED : strnstr(gate, "transport", 128) ? MH_TRANSPORT : strnstr(gate, "checksum", 128) ? MH_CHECKSUM : MH_GATE, -1, gate);
 + printf("MARBLE TOUCH: STOP gate=%s\n", gate); return false;
 +}
@@ -13788,9 +13796,8 @@ new file mode 100644
 + printf("MARBLE TOUCH: GENI FIFO TX=%#x RX=%#x counts=%#x/%#x M_IRQ=%#x DMA_TX=%#x DMA_RX=%#x clock=%#x sel=%#x\n",
 +     mt_rd(mt_se, 0xe24), mt_rd(mt_se, 0xe28), mt_rd(mt_se, 0x800), mt_rd(mt_se, 0x804),
 +     mt_rd(mt_se, 0x610), mt_rd(mt_se, 0xc40), mt_rd(mt_se, 0xd40), mt_rd(mt_se, 0x48), mt_rd(mt_se, 0x7c));
-+ /* DTS cells identify SE4, not an inherited GPI instance owner. Do not read
-+  * or mutate random GPI channel/event contexts or their SMMU mappings. */
-+ printf("MARBLE TOUCH: GPI0@900000 SID5b6 ownership/IOVA unknown; channel registers not sampled\n");
++ /* Vendor five-cell arg4=2 selects static GPII0, priority0. Ownership and
++  * SID5b6 translation are checked by marble_gpi before any submission. */
 +}
 +static bool
 +mt_select_fifo(void)
@@ -13977,6 +13984,11 @@ new file mode 100644
 +mt_exchange(unsigned n)
 +{
 + if (!mh_first_spi) { mh_first_spi = true; marble_hwdiag_value(0, "first_SPI", n, mt_tx[0]); }
++ if (mt_use_gpi) {
++  if(!n || n>sizeof(mt_tx) || mt_bad || (mt_tx[0]!=0xf1 && mt_tx[0]!=0xf0)) return false;
++  if(marble_gpi_spi_xfer(mt_tx,mt_rx,n,mt_tx[0]==0xf1)) { mt_bad=true; return false; }
++  return true;
++ }
 + if (n == 0 || n > sizeof(mt_tx) || mt_bad ||
 +     !mt_fifo_available(mt_rd(mt_se, 0x64)) || (mt_rd(mt_se, 0x40) & 0x1001) ||
 +     (mt_rd(mt_se, 0x800) & 0xfffffff) || (mt_rd(mt_se, 0x804) & 0x1ffffff)) return false;
@@ -14057,6 +14069,7 @@ new file mode 100644
 +  /* Berlin-D device confirm only; no arbitrary register write interface. */
 +  const uint8_t command[13] = {0xf0, 0, 1, 0, 0, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa};
 +  memcpy(mt_tx, command, sizeof(command));
++  memcpy(mt_confirm_tx,command,sizeof(command));
 +  marble_hwdiag_bytes(0,"confirm_TX",command,sizeof(command));
 +  printf("MARBLE TOUCH: device confirm write/read @0x10000 attempt=%u\n", attempt);
 +  if (!mt_exchange(sizeof(command))) return mt_stop("device confirm write transport");
@@ -14067,7 +14080,7 @@ new file mode 100644
 +  for (unsigned i = 0; i < sizeof(data); i++) match &= data[i] == 0xaa;
 +  printf("MARBLE TOUCH: device confirm %s attempt=%u rx=%02x %02x %02x %02x %02x %02x %02x %02x\n",
 +      match ? "PASS" : "FAILED", attempt, data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]);
-+  if (match) return true;
++  if (match) { memcpy(mt_confirm_raw,data,sizeof(data)); return true; }
 +  if (attempt < 3) mt_wait(5);
 + }
 + return mt_stop("device confirm mismatch after 3 attempts");
@@ -14132,43 +14145,6 @@ new file mode 100644
 + }
 + return true;
 +}
-+/* Read-only OEM five-cell GPI discovery. No channel/ring ownership claim.
-+ * Vendor gpi.c subtracts gpi-ee-offset from the mapped base before adding
-+ * msm_gpi_mmio.h offsets. Keep accesses inside the live DT 0x60000 range. */
-+static void
-+mt_gpi_snapshot(void)
-+{
-+ marble_hwdiag_stage(0,MT_GPI);
-+ vm_offset_t gpi=ml_io_map(0x00900000,0x60000);
-+ marble_hwdiag_value(0,"GPI_map/EE_offset",gpi!=0,0x10000);
-+ if(gpi) for(unsigned n=1;n<=6;n++) {
-+  for(unsigned ch=0;ch<2;ch++) {
-+   unsigned base=0x10000+0x4000*n+0x80*ch;
-+   const unsigned offsets[]={0,4,8,12,0x60};
-+   const char *names[]={"CTX0","LEN","BASELO","BASEHI","SCRATCH0"};
-+   for(unsigned i=0;i<5;i++) {
-+    char key[32]; uint32_t v=mt_rd(gpi,base+offsets[i]);
-+    snprintf(key,sizeof(key),"GPI%u_CH%u_%s",n,ch,names[i]); marble_hwdiag_value(0,key,v,v);
-+   }
-+  }
-+  unsigned off=0x11000+0x4000*n; char key[32]; uint32_t v=mt_rd(gpi,off);
-+  snprintf(key,sizeof(key),"GPI%u_EV_CTX0",n); marble_hwdiag_value(0,key,v,v);
-+ }
-+ vm_offset_t smmu=ml_io_map(0x15000000,0x10000);
-+ if(!smmu) { marble_hwdiag_value(0,"GPI_SMMU_map",0,0); return; }
-+ uint32_t cr0=mt_rd(smmu,0),id0=mt_rd(smmu,0x20);
-+ marble_hwdiag_value(0,"GPI_SMMU_CR0/ID0",cr0,id0);
-+ if(cr0==0xffffffffu || !id0 || id0==0xffffffffu || !(id0&(1u<<27))) return;
-+ bool exid=(cr0&8)&&(id0&256);
-+ for(unsigned i=0;i<(id0&255);i++) {
-+  uint32_t smr=mt_rd(smmu,0x800+i*4),s2cr=mt_rd(smmu,0xc00+i*4);
-+  bool valid=exid ? !!(s2cr&(1u<<10)) : !!(smr&(1u<<31));
-+  unsigned mask=(smr>>16)&(exid?65535:32767);
-+  if(valid && !(((smr&65535)^0x5b6)&~mask)) {
-+   char key[32]; snprintf(key,sizeof(key),"SID5b6_match%u",i); marble_hwdiag_value(0,key,smr,s2cr);
-+  }
-+ }
-+}
 +static bool
 +mt_probe(void)
 +{
@@ -14213,9 +14189,19 @@ new file mode 100644
 +  printf("MARBLE TOUCH: rails expected PM8350C ldoc2=1800mV ldoc9=3224mV; voltage not measured\n");
 + }
 + if (((fw >> 8) & 255) != 1) return mt_stop("resident SPI protocol firmware absent; no loader");
-+ if (!mt_fifo_available(mt_rd(mt_se, 0x64))) {
-+  mt_gpi_snapshot();
-+  return mt_stop("FIFO_IF_DISABLE=1/invalid: Linux prefers GPI; no safe owned GPI/SMMU path");
++ uint32_t disabled=mt_rd(mt_se,0x64);
++ if(disabled==0xffffffffu) return mt_stop("GENI IF_DISABLE unreadable");
++ mt_use_gpi=!!(disabled&1);
++ marble_hwdiag_stage(0,MT_FIFO);
++ marble_hwdiag_value(0,"FIFO_IF_DISABLE/path",disabled,mt_use_gpi?2:1);
++ if(mt_use_gpi) {
++  if(!mt_active) return mt_stop("GPI requires explicit marbletouchinit=1 ownership");
++  if((status&0x1001) || mt_rd(mt_se,0xc54) || mt_rd(mt_se,0xd54)) return mt_stop("GENI/GPI inherited DMA busy");
++  if(!mt_spi_clock() || !mt_power_on()) return false;
++  mt_wr(0x28,mt_rd(mt_se,0x28)|0x7f); mt_wr(0xe30,mt_rd(mt_se,0xe30)|0xf);
++  mt_wr(0x24,0x7f); mt_wr(0x20,1);
++  if(marble_gpi_spi_init(mt_se,mt_clock_level,2)) return false;
++  goto transport_ready;
 + }
 + if ((status & 0x1001) || (mt_rd(mt_se, 0x800) & 0xfffffff) ||
 +     (mt_rd(mt_se, 0x804) & 0x1ffffff)) return mt_stop("GENI busy or FIFO not empty");
@@ -14241,16 +14227,26 @@ new file mode 100644
 + mt_pack8(); mt_wr(0x224, 0); mt_wr(0x230, 0); mt_wr(0x22c, 0);
 + mt_wr(0x24c, 0); mt_wr(0x250, 0);
 + printf("MARBLE TOUCH: SPI transport ready: SE4 mode0 8-bit MSB automatic CS0 FIFO\n");
++transport_ready:
 + if (mt_active) { if (!mt_confirm()) return false; }
 + marble_hwdiag_stage(0, MT_VERSION);
 + printf("MARBLE TOUCH: version read @0x10014 bytes=28\n");
 + uint8_t version[28] = {0};
-+ bool version_read = mt_read(0x10014, version, sizeof(version));
-+ marble_hwdiag_bytes(0,"version",version,sizeof(version));
++ bool version_read=false;
++ /* Pzqqt cf63f539 brl_read_version: three attempts, 5ms bus failure and
++  * 10ms checksum retry. An uncertain DMA transfer remains quarantined. */
++ for(unsigned attempt=0;attempt<3;attempt++) {
++  bzero(version,sizeof(version)); version_read=mt_read(0x10014,version,sizeof(version));
++  marble_hwdiag_bytes(0,"version",version,sizeof(version));
++  marble_hwdiag_value(0,"version_try/checksum",attempt+1,version_read&&mt_checksum(version,sizeof(version)));
++  if((version_read&&mt_checksum(version,sizeof(version))) || mt_bad) break;
++  mt_wait(version_read?10:5);
++ }
 + const char *version_gate = !version_read ? "version transport" :
 +     !mt_checksum(version, sizeof(version)) ? "version checksum" :
 +     memcmp(version + 10, "9916", 4) ? "version PID not 9916" : NULL;
 + if (version_gate) { mt_dump("version", version, sizeof(version)); return mt_stop(version_gate); }
++ memcpy(mt_version_raw,version,sizeof(version));
 + if (mt_diag) printf("MARBLE TOUCH: identified GT%.8s ROM%.6s FW=%02x.%02x.%02x.%02x sensor%u\n",
 +     version + 10, version, version[18], version[19], version[20], version[21], version[23]);
 + mt_legacy_range = !memcmp(version, "BERLIN", 6) && !memcmp(version + 10, "9916", 4);
@@ -14305,6 +14301,17 @@ new file mode 100644
 + if (mt_probe()) {
 +  printf("MARBLE TOUCH: polling active, 10 contacts, 10ms\n");
 +  marble_hwdiag_stage(0, MT_IRQ);
++  /* Keep the successful controller identity and first physical frames visible
++   * after verbose transport initialization, without increasing RAM/file bounds. */
++  if(mt_use_gpi) {
++   marble_hwdiag_failure_snapshot(0);
++   marble_hwdiag_bytes(0,"confirmed_TX",mt_confirm_tx,sizeof(mt_confirm_tx));
++   marble_hwdiag_bytes(0,"confirmed_RX",mt_confirm_raw,sizeof(mt_confirm_raw));
++   marble_hwdiag_bytes(0,"valid_version",mt_version_raw,sizeof(mt_version_raw));
++   marble_hwdiag_bytes(0,"valid_ICinfo",mt_info,MIN(mt_le16(mt_info),64));
++   marble_hwdiag_value(0,"ICinfo_length/event",mt_le16(mt_info),mt_event);
++   marble_hwdiag_value(0,"ICinfo_scale/checksums",mt_factor,1);
++  }
 +  unsigned bad = 0, transitions = 0; uint32_t previous = mt_rd(mt_tlmm,0x15004)&1;
 +  marble_hwdiag_value(0,"IRQ_initial",previous,previous);
 +  for (;;) {
@@ -15538,14 +15545,16 @@ diff --git a/bsd/dev/marble_hwdiag.h b/bsd/dev/marble_hwdiag.h
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/marble_hwdiag.h
-@@ -0,0 +1,26 @@
+@@ -0,0 +1,33 @@
 +/* MARBLE only, bounded RAM diagnostics. No logger calls printf. */
 +#ifndef MARBLE_HWDIAG_H
 +#define MARBLE_HWDIAG_H
 +#include <sys/types.h>
 +enum mt_stage { MT_NONE, MT_WORKER, MT_MMIO, MT_POWER_RESET_ASSERT, MT_VDDIO,
 + MT_AVDD, MT_RESET_RELEASE, MT_RESET_WAIT, MT_GENI, MT_FIFO, MT_GPI, MT_CONFIRM,
-+ MT_VERSION, MT_ICINFO, MT_IRQ, MT_EVENT, MT_RUNNING, MT_FAILED, MT_CLOCK_SOURCE, MT_CLOCK_M_AHB, MT_CLOCK_S_AHB, MT_CLOCK_S4 };
++ MT_VERSION, MT_ICINFO, MT_IRQ, MT_EVENT, MT_RUNNING, MT_FAILED, MT_CLOCK_SOURCE, MT_CLOCK_M_AHB, MT_CLOCK_S_AHB, MT_CLOCK_S4,
++ MT_GPI_SMMU, MT_GPI_MEMORY, MT_GPI_EVENT_RING, MT_GPI_TX_CH, MT_GPI_RX_CH,
++ MT_GPI_START, MT_GPI_CONFIG, MT_GPI_TRANSFER, MT_GPI_EVENT };
 +enum mu_stage { MU_NONE, MU_WORKER, MU_REGULATORS, MU_REPEATER_RESET, MU_REFCLK,
 + MU_PHY_RESET, MU_PHY_INIT, MU_GDSC, MU_CLOCKS, MU_DWC_RESET, MU_QSCRATCH,
 + MU_SMMU, MU_DMA, MU_EP0, MU_RUN, MU_BUS_RESET, MU_CONNECT_DONE, MU_ENUM,
@@ -15558,18 +15567,23 @@ new file mode 100644
 + MH_POST_CFGNOC_OFF, MH_POST_AGGRE_OFF, MH_POST_EUSB_REF_OFF, MH_DWC_MAP,
 + MH_GSNPSID_INVALID, MH_DWC_REVISION, MH_DEVICE_ROLE, MH_USB2_CONFIG,
 + MH_DMA_ALLOC, MH_DMA_PHYS, MH_DMA_WIDTH, MH_DWC_SOFT_RESET, MH_EP0_SETUP,
-+ MH_DWC_RUN_HALT, MH_DWC_EVENT, MH_GCC_MAP };
++ MH_DWC_RUN_HALT, MH_DWC_EVENT, MH_GCC_MAP,
++ MH_GPI_OWNERSHIP, MH_GPI_SMMU_CAPS, MH_GPI_SMMU_OWNERSHIP,
++ MH_GPI_SMMU_READBACK, MH_GPI_SMMU_FAULT, MH_GPI_TLBI,
++ MH_GPI_COMMAND, MH_GPI_COMMAND_TIMEOUT, MH_GPI_CONTEXT,
++ MH_GPI_RING, MH_GPI_EVENT_ERROR, MH_GPI_TRANSFER_TIMEOUT, MH_GPI_LOOPBACK };
 +void marble_hwdiag_stage(unsigned, unsigned);
 +void marble_hwdiag_fail(unsigned, enum mh_reason, int, const char *);
 +void marble_hwdiag_value(unsigned, const char *, uint32_t, uint32_t);
 +void marble_hwdiag_bytes(unsigned, const char *, const uint8_t *, unsigned);
 +void marble_hwdiag_init(void);
++void marble_hwdiag_failure_snapshot(unsigned);
 +#endif
 diff --git a/bsd/dev/marble_hwdiag.c b/bsd/dev/marble_hwdiag.c
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/marble_hwdiag.c
-@@ -0,0 +1,203 @@
+@@ -0,0 +1,216 @@
 +/* RAM survives hardware-worker exits. VFS snapshot never gates boot.
 + * Framebuffer uses the existing AppleCLCD mapping, avoiding cache aliases.
 + * See docs/MARBLE_TOUCH_USB_V3_RESEARCH.md for button/overlay contract. */
@@ -15653,6 +15667,19 @@ new file mode 100644
 +  for (unsigned b = 0; b < 4 && i + b < n; b++) word |= (uint32_t)p[i+b] << (8*b);
 +  snprintf(key, sizeof(key), "%s+%02x", name, i); marble_hwdiag_value(usb, key, word, word);
 + }
++}
++/* Preserve the initial history and reserve its final64 slots for a terminal
++ * hardware snapshot, even after a long event stream filled the RAM history.
++ * Total capacity remains512 records; formatter/VFS/overlay are unchanged. */
++void marble_hwdiag_failure_snapshot(unsigned usb)
++{
++ if (!mh_take()) return;
++ struct mh_section *s=mh_section(usb);
++ if (s->count>MH_RECORDS-64) {
++  s->dropped+=s->count-(MH_RECORDS-64); s->count=MH_RECORDS-64;
++  __atomic_add_fetch(&mh_revision,1,__ATOMIC_RELEASE);
++ }
++ mh_drop();
 +}
 +/* Key driver supplies already sampled states; no duplicate SPMI transactions. */
 +void marble_hwdiag_keys(int, int);
@@ -15944,5 +15971,701 @@ new file mode 100644
 + if(!uh_mask(qs,8,1u<<8,0)||!uh_mask(qs,0x10,(1u<<20)|(1u<<28),(1u<<20)|(1u<<28))||
 +    !uh_mask(qs,0x30,1u<<24,1u<<24)) return false;
 + return true;
++}
++#endif
+diff --git a/bsd/dev/marble_gpi.h b/bsd/dev/marble_gpi.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/marble_gpi.h
+@@ -0,0 +1,73 @@
++/* MARBLE live DTS + Pzqqt cf63f539 include/linux/msm_gpi.h.
++ * Pure wire/ring/table helpers are also compiled by the host tests. */
++#ifndef MARBLE_GPI_H
++#define MARBLE_GPI_H
++#include <sys/types.h>
++#include <stdbool.h>
++#define MG_RESOURCE 0x00900000u
++#define MG_RESOURCE_SIZE 0x60000u
++#define MG_EE_OFFSET 0x10000u
++#define MG_SID 0x5b6u
++#define MG_IOVA 0x00100000u
++#define MG_PAGE 4096u
++#define MG_TRES 64u
++#define MG_EVENTS 256u /* vendor ev-factor2: 64 << 2 */
++#define MG_MAX_XFER 1032u
++struct mg_tre { uint32_t d[4]; };
++_Static_assert(sizeof(struct mg_tre)==16,"Qualcomm TRE/ERE size");
++/* All register arguments use vendor EE-relative offsets; map the resource,
++ * subtract the DT EE offset, then add the vendor offset (never add twice). */
++static inline uint32_t mg_offset(uint32_t vendor) { return vendor-MG_EE_OFFSET; }
++static inline unsigned mg_next(unsigned index,unsigned count) { return (index+1)&(count-1); }
++static inline unsigned mg_available(unsigned rp,unsigned wp,unsigned count) { return (rp-wp-1)&(count-1); }
++static inline int mg_index(uint32_t address,uint32_t base,unsigned count)
++{
++ if(address<base || address-base>=count*16 || ((address-base)&15)) return -1;
++ return (int)((address-base)/16);
++}
++/* Vendor gpi_of_dma_xlate: arg4 static slot is one-based, priority is bit0. */
++static inline int mg_decode(const uint32_t cells[5],unsigned *gpii,unsigned *priority)
++{
++ unsigned slot=(cells[4]&0x1e)>>1;
++ if(cells[0]>1 || cells[1]!=4 || cells[2]!=1 || cells[3]!=64 || !slot) return -1;
++ *gpii=slot-1; *priority=cells[4]&1; return 0;
++}
++/* spi-msm-geni.c setup_config0_tre: mode0, MSB, TX/RX pack, 8-4 bits. */
++static inline struct mg_tre mg_config(unsigned source,unsigned divider,bool loop)
++{
++ struct mg_tre t={{3u<<24 | (loop?1u<<8:0) | 4u,0,source<<16 | divider,0x00220001}};
++ return t;
++}
++static inline struct mg_tre mg_go(unsigned length,bool receive)
++{
++ struct mg_tre t={{receive?3u:1u,0,receive?length:0,0x00200001u | (receive?1u<<11:0)}};
++ return t; /* no FRAGMENTATION: one transfer, one automatic-CS interval */
++}
++static inline struct mg_tre mg_buffer(uint32_t iova,unsigned length,bool transmit)
++{
++ struct mg_tre t={{iova,0,length,0x00100000u | (transmit?1u<<9:0)}};
++ return t; /* exact vendor: TX IEOT, paired RX receives EOT via GO link_rx */
++}
++/* ARM SMMUv2 / Linux io-pgtable-arm: 4K, L1->L2->L3, 32-bit IOVA.
++ * Five owned data pages only; page-table memory itself is never DMA mapped. */
++static inline bool mg_tables(uint64_t *tables,uint64_t physical,unsigned pa_bits)
++{
++ if((physical&0x3fff) || pa_bits<36 || pa_bits>48 || physical>=(1ull<<pa_bits)-0x18000) return false;
++ for(unsigned i=0;i<3*512;i++) tables[i]=0;
++ tables[0]=(physical+0x1000)|3;
++ tables[512]=(physical+0x2000)|3;
++ for(unsigned i=0;i<5;i++) {
++  /* nG, AF, inner-shareable, unprivileged RW, normal WB MAIR index1,
++   * PXN+UXN. CPU allocation pages are 16K; expose only one 4K per page. */
++  tables[1024+256+i]=(physical+0x4000*(i+1)) | (3ull<<53) | 0xf47;
++ }
++ return true;
++}
++struct mg_memory { uintptr_t va; uint64_t pa; };
++int marble_gpi_dma_init(struct mg_memory *);
++bool marble_gpi_dma_fault(void);
++void marble_gpi_dma_snapshot(void);
++int marble_gpi_spi_init(uintptr_t se,unsigned source,unsigned divider);
++int marble_gpi_spi_xfer(const uint8_t *,uint8_t *,unsigned,bool);
++void marble_gpi_diag_snapshot(void);
++#endif
+diff --git a/bsd/dev/marble_gpi.c b/bsd/dev/marble_gpi.c
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/marble_gpi.c
+@@ -0,0 +1,350 @@
++/* Narrow MARBLE SE4 transport. Hardware definitions/order:
++ * Pzqqt cf63f539 drivers/dma/qcom/{gpi.c,msm_gpi_mmio.h},
++ * include/linux/msm_gpi.h and drivers/spi/spi-msm-geni.c.
++ * Only GPII0 is programmed. No Linux rings/physical DMA are reused. */
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <sys/errno.h>
++#include <kern/clock.h>
++#include <arm/caches_internal.h>
++#include "marble_hwdiag.h"
++#include "marble_gpi.h"
++extern vm_offset_t ml_io_map(vm_offset_t,vm_size_t);
++/* Vendor EE-relative offsets, GPII0 only (DT static-gpii-mask1). */
++#define MC_CH(k) (0x20000u+0x80u*(k))
++#define MC_EV 0x21000u
++#define MC_CH_DB(k) (0x22000u+8u*(k))
++#define MC_EV_DB 0x22100u
++#define MC_CH_CMD 0x23008u
++#define MC_EV_CMD 0x23010u
++#define MC_TYPE 0x23080u
++#define MC_TYPE_MASK 0x23088u
++#define MC_CH_IRQ 0x23090u
++#define MC_EV_IRQ 0x23094u
++#define MC_CH_CLEAR 0x230a0u
++#define MC_EV_CLEAR 0x230a4u
++#define MC_IEOB_CLEAR 0x230c0u
++#define MC_GLOBAL 0x23100u
++#define MC_GENERAL 0x23118u
++#define MC_ERROR 0x23200u
++static struct {
++ vm_offset_t regs,se; struct mg_memory memory;
++ unsigned source,divider,wp[2],rp[2],erp,ewp;
++ bool ready,failed,allocated[2],event_allocated,loopback,attempted,inflight;
++ struct mg_tre last_event;
++ unsigned saved_transfers;
++} mg;
++static uint32_t mg_rd(unsigned vendor)
++{
++ uint32_t v=*(volatile uint32_t *)(mg.regs+mg_offset(vendor));
++ __asm__ volatile("dmb oshld":::"memory"); return v;
++}
++static void mg_wr(unsigned vendor,uint32_t v)
++{
++ *(volatile uint32_t *)(mg.regs+mg_offset(vendor))=v;
++ __asm__ volatile("dsb sy":::"memory");
++}
++static uint32_t mg_se_rd(unsigned off)
++{ uint32_t v=*(volatile uint32_t *)(mg.se+off); __asm__ volatile("dmb oshld":::"memory"); return v; }
++static bool mg_se_mask(unsigned off,uint32_t mask,uint32_t bits)
++{
++ uint32_t old=mg_se_rd(off); if(old==0xffffffffu) return false;
++ *(volatile uint32_t *)(mg.se+off)=(old&~mask)|bits; __asm__ volatile("dsb sy":::"memory");
++ return (mg_se_rd(off)&mask)==bits;
++}
++static bool mg_set(unsigned off,uint32_t v,uint32_t mask)
++{
++ mg_wr(off,v); uint32_t got=mg_rd(off);
++ if(got==0xffffffffu || ((got^v)&mask)) {
++  marble_hwdiag_value(0,"GPI_WRITE_offset/value",off,got); return false;
++ }
++ return true;
++}
++void marble_gpi_diag_snapshot(void)
++{
++ if(!mg.regs) return;
++ for(unsigned ch=0;ch<3;ch++) {
++  unsigned base=ch==2?MC_EV:MC_CH(ch);
++  for(unsigned i=0;i<8;i+=2) {
++   char key[32]; snprintf(key,sizeof(key),"GPI0_%s_CTX%u/%u",ch==2?"EV":ch?"RX":"TX",i,i+1);
++   marble_hwdiag_value(0,key,mg_rd(base+4*i),mg_rd(base+4*(i+1)));
++  }
++ }
++ marble_hwdiag_value(0,"GPI0_TX/RX_SCRATCH0",mg_rd(MC_CH(0)+0x60),mg_rd(MC_CH(1)+0x60));
++ marble_hwdiag_value(0,"GPI0_TYPE/ERROR",mg_rd(MC_TYPE),mg_rd(MC_ERROR));
++ marble_hwdiag_value(0,"GPI0_GLOBAL/GENERAL",mg_rd(MC_GLOBAL),mg_rd(MC_GENERAL));
++ marble_hwdiag_value(0,"GPI0_CH/EV_IRQ",mg_rd(MC_CH_IRQ),mg_rd(MC_EV_IRQ));
++ marble_hwdiag_value(0,"GPI0_IEOB/SE_STATUS",mg_rd(0x230b0),mg_se_rd(0x40));
++ if(mg.memory.va && (mg.saved_transfers || mg.inflight)) {
++  for(unsigned i=0;i<3;i++) {
++   unsigned index=(mg.wp[0]+MG_TRES-3+i)&(MG_TRES-1);
++   const struct mg_tre *ring=(const struct mg_tre *)(mg.memory.va+0x4000);
++   marble_hwdiag_bytes(0,"GPI_LAST_TX_TRE",(const uint8_t *)&ring[index],16);
++  }
++  const struct mg_tre *ring=(const struct mg_tre *)(mg.memory.va+0x8000);
++  marble_hwdiag_bytes(0,"GPI_LAST_RX_TRE",(const uint8_t *)&ring[(mg.wp[1]+MG_TRES-1)&(MG_TRES-1)],16);
++  marble_hwdiag_bytes(0,"GPI_LAST_EVENT",(const uint8_t *)&mg.last_event,16);
++  marble_hwdiag_bytes(0,"GPI_LAST_TX_BYTES",(const uint8_t *)(mg.memory.va+0x10000),16);
++  marble_hwdiag_bytes(0,"GPI_LAST_RX_BYTES",(const uint8_t *)(mg.memory.va+0x14000),16);
++ }
++ marble_gpi_dma_snapshot();
++}
++static bool mg_fail(enum mh_reason reason,const char *gate)
++{
++ if(!mg.failed) {
++  mg.failed=true; mg.ready=false;
++  marble_hwdiag_failure_snapshot(0);
++  marble_gpi_diag_snapshot(); marble_hwdiag_fail(0,reason,-1,gate);
++ }
++ return false;
++}
++static int mg_error(enum mh_reason reason,const char *gate)
++{ (void)mg_fail(reason,gate); return -1; }
++/* Poll raw control completion and verify context state. Upper TYPE mask stays
++ * zero, so no GIC registration or shared interrupt infrastructure is changed.
++ * Raw status registers are the same ones gpi_handle_irq consumes. */
++static bool mg_command(bool event,unsigned ch,unsigned opcode,unsigned expected)
++{
++ unsigned status=event?MC_EV_IRQ:MC_CH_IRQ,clear=event?MC_EV_CLEAR:MC_CH_CLEAR;
++ unsigned bit=event?1u:1u<<ch,base=event?MC_EV:MC_CH(ch);
++ uint32_t before=mg_rd(base);
++ mg_wr(clear,bit); mg_wr(event?MC_EV_CMD:MC_CH_CMD,(opcode<<24)|(event?0:ch));
++ for(unsigned i=0;i<50000;i++) {
++  uint32_t irq=mg_rd(status),ctx=mg_rd(base);
++  if(irq!=0xffffffffu && (irq&bit)) {
++   mg_wr(clear,bit);
++   marble_hwdiag_value(0,event?"GPI0_EV_CMD/state":"GPI0_CH_CMD/state",(opcode<<24)|(ch<<16)|((before>>20)&15),(ctx>>20)&15);
++   /* Vendor DEALLOC completion does not update hardware context state. */
++   if(opcode==10 || (ctx!=0xffffffffu && ((ctx>>20)&15)==expected)) return true;
++   return mg_fail(MH_GPI_COMMAND,"GPI command completed with wrong state");
++  }
++  if((mg_rd(MC_GLOBAL)&1) || (mg_rd(MC_GENERAL)&15))
++   return mg_fail(MH_GPI_COMMAND,"GPI error during channel command");
++  delay(10);
++ }
++ return mg_fail(MH_GPI_COMMAND_TIMEOUT,event?"GPI event command timeout":"GPI channel command timeout");
++}
++static void mg_quarantine(void)
++{
++ /* Failure snapshot is already retained. Never reuse buffers after timeout.
++  * Stop/reset only allocated owned GPII0 channels, bounded like vendor
++  * gpi_terminate_all. No event reset while DMA may still be outstanding. */
++ for(unsigned ch=0;ch<2;ch++) if(mg.allocated[ch]) {
++  unsigned state=(mg_rd(MC_CH(ch))>>20)&15;
++  if(state==2 && !mg_command(false,ch,2,3)) continue;
++  state=(mg_rd(MC_CH(ch))>>20)&15;
++  if(state==1 || state==3 || state==15) (void)mg_command(false,ch,9,1);
++ }
++}
++static bool mg_context(unsigned base,unsigned iova,unsigned bytes,bool event,unsigned ch)
++{
++ /* gpi_alloc_chan / gpi_alloc_ev_chan: ALLOC command precedes context setup.
++  * TX is OUT1, RX IN0; protocol2 is GPI engine (scratch protocol1 is SPI). */
++ uint32_t config=event?0x10010002u:0x10000002u|(!ch?8u:0);
++ if(!mg_set(base,config,event?0xff01000fu:0xff07c00fu) || !mg_set(base+4,bytes,0xffff) ||
++    !mg_set(base+8,iova,0xffffffffu) || !mg_set(base+12,0,0xffffffffu)) return false;
++ unsigned db=event?MC_EV_DB:MC_CH_DB(ch);
++ if(!mg_set(db+4,0,0xffffffffu)) return false;
++ if(event) {
++  const unsigned zero[]={0x20,0x28,0x2c,0x30,0x34};
++  for(unsigned i=0;i<5;i++) if(!mg_set(base+zero[i],0,0xffffffffu)) return false;
++ } else {
++  if(!mg_set(base+0x60,((!ch)<<16)|(1u<<4)|4,0xffffffffu) ||
++     !mg_set(base+0x64,0,0xffffffffu) || !mg_set(base+0x68,0,0xffffffffu) ||
++     !mg_set(base+0x6c,0,0xffffffffu) || !mg_set(base+0x5c,1,0xffffffffu)) return false;
++ }
++ return true;
++}
++static bool mg_quiescent(void)
++{
++ /* GPI SID is shared by its APSS channels. Read-only qualification of the
++  * other DT-enabled instances prevents retargeting a DMA master still in use.
++  * No command/context/doorbell/mask is written outside GPII0. */
++ for(unsigned n=0;n<7;n++) for(unsigned ch=0;ch<2;ch++) {
++  uint32_t ctx=mg_rd(MC_CH(ch)+n*0x4000);
++  unsigned state=(ctx>>20)&15;
++  if(ctx==0xffffffffu || state==2 || state==4 || state==15 || (n && state)) {
++   marble_hwdiag_value(0,"GPI_busy_instance/channel",n,ch);
++   marble_hwdiag_value(0,"GPI_busy_CTX0",ctx,ctx);
++   return mg_fail(MH_GPI_OWNERSHIP,"GPI DMA master has active/unreadable channel");
++  }
++  if(n==0 && state && mg_rd(MC_CH(ch)+0x60)!=(((!ch)<<16)|0x14))
++   return mg_fail(MH_GPI_OWNERSHIP,"GPII0 allocated to another SE/protocol");
++ }
++ return true;
++}
++int marble_gpi_spi_init(uintptr_t se,unsigned source,unsigned divider)
++{
++ if(mg.attempted) return mg_error(MH_GPI_OWNERSHIP,"GPI init already attempted; resources pinned");
++ mg.attempted=true;
++ marble_hwdiag_stage(0,MT_GPI);
++ mg.se=se; mg.source=source; mg.divider=divider;
++ if(!se || source>7 || !divider || divider>4095) return mg_error(MH_LAYOUT,"GPI SPI clock parameters");
++ mg.regs=ml_io_map(MG_RESOURCE,MG_RESOURCE_SIZE);
++ if(!mg.regs) return mg_error(MH_MAPPING,"GPI resource mapping");
++ if(mg_se_rd(0x7c)!=source || mg_se_rd(0x48)!=((divider<<4)|1))
++  return mg_error(MH_READBACK,"GPI CONFIG0 clock differs from verified GENI clock");
++ marble_hwdiag_value(0,"GPI_resource/EEbase",MG_RESOURCE,MG_RESOURCE-MG_EE_OFFSET);
++ marble_hwdiag_value(0,"TOUCH_TRANSPORT_BUILD/IRQ",6,0xf4+32); /* DT GIC SPI244 -> INTID276 */
++ marble_hwdiag_value(0,"GPI_EEoffset/GPII",MG_EE_OFFSET,0);
++ marble_hwdiag_value(0,"GPI_TX/RX_SE_proto",0x00010004,1);
++ marble_hwdiag_value(0,"GPI_TREs/priority",MG_TRES,0);
++ marble_hwdiag_value(0,"GPI_SID/QUP_SID",MG_SID,0x5a3);
++ marble_hwdiag_value(0,"GPI0_INITIAL_TX/RX",mg_rd(MC_CH(0)),mg_rd(MC_CH(1)));
++ marble_hwdiag_value(0,"GPI0_INITIAL_EV/ERROR",mg_rd(MC_EV),mg_rd(MC_ERROR));
++ marble_hwdiag_value(0,"GPI0_INITIAL_SCRATCH",mg_rd(MC_CH(0)+0x60),mg_rd(MC_CH(1)+0x60));
++ if(!mg_quiescent()) return -1;
++ /* Suppress the external IRQ at the GPII type mask; poll raw sources. */
++ if(!mg_set(MC_TYPE_MASK,0,0x7f) || !mg_set(0x23098,3,3) || !mg_set(0x2309c,1,1) ||
++    !mg_set(0x230b8,1,1) || !mg_set(0x23108,1,15) || !mg_set(0x23120,15,15) ||
++    !mg_set(0x23180,1,1)) return mg_error(MH_READBACK,"GPI polled control setup");
++ /* Remaining vendor gpi_config_interrupts defaults, on owned GPII0 only. */
++ if(!mg_set(0x23188,0,~0u) || !mg_set(0x2318c,0,~0u) ||
++    !mg_set(0x23400,0,~0u) || !mg_set(0x23404,0,~0u))
++  return mg_error(MH_READBACK,"GPII0 MSI/scratch defaults");
++ uint32_t global=mg_rd(MC_GLOBAL),general=mg_rd(MC_GENERAL);
++ if(global==0xffffffffu || general==0xffffffffu) return mg_error(MH_GPI_OWNERSHIP,"GPI error status unreadable");
++ mg_wr(0x23110,global&15); mg_wr(0x23128,general&15); mg_wr(MC_ERROR,0); mg_wr(MC_IEOB_CLEAR,1);
++ /* Reclaim only a matching inactive SE4 allocation, never an unknown ring.
++  * Commands complete through MMIO; inherited rings are never submitted. */
++ for(unsigned ch=0;ch<2;ch++) if((mg_rd(MC_CH(ch))>>20)&15) {
++  if(!mg_command(false,ch,9,1) || !mg_command(false,ch,10,0)) return -1;
++ }
++ uint32_t ev=mg_rd(MC_EV);
++ if(ev==0xffffffffu) return mg_error(MH_GPI_OWNERSHIP,"GPI event context unreadable");
++ if((ev>>20)&15) if(!mg_command(true,0,9,1) || !mg_command(true,0,10,0)) return -1;
++ if(marble_gpi_dma_init(&mg.memory)) return -1;
++ /* Vendor GENI GSI mode, not SE-local DMA. Clear local pending IRQs and
++  * select the GPI event route; do not clear FIFO_IF_DISABLE_RO. */
++ if((mg_se_rd(0x40)&0x1001) || mg_se_rd(0xc54) || mg_se_rd(0xd54))
++  return mg_error(MH_BUSY,"GENI active before GSI selection");
++ if(!mg_se_mask(0xe1c,~0u,0) || !mg_se_mask(0x614,0x4c000001u,0) ||
++    !mg_se_mask(0x644,1,0)) return mg_error(MH_READBACK,"GENI GSI IRQ route");
++ const unsigned clears[]={0x618,0x648,0xc44,0xd44};
++ for(unsigned i=0;i<4;i++) { *(volatile uint32_t *)(se+clears[i])=~0u; }
++ __asm__ volatile("dsb sy":::"memory");
++ if(!mg_se_mask(0x258,1,1) || !mg_se_mask(0xe18,15,15))
++  return mg_error(MH_READBACK,"GENI GSI DMA/event mode readback");
++ marble_hwdiag_value(0,"GENI_GSI_MODE/EVENTS",mg_se_rd(0x258),mg_se_rd(0xe18));
++ clean_dcache64(mg.memory.pa,0x18000,TRUE);
++ marble_hwdiag_stage(0,MT_GPI_EVENT_RING);
++ if(!mg_command(true,0,0,1)) return -1;
++ mg.event_allocated=true;
++ if(!mg_context(MC_EV,MG_IOVA+2*MG_PAGE,MG_EVENTS*16,true,0)) goto readback;
++ mg.ewp=MG_EVENTS-1;
++ mg_wr(MC_EV_DB,MG_IOVA+2*MG_PAGE+mg.ewp*16);
++ for(unsigned ch=0;ch<2;ch++) {
++  marble_hwdiag_stage(0,ch?MT_GPI_RX_CH:MT_GPI_TX_CH);
++  if(!mg_command(false,ch,0,1)) goto failure;
++  mg.allocated[ch]=true;
++  if(!mg_context(MC_CH(ch),MG_IOVA+ch*MG_PAGE,MG_TRES*16,false,ch)) goto readback;
++ }
++ marble_hwdiag_stage(0,MT_GPI_START);
++ for(unsigned ch=0;ch<2;ch++) if(!mg_command(false,ch,1,2)) goto failure;
++ /* Vendor software RP/WP start at the ring base. Do not require hardware WP
++  * to reflect a doorbell that has not yet been rung. Sample it diagnostically;
++  * completion pointers must match owned IOVAs before any data is consumed. */
++ marble_gpi_diag_snapshot(); mg.ready=true;
++ marble_hwdiag_stage(0,MT_GPI_CONFIG);
++ /* spi-msm-geni.c setup_config0_tre explicitly supports SPI_LOOP via
++  * GSI_LOOPBACK_EN. One internal 16-byte transfer validates the transport
++  * before any Goodix command; the next CONFIG0 restores normal mode. */
++ static const uint8_t pattern[16]={0x11,0x22,0x33,0x44,0x55,0x66,0x77,0x88,0x99,0xaa,0xbb,0xcc,0xdd,0xee,0xff,0};
++ uint8_t received[16]; mg.loopback=true;
++ if(marble_gpi_spi_xfer(pattern,received,sizeof(pattern),true)) goto failure;
++ mg.loopback=false;
++ marble_hwdiag_bytes(0,"GPI_LOOPBACK_RX",received,sizeof(received));
++ if(memcmp(pattern,received,sizeof(pattern))) { mg_fail(MH_GPI_LOOPBACK,"GPI internal loopback mismatch"); goto failure; }
++ marble_hwdiag_value(0,"GPI_LOOPBACK_OK",1,sizeof(pattern)); return 0;
++readback:
++ mg_fail(MH_GPI_CONTEXT,"GPI ring context/read-pointer readback");
++failure:
++ mg_quarantine(); return -1;
++}
++static bool mg_queue(unsigned ch,struct mg_tre tre)
++{
++ if(!mg_available(mg.rp[ch],mg.wp[ch],MG_TRES)) return false;
++ struct mg_tre *ring=(struct mg_tre *)(mg.memory.va+0x4000*(ch+1));
++ ring[mg.wp[ch]]=tre; mg.wp[ch]=mg_next(mg.wp[ch],MG_TRES); return true;
++}
++static bool mg_events(bool receive,unsigned length,bool *tx_done,bool *rx_done)
++{
++ /* gpi_process_ieob() invokes gpi_process_events only after this raw source
++  * is pending. In particular, do not interpret an uninitialized EV RP as a
++  * completion before the first event exists. External IRQ remains masked. */
++ uint32_t irq=mg_rd(0x230b0);
++ if(irq==0xffffffffu) return mg_fail(MH_GPI_EVENT_ERROR,"GPI IEOB status unreadable");
++ if(!(irq&1)) return true;
++ uint32_t next=mg_rd(MC_EV+0x10);
++ int producer=mg_index(next,MG_IOVA+2*MG_PAGE,MG_EVENTS);
++ if(producer<0) return mg_fail(MH_GPI_RING,"GPI event RP outside owned IOVA ring");
++ if(mg.erp==(unsigned)producer) { mg_wr(MC_IEOB_CLEAR,1); return true; }
++ /* DMA-coherent DT: acquire after observing producer; no CPU dirty data in
++  * event pages. Explicit cache invalidation also supports the existing XNU
++  * direct-map aliases, using the same cache API as the UFS DMA driver. */
++ flush_dcache64(mg.memory.pa+0xc000,MG_PAGE,TRUE);
++ struct mg_tre *events=(struct mg_tre *)(mg.memory.va+0xc000);
++ for(unsigned budget=0;mg.erp!=(unsigned)producer && budget<MG_EVENTS;budget++) {
++  struct mg_tre event=events[mg.erp]; mg.last_event=event;
++  unsigned type=(event.d[3]>>16)&255,ch=event.d[3]>>24,code=event.d[2]>>24;
++  if(mg.saved_transfers<2) marble_hwdiag_bytes(0,"GPI_EVENT",(const uint8_t *)&event,16);
++  if(ch>1) return mg_fail(MH_GPI_EVENT_ERROR,"GPI event invalid channel");
++  if(type==0x22) {
++   int index=mg_index(event.d[0],MG_IOVA+ch*MG_PAGE,MG_TRES);
++   if(event.d[1] || index<0 || mg_next((unsigned)index,MG_TRES)!=mg.wp[ch] ||
++      (code!=1 && code!=2) || (event.d[2]&0xffffff)!=length || (event.d[3]&0xffff)==16)
++    return mg_fail(MH_GPI_EVENT_ERROR,"GPI transfer event code/length/pointer/status");
++   if(ch && !receive) return mg_fail(MH_GPI_EVENT_ERROR,"GPI unsolicited RX completion");
++   mg.rp[ch]=mg_next((unsigned)index,MG_TRES);
++   if(ch) *rx_done=true; else *tx_done=true;
++  } else if(type!=0x31) return mg_fail(MH_GPI_EVENT_ERROR,"GPI unsupported event type");
++  mg.erp=mg_next(mg.erp,MG_EVENTS); mg.ewp=mg_next(mg.ewp,MG_EVENTS);
++ }
++ __asm__ volatile("dsb sy":::"memory");
++ mg_wr(MC_EV_DB,MG_IOVA+2*MG_PAGE+mg.ewp*16); mg_wr(MC_IEOB_CLEAR,1);
++ return true;
++}
++int marble_gpi_spi_xfer(const uint8_t *tx,uint8_t *rx,unsigned length,bool receive)
++{
++ if(mg.failed) return -1; /* first specific failure is already persistent */
++ if(!mg.ready) return mg_error(MH_GPI_OWNERSHIP,"GPI transfer before successful init");
++ if(!tx || (receive&&!rx) || !length || length>MG_MAX_XFER) return mg_error(MH_LAYOUT,"GPI transfer arguments/bounds");
++ if(marble_gpi_dma_fault()) return mg_error(MH_GPI_SMMU_FAULT,"GPI SMMU fault before submission");
++ marble_hwdiag_stage(0,MT_GPI_CONFIG);
++ if(!mg_available(mg.rp[0],mg.wp[0],MG_TRES) ||
++    mg_available(mg.rp[0],mg.wp[0],MG_TRES)<3 || (receive&&!mg_available(mg.rp[1],mg.wp[1],MG_TRES)))
++  return mg_error(MH_GPI_RING,"GPI transfer ring full");
++ memcpy((void *)(mg.memory.va+0x10000),tx,length); bzero((void *)(mg.memory.va+0x14000),MG_PAGE);
++ struct mg_tre config=mg_config(mg.source,mg.divider,mg.loopback),go=mg_go(length,receive);
++ struct mg_tre out=mg_buffer(MG_IOVA+3*MG_PAGE,length,true),in=mg_buffer(MG_IOVA+4*MG_PAGE,length,false);
++ if(mg.saved_transfers<2) {
++  marble_hwdiag_bytes(0,"GPI_CONFIG0",(const uint8_t *)&config,16);
++  marble_hwdiag_bytes(0,"GPI_GO",(const uint8_t *)&go,16);
++  marble_hwdiag_bytes(0,"GPI_TX_TRE",(const uint8_t *)&out,16);
++  if(receive) marble_hwdiag_bytes(0,"GPI_RX_TRE",(const uint8_t *)&in,16);
++ }
++ if(!mg_queue(0,config)||!mg_queue(0,go)||!mg_queue(0,out)||(receive&&!mg_queue(1,in)))
++  return mg_error(MH_GPI_RING,"GPI enqueue bounds");
++ clean_dcache64(mg.memory.pa+0x4000,0x14000,TRUE);
++ __asm__ volatile("dsb sy":::"memory");
++ marble_hwdiag_stage(0,MT_GPI_TRANSFER);
++ mg.inflight=true;
++ /* TX descriptor first, then paired RX, same as setup_gsi_xfer. Link_rx
++  * holds the full-duplex GO until RX is available. No CS fragmentation. */
++ mg_wr(MC_CH_DB(0),MG_IOVA+mg.wp[0]*16);
++ if(receive) mg_wr(MC_CH_DB(1),MG_IOVA+MG_PAGE+mg.wp[1]*16);
++ bool tx_done=false,rx_done=!receive;
++ for(unsigned poll=0;poll<15000;poll++) {
++  if(marble_gpi_dma_fault()) { mg_fail(MH_GPI_SMMU_FAULT,"GPI SMMU fault during transfer"); break; }
++  if((mg_rd(MC_GLOBAL)&1)||(mg_rd(MC_GENERAL)&15)) { mg_fail(MH_GPI_EVENT_ERROR,"GPI global/general transfer error"); break; }
++  if(!mg_events(receive,length,&tx_done,&rx_done)) break;
++  if(tx_done&&rx_done) {
++   if(receive) { flush_dcache64(mg.memory.pa+0x14000,MG_PAGE,TRUE); memcpy(rx,(const void *)(mg.memory.va+0x14000),length); }
++   mg.inflight=false; mg.saved_transfers++; return 0;
++  }
++  delay(100);
++ }
++ mg_fail(MH_GPI_TRANSFER_TIMEOUT,"GPI transfer completion timeout"); mg_quarantine(); return -1;
++}
++#endif
+diff --git a/bsd/dev/marble_gpi_smmu.c b/bsd/dev/marble_gpi_smmu.c
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/marble_gpi_smmu.c
+@@ -0,0 +1,258 @@
++/* MARBLE GPI SID5b6 only. Register/program order: Linux 734bef548 arm-smmu.c
++ * and arm-smmu.h. 4K context/table encoding cross-checked with UniXNU
++ * ArmSmmu4K 4d0d6598. No global SMMU writes, no PA-as-IOVA fallback.
++ * Caller must establish all APSS GPI clients quiescent before route changes.
++ * Allocations and table leases are permanent, including on failure. */
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <sys/errno.h>
++#include <kern/clock.h>
++#include <vm/pmap.h>
++#include <vm/vm_kern.h>
++#include <arm/caches_internal.h>
++#include "marble_hwdiag.h"
++#include "marble_gpi.h"
++extern vm_offset_t ml_io_map(vm_offset_t,vm_size_t);
++extern ppnum_t pmap_find_phys(pmap_t,addr64_t);
++/* Live OEM apps-smmu phandle5d, qcom,qsmmu-v500; overrides constrain
++ * accessible NS banks/SMRs. ID1 still determines architectural spacing. */
++#define MS_PA 0x15000000u
++#define MS_SIZE 0x100000u
++#define MS_CBS 0x4eu
++#define MS_SMRS 0x78u
++#define MS_ALLOCATION 0x18000u
++static vm_offset_t ms_base;
++static unsigned ms_cb,ms_gr1,ms_context,ms_asid;
++static bool ms_owned,ms_attempted;
++static uint32_t ms_read(unsigned off)
++{
++ uint32_t v=*(volatile uint32_t *)(ms_base+off);
++ __asm__ volatile("dmb oshld":::"memory"); return v;
++}
++static uint64_t ms_read64(unsigned off)
++{
++ uint64_t v=*(volatile uint64_t *)(ms_base+off);
++ __asm__ volatile("dmb oshld":::"memory"); return v;
++}
++static void ms_write(unsigned off,uint32_t v)
++{
++ *(volatile uint32_t *)(ms_base+off)=v; __asm__ volatile("dsb sy":::"memory");
++}
++static void ms_write64(unsigned off,uint64_t v)
++{
++ *(volatile uint64_t *)(ms_base+off)=v; __asm__ volatile("dsb sy":::"memory");
++}
++static void ms_pair(const char *name,uint64_t v)
++{ marble_hwdiag_value(0,name,(uint32_t)v,(uint32_t)(v>>32)); }
++static bool ms_fail(enum mh_reason why,const char *gate)
++{ marble_hwdiag_failure_snapshot(0); marble_gpi_dma_snapshot(); marble_hwdiag_fail(0,why,-1,gate); return false; }
++static int ms_error(enum mh_reason why,const char *gate)
++{ (void)ms_fail(why,gate); return -1; }
++static bool ms_set(unsigned off,uint32_t v,uint32_t mask)
++{
++ ms_write(off,v); uint32_t got=ms_read(off);
++ if(got==0xffffffffu || ((got^v)&mask)) {
++  marble_hwdiag_value(0,"SMMU_WRITE_offset",off,got);
++  return ms_fail(MH_GPI_SMMU_READBACK,"GPI SMMU register readback");
++ }
++ return true;
++}
++static bool ms_set64(unsigned off,uint64_t v)
++{
++ ms_write64(off,v);
++ if(ms_read64(off)!=v) return ms_fail(MH_GPI_SMMU_READBACK,"GPI TTBR readback");
++ return true;
++}
++static bool ms_sync(void)
++{
++ /* Context-local ASID invalidation only, Linux arm_smmu_tlb_inv_context_s1. */
++ __asm__ volatile("dsb sy":::"memory");
++ ms_write(ms_context+0x610,ms_asid); ms_write(ms_context+0x7f0,0);
++ for(unsigned i=0;i<10000;i++) {
++  uint32_t v=ms_read(ms_context+0x7f4);
++  if(v!=0xffffffffu && !(v&1)) return true;
++  delay(1);
++ }
++ return ms_fail(MH_GPI_TLBI,"GPI context TLBSYNC timeout");
++}
++void marble_gpi_dma_snapshot(void)
++{
++ if(!ms_base) return;
++ marble_hwdiag_value(0,"GPI_SMMU_CR0/ID0",ms_read(0),ms_read(0x20));
++ if(!ms_owned) return;
++ marble_hwdiag_value(0,"GPI_CB/SCTLR",ms_cb,ms_read(ms_context));
++ marble_hwdiag_value(0,"GPI_CBAR/CBA2R",ms_read(ms_gr1+ms_cb*4),ms_read(ms_gr1+0x800+ms_cb*4));
++ ms_pair("GPI_TTBR0_lo/hi",ms_read64(ms_context+0x20));
++ marble_hwdiag_value(0,"GPI_TCR/TCR2",ms_read(ms_context+0x30),ms_read(ms_context+0x10));
++ marble_hwdiag_value(0,"GPI_MAIR0/1",ms_read(ms_context+0x38),ms_read(ms_context+0x3c));
++ marble_hwdiag_value(0,"GPI_FSR/FSYNR",ms_read(ms_context+0x58),ms_read(ms_context+0x68));
++ ms_pair("GPI_FAR_lo/hi",ms_read64(ms_context+0x60));
++}
++bool marble_gpi_dma_fault(void)
++{
++ if(!ms_owned) return true;
++ uint32_t fsr=ms_read(ms_context+0x58);
++ if(fsr&0xc00001feu) {
++  marble_gpi_dma_snapshot(); ms_fail(MH_GPI_SMMU_FAULT,"GPI SMMU translation fault"); return true;
++ }
++ return false;
++}
++static unsigned ms_width(unsigned code)
++{
++ const unsigned widths[]={32,36,40,42,44,48}; return code<6?widths[code]:0;
++}
++/* Validate architected ATS results for every mapped page and an unmapped guard.
++ * ATS is optional in ID0; direct software table readback is always required. */
++static bool ms_translate(unsigned iova,uint64_t physical,bool mapped)
++{
++ ms_write64(ms_context+0x800,iova);
++ for(unsigned i=0;i<10000;i++) {
++  uint32_t state=ms_read(ms_context+0x8f0);
++  if(state!=0xffffffffu && !(state&1)) {
++   uint64_t par=ms_read64(ms_context+0x50);
++   ms_pair("GPI_ATS_PAR",par);
++   if(mapped ? (!(par&1) && (par&0x0000fffffffff000ull)==physical) : !!(par&1)) return true;
++   return ms_fail(MH_GPI_SMMU_READBACK,"GPI ATS translation mismatch");
++  }
++  delay(1);
++ }
++ return ms_fail(MH_GPI_TLBI,"GPI ATS timeout");
++}
++int marble_gpi_dma_init(struct mg_memory *memory)
++{
++ if(!memory) return ms_error(MH_LAYOUT,"GPI memory descriptor missing");
++ if(ms_attempted) return ms_error(MH_GPI_SMMU_OWNERSHIP,"GPI SMMU init already attempted; resources pinned");
++ ms_attempted=true;
++ if(PAGE_SIZE!=0x4000 || PAGE_MASK!=0x3fff) return ms_error(MH_LAYOUT,"GPI requires MARBLE 16K CPU allocation pages");
++ marble_hwdiag_stage(0,MT_GPI_SMMU);
++ ms_base=ml_io_map(MS_PA,MS_SIZE);
++ if(!ms_base) return ms_error(MH_MAPPING,"GPI apps-SMMU map");
++ uint32_t cr0=ms_read(0),id0=ms_read(0x20),id1=ms_read(0x24),id2=ms_read(0x28);
++ marble_hwdiag_value(0,"GPI_SMMU_CR0/ID0",cr0,id0);
++ marble_hwdiag_value(0,"GPI_SMMU_ID1/ID2",id1,id2);
++ unsigned shift=(id1>>31)?16:12,pgsize=1u<<shift;
++ unsigned pages=1u<<(((id1>>28)&7)+1),banks=id1&255,s2=(id1>>16)&255;
++ unsigned count=id0&255,pa_bits=ms_width((id2>>4)&15);
++ bool exid=(cr0&8)&&(id0&256);
++ if(cr0==0xffffffffu || (cr0&1) || !(id0&(1u<<30)) || !(id0&(1u<<27)) ||
++    !(id2&(1u<<12)) || !pa_bits || pa_bits<36 || ms_width((id2>>8)&15)<32 ||
++    !count || count>MS_SMRS || !banks || banks>128 || s2>=banks ||
++    2ull*pages*pgsize>MS_SIZE || banks>pages)
++  return ms_error(MH_GPI_SMMU_CAPS,"GPI SMMU capabilities/active geometry");
++ /* No CB outside the live DT NS bank override may be claimed. */
++ banks=MIN(banks,MS_CBS); ms_gr1=pgsize;
++ uint32_t smr[MS_SMRS],s2cr[MS_SMRS]; bool used[128]={false};
++ unsigned matches=0,entry=MS_SMRS,free_entry=MS_SMRS;
++ for(unsigned i=0;i<count;i++) {
++  smr[i]=ms_read(0x800+i*4); s2cr[i]=ms_read(0xc00+i*4);
++  if(smr[i]==0xffffffffu || s2cr[i]==0xffffffffu)
++   return ms_error(MH_GPI_SMMU_OWNERSHIP,"GPI unreadable stream table");
++  bool valid=exid?!!(s2cr[i]&(1u<<10)):!!(smr[i]&(1u<<31));
++  unsigned mask=(smr[i]>>16)&(exid?65535:32767);
++  if(valid && ((s2cr[i]>>16)&3)==0) {
++   unsigned cb=s2cr[i]&255;
++   if(cb<banks) used[cb]=true;
++  }
++  if(!valid && smr[i]==0 && !(s2cr[i]&~(3u<<16)) && free_entry==MS_SMRS) free_entry=i;
++  if(valid && !(((smr[i]&65535)^MG_SID)&~mask)) {
++   entry=i; matches++; marble_hwdiag_value(0,"GPI_SID_SMR/S2CR",smr[i],s2cr[i]);
++   if(mask || (smr[i]&65535)!=MG_SID)
++    return ms_error(MH_GPI_SMMU_OWNERSHIP,"GPI SID covered by shared/wildcard SMR");
++   if(((s2cr[i]>>16)&3)==0) {
++    unsigned bank=s2cr[i]&255;
++    if(bank>=banks) return ms_error(MH_GPI_SMMU_OWNERSHIP,"GPI inherited CB inaccessible");
++    unsigned off=(pages+bank)*pgsize;
++    marble_hwdiag_value(0,"GPI_OLD_CB/SCTLR",bank,ms_read(off));
++    marble_hwdiag_value(0,"GPI_OLD_CBAR/CBA2R",ms_read(pgsize+bank*4),ms_read(pgsize+0x800+bank*4));
++    ms_pair("GPI_OLD_TTBR0",ms_read64(off+0x20));
++    marble_hwdiag_value(0,"GPI_OLD_TCR/TCR2",ms_read(off+0x30),ms_read(off+0x10));
++    marble_hwdiag_value(0,"GPI_OLD_MAIR/FSR",ms_read(off+0x38),ms_read(off+0x58));
++    ms_pair("GPI_OLD_FAR",ms_read64(off+0x60));
++   }
++  }
++ }
++ if(matches>1 || (!matches && free_entry==MS_SMRS))
++  return ms_error(MH_GPI_SMMU_OWNERSHIP,"GPI SID ambiguous/no free stream slot");
++ if(!matches) entry=free_entry;
++ /* Never overwrite inherited tables or a live bank. Select an unreferenced,
++  * disabled bank with empty roots, and an ASID absent from all NS banks.
++  * Other streams/context banks, including QUP SID5a3, remain untouched. */
++ bool asids[256]={false}; ms_cb=banks;
++ for(unsigned b=0;b<banks;b++) {
++  unsigned off=(pages+b)*pgsize; uint32_t ctl=ms_read(off);
++  if(ctl==0xffffffffu) { used[b]=true; continue; }
++  uint64_t root0=ms_read64(off+0x20),root1=ms_read64(off+0x28);
++  asids[(root0>>48)&255]=true; asids[(root1>>48)&255]=true;
++  /* Linux's AArch32 short-descriptor contexts carry ASID in CONTEXTIDR
++   * rather than TTBR. Conservatively exclude that namespace too. */
++  if(ctl&1) asids[ms_read(off+0x34)&255]=true;
++  if(b>=s2 && !used[b] && ctl==0 && root0==0 && root1==0 && ms_cb==banks) ms_cb=b;
++ }
++ ms_asid=1; while(ms_asid<256 && asids[ms_asid]) ms_asid++;
++ if(ms_cb==banks || ms_asid==256)
++  return ms_error(MH_GPI_SMMU_OWNERSHIP,"GPI no provably free context/ASID");
++ ms_context=(pages+ms_cb)*pgsize;
++ marble_hwdiag_value(0,"GPI_SMR_index/CB",entry,ms_cb);
++ marble_hwdiag_value(0,"GPI_ASID/granule",ms_asid,MG_PAGE);
++ marble_hwdiag_stage(0,MT_GPI_MEMORY);
++ vm_offset_t allocation=0;
++ if(kmem_alloc_contig(kernel_map,&allocation,MS_ALLOCATION,PAGE_MASK,0,0,
++    KMA_DATA|KMA_ZERO|KMA_PERMANENT,VM_KERN_MEMORY_IOKIT)!=KERN_SUCCESS)
++  return ms_error(MH_DMA_ALLOC,"GPI dedicated 96KiB allocation");
++ ppnum_t first=pmap_find_phys(kernel_pmap,allocation);
++ uint64_t physical=ptoa_64(first);
++ if(!first || (physical&PAGE_MASK)) return ms_error(MH_DMA_PHYS,"GPI physical backing/alignment");
++ for(unsigned off=0;off<MS_ALLOCATION;off+=PAGE_SIZE) {
++  ppnum_t pn=pmap_find_phys(kernel_pmap,allocation+off);
++  if(!pn || ptoa_64(pn)!=physical+off) return ms_error(MH_DMA_PHYS,"GPI noncontiguous physical backing");
++ }
++ memory->va=allocation; memory->pa=physical;
++ uint64_t *tables=(uint64_t *)allocation;
++ if(!mg_tables(tables,physical,pa_bits)) return ms_error(MH_LAYOUT,"GPI owned 4K table layout");
++ clean_dcache64(physical,3*MG_PAGE,TRUE); __asm__ volatile("dsb sy":::"memory");
++ volatile uint64_t *observed=(volatile uint64_t *)allocation;
++ for(unsigned i=0;i<1536;i++) {
++  uint64_t wanted=0;
++  if(i==0) wanted=(physical+0x1000)|3;
++  if(i==512) wanted=(physical+0x2000)|3;
++  if(i>=1280 && i<1285) wanted=(physical+0x4000*(i-1279))|(3ull<<53)|0xf47;
++  if(observed[i]!=wanted) return ms_error(MH_GPI_SMMU_READBACK,"GPI page-table readback");
++ }
++ ms_pair("GPI_memory_PA",physical);
++ marble_hwdiag_value(0,"GPI_IOVA_first/last",MG_IOVA,MG_IOVA+5*MG_PAGE-1);
++ marble_hwdiag_stage(0,MT_GPI_SMMU);
++ /* Revalidate lease immediately before any SMMU write. */
++ if(ms_read(0)!=cr0 || ms_read(ms_context)!=0 || ms_read64(ms_context+0x20)!=0 ||
++    ms_read64(ms_context+0x28)!=0 || ms_read(0x800+entry*4)!=smr[entry] || ms_read(0xc00+entry*4)!=s2cr[entry])
++  return ms_error(MH_GPI_SMMU_OWNERSHIP,"GPI SMMU lease changed");
++ /* Exact SID route is faulted while the new bank is prepared; no global CR0
++  * changes or unrelated SMR/S2CR writes. Existing context is not modified. */
++ uint32_t valid=exid?1u<<10:0;
++ if(!ms_set(0xc00+entry*4,(2u<<16)|(matches?valid:0),0xffffffffu)) return -1;
++ ms_owned=true;
++ unsigned cbar=ms_gr1+ms_cb*4,cba2r=ms_gr1+0x800+ms_cb*4;
++ unsigned oas=(id2>>4)&15;
++ /* Linux/ArmSmmu4K: AArch64 S1/S2 bypass, 32-bit input, WBWA/inner-shareable
++  * table walks, EPD1, 4K TG0/TG1, upstream SEP, ASID16. Poll faults (CFIE0). */
++ if(!ms_set(cba2r,1,0xffffffffu) || !ms_set(cbar,0x1f300,0xffffffffu) ||
++    !ms_set(ms_context+0x10,(7u<<15)|(1u<<4)|oas,~0x60u) ||
++    !ms_set(ms_context+0x30,0x80803520u,0xffffffffu) ||
++    !ms_set64(ms_context+0x20,((uint64_t)ms_asid<<48)|physical) ||
++    !ms_set64(ms_context+0x28,(uint64_t)ms_asid<<48) ||
++    !ms_set(ms_context+0x38,0xff44,0xffffffffu) || !ms_set(ms_context+0x3c,0,0xffffffffu)) return -1;
++ ms_write(ms_context+0x58,0xc00001feu);
++ if(!ms_sync() || !ms_set(ms_context,0x1027,~0x1000u)) return -1;
++ marble_gpi_dma_snapshot();
++ if(marble_gpi_dma_fault()) return -1;
++ if(!(id0&(1u<<26))) {
++  for(unsigned i=0;i<5;i++) if(!ms_translate(MG_IOVA+i*MG_PAGE,physical+0x4000*(i+1),true)) return -1;
++  if(!ms_translate(MG_IOVA+5*MG_PAGE,0,false)) return -1;
++ }
++ /* Publish a unique exact SID only after table/context/ATS validation. */
++ if(!matches && !ms_set(0x800+entry*4,MG_SID|(exid?0:1u<<31),0xffffffffu)) return -1;
++ if(!ms_set(0xc00+entry*4,ms_cb|valid,0xffffffffu)) return -1;
++ marble_hwdiag_value(0,"GPI_route_SMR/S2CR",ms_read(0x800+entry*4),ms_read(0xc00+entry*4));
++ return 0;
 +}
 +#endif

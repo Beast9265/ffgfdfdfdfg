@@ -29,6 +29,8 @@ def diagnostic_stubs(tree):
     return header + r"""
 static bool mh_first_spi;
 static unsigned rh_diag_usb;
+static uint8_t mt_confirm_tx[13],mt_confirm_raw[8],mt_version_raw[28];
+void marble_hwdiag_failure_snapshot(unsigned u){(void)u;}
 void marble_hwdiag_stage(unsigned u,unsigned s){(void)u;(void)s;}
 void marble_hwdiag_value(unsigned u,const char *n,uint32_t a,uint32_t b){(void)u;(void)n;(void)a;(void)b;}
 void marble_hwdiag_bytes(unsigned u,const char *n,const uint8_t *p,unsigned z){(void)u;(void)n;(void)p;(void)z;}
@@ -57,6 +59,9 @@ static uintptr_t mt_se;
 static uint32_t mt_depth=16,mt_rxdepth=16,mt_event;
 static unsigned mt_factor;
 static bool mt_bad,mt_legacy_range,mt_down[10];
+static bool mt_use_gpi;
+static void marble_gpi_diag_snapshot(void){}
+static int marble_gpi_spi_xfer(const uint8_t *tx,uint8_t *rx,unsigned n,bool r){(void)tx;(void)rx;(void)n;(void)r;assert(0);return -1;}
 static int mt_x[10],mt_y[10],mt_diag;
 static uint8_t mt_tx[1032],mt_rx[1032];
 static unsigned hidcalls,downs,ups,xx,yy;

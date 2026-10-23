@@ -85,9 +85,11 @@ def decode(cells):
  assert len(cells)==5
  ch,se,proto,tres,priority=cells
  assert ch in (0,1) and se<12 and proto in (1,2,3) and tres>0
- return ('TX' if ch==0 else 'RX',se,{1:'SPI',2:'UART',3:'I2C'}[proto],tres,priority)
-assert decode([0,4,1,0x40,2])==('TX',4,'SPI',64,2)
-assert decode([1,4,1,0x40,2])==('RX',4,'SPI',64,2)
+ slot=(priority&0x1e)>>1
+ assert slot
+ return ('TX' if ch==0 else 'RX',se,{1:'SPI',2:'UART',3:'I2C'}[proto],tres,slot-1,priority&1)
+assert decode([0,4,1,0x40,2])==('TX',4,'SPI',64,0,0)
+assert decode([1,4,1,0x40,2])==('RX',4,'SPI',64,0,0)
 assert 'USB probe refused' not in usb and 'gadget startup refused' not in usb
 fb=(r/'iokit/Kernel/arm/SweetFramebuffer.cpp').read_text();diag=(r/'bsd/dev/marble_hwdiag.c').read_text()
 assert fb.count('marble_hwdiag_overlay(')==2 # declaration plus one vsync caller

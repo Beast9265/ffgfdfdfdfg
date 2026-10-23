@@ -1,6 +1,43 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
 
+## Active MARBLE GPI touch v6 — implementation/local validation
+
+New user task supersedes v5 packaging. Starting HEAD e545d4198f5a3baef4c2e5162889cf5e47be1845;
+v5 HWCG source passed exact CI39961658578, but was not packaged before redirect.
+No v5/v6 physical result is claimed. V4 overlay is physically confirmed fixed.
+Current task is touch transport only; USB sources/overlay/display/HID/keys/root
+remain unchanged. No phone operation or root retention cleanup.
+
+Vendor cf63f539 five-cell arg4=2 selects STATIC GPII0,priority0, not dynamic
+GPII/priority2. This corrects earlier v4 research/test decoding. New modular
+marble_gpi.c/h and marble_gpi_smmu.c implement GPII0 TX0/RX1/EV0,SE4/SPI,
+64-TRE rings/256-event ring, bounded polled commands/completions, source-backed
+CONFIG0/GO/DMA and one-time internal loopback. FIFO-disabled now selects GPI;
+tested FIFO fallback and Goodix framing/power/HID path remain. Version checksum
+retries follow brl_read_version; uncertain DMA stays quarantined.
+
+SID5b6 uses private4K stage1 tables mapping only five owned data pages inside
+IOVA100000..104fff. Dedicated96KiB allocation, physical verification, free
+unreferenced disabled bank/ASID proof, exact stream lease/readbacks, cache/TLBI/
+ATS+guard validation precede publication. Shared/wildcard/busy/unknown ownership
+refuses before doorbells. Other DT-enabled GPIIs are checked read-only solely
+to establish SID quiescence; only GPII0 is programmed. No global SMMU changes,
+identity mapping, QUP SID5a3 changes, SE-local DMA or firmware upload.
+
+Local ASan/UBSan actual-source GPI/SMMU models, TRE/address/ring/table tests,
+EXID/TLBI/ATS/fault tests, actual offset8/confirm framing, original Goodix/FIFO/
+power/clock tests pass. Four modifiedunits compile with CIheaders to arm64.
+Diagnostic IDs appended;512records/64KiB/file/overlay preserved; terminal
+snapshots reserve64tail slots. Strict82patch replay and all89generated-file
+equality PASS; fourmodified/new Cunits actualCIheader arm64objectcompile and
+symbolclosure PASS.16nonMARBLEpreprocess checks(SWEET/VMAPPLE/BCM2837/T8103)
+PASS; allothergeneratedsource byte-identical to v4;10Pythonunit tests PASS.
+Details and pinned ledger:docs/MARBLE_TOUCH_GPI_V6.md. Pending commit/CI/package.
+New image target will be
+latest-marble-xnu-touch-gpi-v6.img with exact known-good ADT and USB disabled.
+
+
 ## Active MARBLE touch v5 — local implementation and validation
 
 User physically tested v4: overlay is readable/stable, but touch failed at

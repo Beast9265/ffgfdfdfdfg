@@ -77,7 +77,7 @@ funcs=[]
 for name in ['mh_section','mh_take','mh_drop','mh_format']:
  funcs.append(t.function(d,name))
 # non-static public functions extraction by brace count
-for name in ['marble_hwdiag_stage','marble_hwdiag_fail','marble_hwdiag_value','marble_hwdiag_bytes','marble_hwdiag_active','marble_hwdiag_overlay']:
+for name in ['marble_hwdiag_stage','marble_hwdiag_fail','marble_hwdiag_value','marble_hwdiag_bytes','marble_hwdiag_active','marble_hwdiag_overlay','marble_hwdiag_failure_snapshot']:
  needle=name+'(';pos=d.index(needle)
  while d[d.index('\n',pos)-1]==';':pos=d.index(needle,pos+len(needle))
  brace=d.index('{',pos);i=brace+1;depth=1
@@ -107,6 +107,9 @@ int main(void){
  memset(iso_font,255,sizeof(iso_font));
  for(unsigned p=0;p<12;p++){mh_page=p;assert(marble_hwdiag_overlay((uintptr_t)fb,1080,2400,4320));}
  for(unsigned i=0;i<32;i++)assert(fb[1080*2400+i]==0x12345678);
+ unsigned dropped=mh.touch.dropped;
+ marble_hwdiag_failure_snapshot(0);assert(mh.touch.count==MH_RECORDS-64&&mh.touch.dropped==dropped+64);
+ marble_hwdiag_value(0,"terminal register",1,2);assert(mh.touch.count==MH_RECORDS-63);
  /* Existing-console LSB-first: first bit is leftmost; unchanged frames
   * must not repaint even a background pixel. Exercise the actual cache. */
  if (mh.version >= 4) {
