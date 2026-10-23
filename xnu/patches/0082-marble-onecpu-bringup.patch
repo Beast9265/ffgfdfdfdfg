@@ -14217,7 +14217,7 @@ diff --git a/bsd/dev/marble_touch.c b/bsd/dev/marble_touch.c
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/marble_touch.c
-@@ -0,0 +1,479 @@
+@@ -0,0 +1,475 @@
 +/* MARBLE Berlin-D active initialization; references and ownership in
 + * docs/MARBLE_INPUT_HW.md. No firmware/config upload or Berlin-A operations. */
 +#if defined(ARM64_BOARD_CONFIG_MARBLE)
@@ -14611,10 +14611,11 @@ new file mode 100644
 + if (mt_active) { if (!mt_confirm()) return false; mt_wait(100); }
 + printf("MARBLE TOUCH: version read @0x10014 bytes=28\n");
 + uint8_t version[28] = {0};
-+ if (!mt_read(0x10014, version, sizeof(version)) || !mt_checksum(version, sizeof(version)) ||
-+     memcmp(version + 10, "9916", 4)) {
-+  mt_dump("version", version, sizeof(version)); return mt_stop("version transport/checksum/PID9916");
-+ }
++ bool version_read = mt_read(0x10014, version, sizeof(version));
++ const char *version_gate = !version_read ? "version transport" :
++     !mt_checksum(version, sizeof(version)) ? "version checksum" :
++     memcmp(version + 10, "9916", 4) ? "version PID not 9916" : NULL;
++ if (version_gate) { mt_dump("version", version, sizeof(version)); return mt_stop(version_gate); }
 + if (mt_diag) printf("MARBLE TOUCH: identified GT%.8s ROM%.6s FW=%02x.%02x.%02x.%02x sensor%u\n",
 +     version + 10, version, version[18], version[19], version[20], version[21], version[23]);
 + mt_legacy_range = !memcmp(version, "BERLIN", 6) && !memcmp(version + 10, "9916", 4);
@@ -14623,18 +14624,13 @@ new file mode 100644
 + if (!mt_read(0x10070, length, 2)) return mt_stop("IC-info length transport");
 + unsigned len = mt_le16(length);
 + printf("MARBLE TOUCH: IC-info length=%u read @0x10070\n", len);
-+ bool info_read = len >= 34 && len < MT_MAX && mt_read(0x10070, mt_info, len);
-+ if (!info_read || !mt_parse_info(mt_info, len)) {
++ if (len < 34 || len > MT_MAX) return mt_stop("IC-info length outside 34..1024");
++ if (!mt_read(0x10070, mt_info, len)) return mt_stop("IC-info body transport");
++ if (!mt_parse_info(mt_info, len)) {
 +  printf("MARBLE TOUCH: IC-info/checksum/report geometry unsupported len%u; withheld\n", len);
-+  if (mt_diag && info_read) {
-+   for (unsigned i = 0; i + 16 <= 64 && i + 16 <= len; i += 16)
-+    printf("MARBLE TOUCH: IC-info[%u] %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x\n",
-+        i, mt_info[i], mt_info[i+1], mt_info[i+2], mt_info[i+3],
-+        mt_info[i+4], mt_info[i+5], mt_info[i+6], mt_info[i+7],
-+        mt_info[i+8], mt_info[i+9], mt_info[i+10], mt_info[i+11],
-+        mt_info[i+12], mt_info[i+13], mt_info[i+14], mt_info[i+15]);
-+  }
-+  return mt_stop("IC-info length/transport/checksum/layout/geometry");
++  if (mt_diag) mt_dump("IC-info", mt_info, len);
++  return mt_stop(mt_le16(mt_info) != len ? "IC-info changed length" :
++      !mt_checksum(mt_info, len) ? "IC-info checksum" : "IC-info unsupported layout/geometry");
 + }
 + return true;
 +}
