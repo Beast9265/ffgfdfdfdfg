@@ -107,6 +107,15 @@ int main(void){
  memset(iso_font,255,sizeof(iso_font));
  for(unsigned p=0;p<12;p++){mh_page=p;assert(marble_hwdiag_overlay((uintptr_t)fb,1080,2400,4320));}
  for(unsigned i=0;i<32;i++)assert(fb[1080*2400+i]==0x12345678);
+ /* Existing-console LSB-first: first bit is leftmost; unchanged frames
+  * must not repaint even a background pixel. Exercise the actual cache. */
+ if (mh.version >= 4) {
+  memset(iso_font,0,sizeof(iso_font));iso_font['M'*16]=1;
+  mh_page=0;mh_active=0;assert(!marble_hwdiag_overlay((uintptr_t)fb,1080,2400,4320));mh_active=1;
+  assert(marble_hwdiag_overlay((uintptr_t)fb,1080,2400,4320));
+  assert(fb[24*1080+16]==0xffffff&&fb[24*1080+30]==0x101820);
+  fb[0]=0x1234;assert(marble_hwdiag_overlay((uintptr_t)fb,1080,2400,4320)&&fb[0]==0x1234);
+ }
  assert(!marble_hwdiag_overlay((uintptr_t)fb,1125,2436,4500));mh_active=0;assert(!marble_hwdiag_overlay((uintptr_t)fb,1080,2400,4320));free(fb);
  puts("PASS diagnostics: terminal reason retention, 512-record bound/drop count, bounded formatter, all 12 framebuffer pages and guard words under ASan/UBSan");
 }

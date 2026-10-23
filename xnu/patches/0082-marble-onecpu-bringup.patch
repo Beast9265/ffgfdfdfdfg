@@ -12740,7 +12740,7 @@ diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFrame
  		return false;
  	}
  	uint32_t hz = 10;
-@@ -201,11 +270,17 @@
+@@ -201,11 +270,18 @@
  	setProperty("external", false);
  	setProperty("DisplayPipePlaneBaseAlignment", 64ULL, 32);
  	registerService();
@@ -12754,12 +12754,13 @@ diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFrame
  }
  
 +#if defined(ARM64_BOARD_CONFIG_MARBLE)
++extern "C" int marble_hwdiag_active(void);
 +extern "C" int marble_hwdiag_overlay(uintptr_t, unsigned, unsigned, unsigned);
 +#endif
  void
  AppleCLCD::vsyncFired(OSObject *owner, IOTimerEventSource *sender)
  {
-@@ -242,8 +317,14 @@
+@@ -242,8 +318,14 @@
  		sender->setTimeoutUS(SWEET_FB_VSYNC_US);
  		return;
  	}
@@ -12776,7 +12777,7 @@ diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFrame
  	if (flush) {
  		rec = (uint8_t *)IOMallocData(SWEET_FB_SWAP_REC_SIZE);
  		if (rec != NULL) {
-@@ -304,14 +385,17 @@
+@@ -304,14 +386,17 @@
  	fDirty = true;
  	IOLockUnlock(fLock);
  	if ((++sweet_fb_swap_count % 1000) == 0) {
@@ -12790,13 +12791,13 @@ diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFrame
  {
 -	uint32_t mask = get32(rec, 0x104);
 +	#if defined(ARM64_BOARD_CONFIG_MARBLE)
-+ if (marble_hwdiag_overlay(fPixels, fWidth, fHeight, fRowBytes)) return;
++ if (marble_hwdiag_active()) return;
 +#endif
 + uint32_t mask = get32(rec, 0x104);
  
  
  	if (!fConsolePaused) {
-@@ -320,7 +404,10 @@
+@@ -320,7 +405,10 @@
  		if (PE_parse_boot_argn("sweetfb_noconsole", &quiet, sizeof(quiet)) && quiet != 0) {
  			/* Not PE_initialize_console(kPEDisableScreen): its console switch
  			 * writes the read-only-late cons_ops_index and panics. */
@@ -12807,7 +12808,7 @@ diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFrame
  		}
  	}
  
-@@ -338,7 +425,7 @@
+@@ -338,7 +426,7 @@
  		SweetSurface *s = sweet_surface_copy(id);
  		if (sweet_fb_swaps_logged < 16) {
  			sweet_fb_swaps_logged++;
@@ -12816,7 +12817,7 @@ diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFrame
  			    get32(rec, 0x50), layer, id, s ? s->width : 0, s ? s->height : 0,
  			    s ? s->pixelFormat : 0, s ? s->bytesPerRow : 0, sx, sy, get32(a, 8),
  			    get32(a, 12), dx, dy, w, h);
-@@ -419,6 +506,9 @@
+@@ -419,6 +507,9 @@
  		return false;
  	}
  	fFB->addClient(this);
@@ -12826,7 +12827,7 @@ diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFrame
  	return true;
  }
  
-@@ -528,7 +618,7 @@
+@@ -528,7 +619,7 @@
  			IOLockUnlock(fFB->fLock);
  			char name[32];
  			proc_selfname(name, sizeof(name));
@@ -12835,7 +12836,7 @@ diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFrame
  			    args->scalarInput[0] ? "on" : "off");
  		}
  		break;
-@@ -542,7 +632,7 @@
+@@ -542,7 +633,7 @@
  				fFB->fDirty = true;     /* on: redraw the latest frame */
  			}
  			IOLockUnlock(fFB->fLock);
@@ -12844,7 +12845,7 @@ diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFrame
  		}
  		break;
  	case kSweetFBSwapWait:
-@@ -562,10 +652,29 @@
+@@ -562,10 +653,29 @@
  		}
  		char name[32];
  		proc_selfname(name, sizeof(name));
@@ -13648,7 +13649,7 @@ diff --git a/bsd/dev/marble_touch.c b/bsd/dev/marble_touch.c
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/marble_touch.c
-@@ -0,0 +1,571 @@
+@@ -0,0 +1,668 @@
 +/* MARBLE Berlin-D active initialization; references and ownership in
 + * docs/MARBLE_INPUT_HW.md. No firmware/config upload or Berlin-A operations. */
 +#if defined(ARM64_BOARD_CONFIG_MARBLE)
@@ -13673,7 +13674,8 @@ new file mode 100644
 +#define MT_ERRORS 0x33007e3eu /* command, GP errors and FIFO errors; not watermarks */
 +static vm_offset_t mt_se, mt_tlmm, mt_gcc;
 +static uint32_t mt_depth, mt_rxdepth, mt_event;
-+static unsigned mt_factor;
++static unsigned mt_factor, mt_clock_level;
++static bool mt_rcg_forced;
 +static bool mh_first_spi;
 +static bool mt_started, mt_bad, mt_legacy_range, mt_down[MT_FINGERS];
 +static int mt_x[MT_FINGERS], mt_y[MT_FINGERS], mt_chan, mt_diag;
@@ -13855,43 +13857,96 @@ new file mode 100644
 + mt_wait(100); /* GOODIX_NORMAL_RESET_DELAY_MS, before device confirm. */
 + return true;
 +}
++/* Qualcomm GCC parent preparation precedes branch enable. See V4 ledger.
++ * Only S4 RCG and our three vote bits are owned; no CX/PLL vote is added. */
++static bool
++mt_clock_fail(enum mh_reason reason, const char *gate)
++{
++ marble_hwdiag_fail(0, reason, -1, gate);
++ printf("MARBLE TOUCH: STOP clock=%s\n", gate); return false;
++}
++static void
++mt_clock_snapshot(bool after)
++{
++ const unsigned off[] = {0x62008,0x274dc,0x27004,0x27008,0x274e4,0x274e8,0x274f8};
++ const char *names[] = {"GCC_VOTE_62008","S4_CBCR_274dc","M_AHB_27004","S_AHB_27008","S4_CMD_274e4","S4_CFG_274e8","S4_DFS_274f8"};
++ for (unsigned i=0;i<sizeof(off)/sizeof(off[0]);i++) {
++  char name[32]; uint32_t value=mt_rd(mt_gcc,off[i]);
++  snprintf(name,sizeof(name),"%s_%s",names[i],after?"AFTER":"BEFORE");
++  marble_hwdiag_value(0,name,value,value);
++ }
++}
++static bool
++mt_clock_poll(unsigned off, uint32_t mask, uint32_t want, enum mh_reason reason, const char *gate)
++{
++ for (unsigned i=0;i<1000;i++) {
++  uint32_t value=mt_rd(mt_gcc,off);
++  if (value!=0xffffffffu && (value&mask)==want) return true;
++  delay(1);
++ }
++ mt_clock_snapshot(true); return mt_clock_fail(reason,gate);
++}
++static bool
++mt_source_clock(void)
++{
++ marble_hwdiag_stage(0,MT_CLOCK_SOURCE);
++ uint32_t dfs=mt_rd(mt_gcc,0x274f8), cmd=mt_rd(mt_gcc,0x274e4);
++ if (dfs==0xffffffffu || cmd==0xffffffffu) return mt_clock_fail(MH_READBACK,"S4 RCG unreadable");
++ mt_clock_level=0; mt_rcg_forced=false;
++ if (!mt_clock_poll(0x274e4,1,0,MH_S4_RCG_UPDATE,"S4 RCG pending update timeout")) return false;
++ if (dfs&1) {
++  /* DFS tables are firmware-owned; validate a supported XO level, never
++   * disable DFS or rewrite its tables. GENI selection follows live clocks. */
++  bool found=false;
++  for (unsigned level=0;level<8;level++) {
++   uint32_t cfg=mt_rd(mt_gcc,0x27500+level*4); char key[32];
++   snprintf(key,sizeof(key),"S4_DFS_LEVEL%u",level); marble_hwdiag_value(0,key,cfg,cfg);
++   if (!found && cfg!=0xffffffffu && (cfg&0x371f)==1) { mt_clock_level=level; found=true; }
++  }
++  if (!found) return mt_clock_fail(MH_PROTOCOL,"S4 DFS has no XO level; tables unchanged");
++ } else {
++  /* clk_rcg2_configure + safe-config enable: XO/div1, integer MND mode,
++   * HW_CLK_CTRL bit20. Force only this RCG during its bounded update.
++   * Shadow CFG is written before UPDATE; no gated GENI access occurs here. */
++  if ((mt_rd(mt_gcc,0x274e8)&0x10371f)==0x100001 && !(cmd&(1u<<31))) return true;
++  if (!mt_mask(mt_gcc,0x274e8,0x10371f,0x100001)) return mt_clock_fail(MH_READBACK,"S4 RCG config readback");
++  if (!mt_mask(mt_gcc,0x274e4,2,2)) return mt_clock_fail(MH_READBACK,"S4 RCG force-enable readback");
++  mt_rcg_forced=!(cmd&2);
++  mt_store(mt_gcc,0x274e4,mt_rd(mt_gcc,0x274e4)|1);
++  if (!mt_clock_poll(0x274e4,1,0,MH_S4_RCG_UPDATE,"S4 RCG update timeout")) return false;
++  if (!mt_clock_poll(0x274e4,1u<<31,0,MH_S4_RCG_ROOT,"S4 RCG root halt timeout")) return false;
++ }
++ return true;
++}
++static bool
++mt_branch_clock(unsigned bit, unsigned off, unsigned stage, enum mh_reason reason, const char *gate)
++{
++ marble_hwdiag_stage(0,stage);
++ if (!mt_mask(mt_gcc,0x62008,1u<<bit,1u<<bit)) return mt_clock_fail(MH_READBACK,"QUP0 vote readback");
++ return mt_clock_poll(off,1u<<31,0,reason,gate);
++}
 +static bool
 +mt_clocks(void)
 +{
-+ /* Captured SE4 branch/vote offsets, SM8450 GCC family. Own bits only. */
-+ const uint32_t votes = (1u << 6) | (1u << 7) | (1u << 14);
-+ if (!mt_mask(mt_gcc, 0x62008, votes, votes)) return mt_stop("GCC vote readback");
-+ for (unsigned i = 0; i < 1000; i++) {
-+  if (!((mt_rd(mt_gcc, 0x274dc) | mt_rd(mt_gcc, 0x27004) |
-+      mt_rd(mt_gcc, 0x27008)) & (1u << 31))) return true;
-+  delay(1);
++ mt_clock_snapshot(false);
++ if (!mt_source_clock()) return false;
++ /* Exact vendor se_geni_clks_on order: M_AHB, S_AHB, then SE clock. */
++ if (!mt_branch_clock(6,0x27004,MT_CLOCK_M_AHB,MH_M_AHB_BRANCH,"QUP0 M_AHB halt timeout") ||
++     !mt_branch_clock(7,0x27008,MT_CLOCK_S_AHB,MH_S_AHB_BRANCH,"QUP0 S_AHB halt timeout") ||
++     !mt_branch_clock(14,0x274dc,MT_CLOCK_S4,MH_S4_BRANCH,"S4 branch halt timeout")) return false;
++ if (mt_rcg_forced) {
++  if (!mt_mask(mt_gcc,0x274e4,2,0)) return mt_clock_fail(MH_READBACK,"S4 RCG restore force-enable");
++  if (!mt_clock_poll(0x274dc,1u<<31,0,MH_S4_BRANCH,"S4 branch halt after RCG handoff")) return false;
 + }
-+ return mt_stop("GCC SE4/AHB branch timeout");
++ mt_clock_snapshot(true); return true;
 +}
 +static bool
 +mt_spi_clock(void)
 +{
-+ /* Select existing XO 19.2MHz DFS level, or program only this engine's RCG.
-+  * Divider2 gives <=9.6MHz, below captured 15MHz controller maximum. */
-+ uint32_t dfs = mt_rd(mt_gcc, 0x274f8);
-+ unsigned level = 0;
-+ if (dfs & 1) {
-+  for (; level < 8; level++) {
-+   uint32_t cfg = mt_rd(mt_gcc, 0x27500 + level * 4);
-+   if ((cfg & 0x371f) == 1) break;
-+  }
-+  if (level == 8) return mt_stop("no inherited XO DFS level; no PLL/DFS table writes");
-+ } else {
-+  if (!mt_mask(mt_gcc, 0x274e8, 0x371f, 1)) return mt_stop("SE4 RCG config readback");
-+  mt_store(mt_gcc, 0x274e4, mt_rd(mt_gcc, 0x274e4) | 1);
-+  unsigned i;
-+  for (i = 0; i < 1000 && (mt_rd(mt_gcc, 0x274e4) & 1); i++) delay(1);
-+  if (i == 1000) return mt_stop("SE4 RCG update timeout");
-+ }
-+ mt_wr(0x7c, level); mt_wr(0x48, (2u << 4) | 1);
-+ printf("MARBLE TOUCH: SE4 XO clock DFS=%#x level=%u MCLK=%#x sel=%#x\n",
-+     dfs, level, mt_rd(mt_se, 0x48), mt_rd(mt_se, 0x7c));
-+ return mt_rd(mt_se, 0x48) == 0x21 && mt_rd(mt_se, 0x7c) == level ? true : mt_stop("SE4 clock readback");
++ /* Clocks are now live. Only GENI's source index and protocol divider. */
++ mt_wr(0x7c,mt_clock_level); mt_wr(0x48,(2u<<4)|1);
++ marble_hwdiag_value(0,"GENI_CLK_SEL/MCLK",mt_rd(mt_se,0x7c),mt_rd(mt_se,0x48));
++ return mt_rd(mt_se,0x48)==0x21 && mt_rd(mt_se,0x7c)==mt_clock_level ? true : mt_stop("SE4 clock readback");
 +}
 +
 +/* Little-endian CPU FIFO words; MSB-first bits within each 8-bit SPI word.
@@ -14055,6 +14110,43 @@ new file mode 100644
 + }
 + return true;
 +}
++/* Read-only OEM five-cell GPI discovery. No channel/ring ownership claim.
++ * Vendor gpi.c subtracts gpi-ee-offset from the mapped base before adding
++ * msm_gpi_mmio.h offsets. Keep accesses inside the live DT 0x60000 range. */
++static void
++mt_gpi_snapshot(void)
++{
++ marble_hwdiag_stage(0,MT_GPI);
++ vm_offset_t gpi=ml_io_map(0x00900000,0x60000);
++ marble_hwdiag_value(0,"GPI_map/EE_offset",gpi!=0,0x10000);
++ if(gpi) for(unsigned n=1;n<=6;n++) {
++  for(unsigned ch=0;ch<2;ch++) {
++   unsigned base=0x10000+0x4000*n+0x80*ch;
++   const unsigned offsets[]={0,4,8,12,0x60};
++   const char *names[]={"CTX0","LEN","BASELO","BASEHI","SCRATCH0"};
++   for(unsigned i=0;i<5;i++) {
++    char key[32]; uint32_t v=mt_rd(gpi,base+offsets[i]);
++    snprintf(key,sizeof(key),"GPI%u_CH%u_%s",n,ch,names[i]); marble_hwdiag_value(0,key,v,v);
++   }
++  }
++  unsigned off=0x11000+0x4000*n; char key[32]; uint32_t v=mt_rd(gpi,off);
++  snprintf(key,sizeof(key),"GPI%u_EV_CTX0",n); marble_hwdiag_value(0,key,v,v);
++ }
++ vm_offset_t smmu=ml_io_map(0x15000000,0x10000);
++ if(!smmu) { marble_hwdiag_value(0,"GPI_SMMU_map",0,0); return; }
++ uint32_t cr0=mt_rd(smmu,0),id0=mt_rd(smmu,0x20);
++ marble_hwdiag_value(0,"GPI_SMMU_CR0/ID0",cr0,id0);
++ if(cr0==0xffffffffu || !id0 || id0==0xffffffffu || !(id0&(1u<<27))) return;
++ bool exid=(cr0&8)&&(id0&256);
++ for(unsigned i=0;i<(id0&255);i++) {
++  uint32_t smr=mt_rd(smmu,0x800+i*4),s2cr=mt_rd(smmu,0xc00+i*4);
++  bool valid=exid ? !!(s2cr&(1u<<10)) : !!(smr&(1u<<31));
++  unsigned mask=(smr>>16)&(exid?65535:32767);
++  if(valid && !(((smr&65535)^0x5b6)&~mask)) {
++   char key[32]; snprintf(key,sizeof(key),"SID5b6_match%u",i); marble_hwdiag_value(0,key,smr,s2cr);
++  }
++ }
++}
 +static bool
 +mt_probe(void)
 +{
@@ -14076,6 +14168,12 @@ new file mode 100644
 + printf("MARBLE TOUCH: initial reset physical=%u IRQ physical=%u\n",
 +     mt_rd(mt_tlmm, 0x14004) & 1, mt_rd(mt_tlmm, 0x15004) & 1);
 + if (mt_active && !mt_clocks()) return false;
++ if (!mt_active) {
++  mt_clock_snapshot(false);
++  if (!mt_clock_poll(0x27004,1u<<31,0,MH_M_AHB_BRANCH,"QUP0 M_AHB inherited halt") ||
++      !mt_clock_poll(0x27008,1u<<31,0,MH_S_AHB_BRANCH,"QUP0 S_AHB inherited halt") ||
++      !mt_clock_poll(0x274dc,1u<<31,0,MH_S4_BRANCH,"S4 inherited halt")) return false;
++ }
 + mt_mode_diag();
 + printf("MARBLE TOUCH: raw GENI FW=%#x SFW=%#x status=%#x DMA=%#x\n",
 +     mt_rd(mt_se, 0x68), mt_rd(mt_se, 0x6c), mt_rd(mt_se, 0x40), mt_rd(mt_se, 0x258));
@@ -14093,8 +14191,10 @@ new file mode 100644
 +  printf("MARBLE TOUCH: rails expected PM8350C ldoc2=1800mV ldoc9=3224mV; voltage not measured\n");
 + }
 + if (((fw >> 8) & 255) != 1) return mt_stop("resident SPI protocol firmware absent; no loader");
-+ if (!mt_fifo_available(mt_rd(mt_se, 0x64)))
++ if (!mt_fifo_available(mt_rd(mt_se, 0x64))) {
++  mt_gpi_snapshot();
 +  return mt_stop("FIFO_IF_DISABLE=1/invalid: Linux prefers GPI; no safe owned GPI/SMMU path");
++ }
 + if ((status & 0x1001) || (mt_rd(mt_se, 0x800) & 0xfffffff) ||
 +     (mt_rd(mt_se, 0x804) & 0x1ffffff)) return mt_stop("GENI busy or FIFO not empty");
 + if (((hwtx >> 24) & 63) != 32 || ((hwrx >> 24) & 63) != 32 ||
@@ -14108,9 +14208,7 @@ new file mode 100644
 +  mt_wr(0xe30, mt_rd(mt_se, 0xe30) | 0xf);
 +  mt_wr(0x24, 0x7f); mt_wr(0x20, 1);
 + } else {
-+  if ((dma & 1) || !(mt_rd(mt_se, 0x48) & 1) ||
-+      ((mt_rd(mt_gcc, 0x274dc) | mt_rd(mt_gcc, 0x27004) |
-+       mt_rd(mt_gcc, 0x27008)) & (1u << 31))) return mt_stop("inherited FIFO/clock state");
++  if ((dma & 1) || !(mt_rd(mt_se, 0x48) & 1)) return mt_stop("inherited FIFO/clock state");
 +  for (unsigned pin = 16; pin <= 19; pin++)
 +   if (((mt_rd(mt_tlmm, pin * 0x1000) >> 2) & 15) != 1) return mt_stop("inherited SPI pinmux");
 +  if ((mt_rd(mt_tlmm, 0x14000) & 0x23c) != 0x200 ||
@@ -14676,7 +14774,7 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
  	{ "master", 0x0f010 },
  	{ "sleep", 0x0f014 },
  	{ "utmi", 0x0f018 },
-@@ -58,6 +86,7 @@
+@@ -58,10 +86,15 @@
  	{ "aggre-axi", 0x8201c },
  	{ "ahb2phy", 0x6a004 },
  	{ "clkref", 0x8c010 },
@@ -14684,11 +14782,88 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
  };
  
  #define DWC3_PA                 0x0a600000
-@@ -76,62 +105,118 @@
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++#define DWC3_SIZE 0x10000 /* covers OEM child 0xd93c, rounded to 16K */
++#else
+ #define DWC3_SIZE               0x0000d000
++#endif
+ #define QUSB2_PA                0x088e2000
+ #define QUSB2_SIZE              0x00000400
+ 
+@@ -73,66 +106,166 @@
+ 	return v;
+ }
+ 
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++static bool
++ud_marble_post_clocks(vm_offset_t gcc)
++{
++ const unsigned off[]={0x49004,0x49018,0x49020,0x49024,0x49084,0x49088,0x9c00c,0x9c010};
++ const char *names[]={"POST_GDSCR_49004","POST_MASTER_49018","POST_SLEEP_49020","POST_UTMI_49024","POST_CFGNOC_49084","POST_AGGRE_49088","POST_EUSB_REF_9c00c","POST_USB3_REF_9c010"};
++ const enum mh_reason reasons[]={MH_POST_GDSC_OFF,MH_POST_MASTER_OFF,MH_POST_SLEEP_OFF,MH_POST_UTMI_OFF,MH_POST_CFGNOC_OFF,MH_POST_AGGRE_OFF,MH_POST_EUSB_REF_OFF};
++ uint32_t values[8]; marble_hwdiag_stage(1,MU_POST_CLOCKS);
++ for(unsigned i=0;i<8;i++) { values[i]=usb_rd(gcc,off[i]); marble_hwdiag_value(1,names[i],values[i],values[i]); }
++ for(unsigned i=0;i<7;i++) {
++  /* CLKREF enable is bit0, unlike ordinary CBCR halt bit31. USB3's
++   * separate reference gate is diagnostic only in high-speed mode. */
++  bool live=i==0 ? !!(values[i]&(1u<<31)) : i==6 ? !!(values[i]&1) : !(values[i]&CBCR_CLK_OFF);
++  if(values[i]==0xffffffffu || !live) { marble_hwdiag_fail(1,reasons[i],-1,names[i]); return false; }
++ }
++ return true;
++}
++static vm_offset_t
++ud_marble_core_prepare(int enabled)
++{
++ marble_hwdiag_stage(1,MU_DWC_MAP);
++ vm_offset_t dwc=ml_io_map(DWC3_PA,DWC3_SIZE);
++ marble_hwdiag_value(1,"DWC_map_ok/size",dwc!=0,DWC3_SIZE);
++ if(!dwc) { marble_hwdiag_fail(1,MH_DWC_MAP,-1,"DWC_MAP_FAILED"); return 0; }
++ marble_hwdiag_stage(1,MU_DWC_ID);
++ const unsigned off[]={0xc120,0xc110,0xc118,0xc200,0xc140,0xc700,0xc704,0xc708,0xc70c,0xc720,0xc400,0xc404,0xc408,0xc40c};
++ const char *names[]={"GSNPSID","GCTL","GSTS","GUSB2PHYCFG","GHWPARAMS0","DCFG","DCTL","DEVTEN","DSTS","DALEPENA","GEVNTADRLO","GEVNTADRHI","GEVNTSIZ","GEVNTCOUNT"};
++ for(unsigned i=0;i<sizeof(off)/sizeof(off[0]);i++) { uint32_t v=usb_rd(dwc,off[i]); marble_hwdiag_value(1,names[i],v,v); }
++ uint32_t id=usb_rd(dwc,0xc120), family=id&0xffff0000u;
++ /* vendor/upstream dwc3_core_is_valid: DWC3, DWC31, DWC32.
++  * DWC4 is intentionally unsupported by this small gadget implementation. */
++ if(family!=0x55330000u && family!=0x33310000u && family!=0x33320000u) {
++  marble_hwdiag_fail(1,MH_GSNPSID_INVALID,-1,"GSNPSID_INVALID"); return 0;
++ }
++ if(family!=0x55330000u) {
++  uint32_t rev=usb_rd(dwc,0xc1a0),type=usb_rd(dwc,0xc1a4);
++  marble_hwdiag_value(1,"VER_NUMBER/TYPE",rev,type);
++  if(!rev || rev==0xffffffffu) { marble_hwdiag_fail(1,MH_DWC_REVISION,-1,"DWC_REVISION_INVALID"); return 0; }
++ }
++ if(enabled!=2) return dwc;
++ marble_hwdiag_stage(1,MU_DEVICE_ROLE);
++ uint32_t ctl=usb_rd(dwc,0xc110);
++ *(volatile uint32_t *)(dwc+0xc110)=(ctl&~(3u<<12))|(2u<<12);
++ __asm__ volatile("dsb sy" ::: "memory");
++ uint32_t after=usb_rd(dwc,0xc110); marble_hwdiag_value(1,"GCTL_device",ctl,after);
++ if(after==0xffffffffu || ((after>>12)&3)!=2) { marble_hwdiag_fail(1,MH_DEVICE_ROLE,-1,"GCTL_DEVICE_ROLE_READBACK"); return 0; }
++ marble_hwdiag_stage(1,MU_USB2_CONFIG);
++ uint32_t phy=usb_rd(dwc,0xc200),mask=(1u<<6)|(1u<<8)|(1u<<3)|(15u<<10);
++ *(volatile uint32_t *)(dwc+0xc200)=(phy&~mask)|(9u<<10);
++ __asm__ volatile("dsb sy" ::: "memory");
++ after=usb_rd(dwc,0xc200); marble_hwdiag_value(1,"GUSB2PHYCFG_config",phy,after);
++ if(after==0xffffffffu || (after&mask)!=(9u<<10)) { marble_hwdiag_fail(1,MH_USB2_CONFIG,-1,"GUSB2PHYCFG_READBACK"); return 0; }
++ return dwc;
++}
  void
  sweet_usb_probe(void)
  {
 -	int enabled = 1;
++ int enabled=0; PE_parse_boot_argn(USB_ARG,&enabled,sizeof(enabled));
++ if(!enabled) { marble_hwdiag_fail(1,MH_DISABLED,0,"marbleusb disabled"); return; }
++ vm_offset_t gcc=ml_io_map(GCC_PA,GCC_SIZE);
++ if(!gcc) { marble_hwdiag_fail(1,MH_GCC_MAP,-1,"USB GCC map failed"); return; }
++ if(!marble_usb_hw_prepare(gcc,enabled==2) || !ud_marble_post_clocks(gcc)) return;
++ vm_offset_t dwc=ud_marble_core_prepare(enabled);
++ if(dwc && enabled==2) sweet_usb_gadget_start(dwc);
++}
++#else
++void
++sweet_usb_probe(void)
++{
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
 + int enabled = 0; /* dedicated debug image opts in; normal boot untouched */
 +#else
@@ -14702,10 +14877,7 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
 +	PE_parse_boot_argn(USB_ARG, &enabled, sizeof(enabled));
  	if (!enabled) {
 -		return;
-+		#ifdef ARM64_BOARD_CONFIG_MARBLE
-+  marble_hwdiag_fail(1,MH_GATE,-1,"USB probe refused (see register snapshot)");
-+#endif
-+  return;
++		  return;
  	}
  	vm_offset_t gcc = ml_io_map(GCC_PA, GCC_SIZE);
  	if (gcc == 0) {
@@ -14715,10 +14887,7 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
 -	gdscr = usb_rd(gcc, GCC_USB30_PRIM_GDSCR);
 -	printf("SWEET USB: GDSC usb30_prim 0x%08x (%s)\n", gdscr, (gdscr & (1u << 31)) ? "on" : "off");
 +		printf(USB_LOG "GCC map failed\n");
-+		#ifdef ARM64_BOARD_CONFIG_MARBLE
-+  marble_hwdiag_fail(1,MH_GATE,-1,"USB probe refused (see register snapshot)");
-+#endif
-+  return;
++		  return;
 +	}
 +	#ifdef ARM64_BOARD_CONFIG_MARBLE
 + if (!marble_usb_hw_prepare(gcc, enabled == 2)) return;
@@ -14740,10 +14909,7 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
 -		printf("SWEET USB: controller unpowered or unclocked; DWC3 not read\n");
 -		return;
 +		printf(USB_LOG "controller unpowered or unclocked; DWC3 not read\n");
-+		#ifdef ARM64_BOARD_CONFIG_MARBLE
-+  marble_hwdiag_fail(1,MH_GATE,-1,"USB probe refused (see register snapshot)");
-+#endif
-+  return;
++		  return;
  	}
  	vm_offset_t dwc = ml_io_map(DWC3_PA, DWC3_SIZE);
  	if (dwc == 0) {
@@ -14752,10 +14918,7 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
 -	}
 -	printf("SWEET USB: DWC3 GSNPSID 0x%08x GCTL 0x%08x GSTS 0x%08x GUSB2PHYCFG 0x%08x\n",
 +		printf(USB_LOG "DWC3 map failed\n");
-+		#ifdef ARM64_BOARD_CONFIG_MARBLE
-+  marble_hwdiag_fail(1,MH_GATE,-1,"USB probe refused (see register snapshot)");
-+#endif
-+  return;
++		  return;
 +	}
 +	printf(USB_LOG "DWC3 GSNPSID 0x%08x GCTL 0x%08x GSTS 0x%08x GUSB2PHYCFG 0x%08x\n",
  	    usb_rd(dwc, 0xc120), usb_rd(dwc, 0xc110), usb_rd(dwc, 0xc118), usb_rd(dwc, 0xc200));
@@ -14771,9 +14934,6 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
 + uint32_t id = usb_rd(dwc, 0xc120), ctl = usb_rd(dwc, 0xc110);
 + if ((id & 0xffff0000u) != 0x55330000u) {
 +  printf(USB_LOG "STOP: resident DWC3 device-mode identity not validated\n");
-+#ifdef ARM64_BOARD_CONFIG_MARBLE
-+  marble_hwdiag_fail(1,MH_GATE,-1,"USB probe refused (see register snapshot)");
-+#endif
 +  return;
 + }
 + if (enabled == 2) {
@@ -14782,9 +14942,6 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
 +  __asm__ volatile("dsb sy" ::: "memory");
 +  marble_hwdiag_value(1,"GCTL_device",ctl,usb_rd(dwc,0xc110));
 +  if (((usb_rd(dwc,0xc110)>>12)&3)!=2) { marble_hwdiag_fail(1,MH_READBACK,5,"GCTL device role");
-+#ifdef ARM64_BOARD_CONFIG_MARBLE
-+  marble_hwdiag_fail(1,MH_GATE,-1,"USB probe refused (see register snapshot)");
-+#endif
 +  return; }
 +  /* Board DT: dis_u2_susphy, dis_enblslpm; USB2 8-bit UTMI. */
 +  uint32_t phy=usb_rd(dwc,0xc200);
@@ -14801,18 +14958,12 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
 -		printf("SWEET USB: ahb2phy clock off; QUSB2 PHY not read\n");
 -		return;
 +		printf(USB_LOG "ahb2phy clock off; QUSB2 PHY not read\n");
-+		#ifdef ARM64_BOARD_CONFIG_MARBLE
-+  marble_hwdiag_fail(1,MH_GATE,-1,"USB probe refused (see register snapshot)");
-+#endif
-+  return;
++		  return;
  	}
  	vm_offset_t phy = ml_io_map(QUSB2_PA, QUSB2_SIZE);
  	if (phy == 0) {
 -		return;
-+		#ifdef ARM64_BOARD_CONFIG_MARBLE
-+  marble_hwdiag_fail(1,MH_GATE,-1,"USB probe refused (see register snapshot)");
-+#endif
-+  return;
++		  return;
  	}
  	/* DT qcom,qusb-phy-reg-offset order (Linux phy-msm-qusb-v2.c): PORT_TUNE1 0x240,
  	 * PLL_COMMON_STATUS_ONE 0x1a0, PWR_CTRL1 0x210, INTR_CTRL 0x230,
@@ -14820,11 +14971,15 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
 -	printf("SWEET USB: QUSB2 PLL_STATUS 0x%08x PWR_CTRL1 0x%08x PORT_TUNE1 0x%08x TEST1 0x%08x\n",
 +	printf(USB_LOG "QUSB2 PLL_STATUS 0x%08x PWR_CTRL1 0x%08x PORT_TUNE1 0x%08x TEST1 0x%08x\n",
  	    usb_rd(phy, 0x1a0), usb_rd(phy, 0x210), usb_rd(phy, 0x240), usb_rd(phy, 0x254));
+-}
 +#endif
- }
++}
++
++#endif
  
  /*
-@@ -227,6 +312,9 @@
+  * Step 2: USB device mode with only the default control endpoint, enough
+@@ -227,6 +360,9 @@
  	enum { EP0_SETUP, EP0_DATA, EP0_WAIT_STATUS2, EP0_WAIT_STATUS3, EP0_STATUS } state;
  	bool        data_in;        /* data stage direction */
  	uint32_t    events;
@@ -14834,7 +14989,7 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
  	bool        configured;
  	uint8_t     data_alt;       /* data interface alternate setting */
  	/* network */
-@@ -241,7 +329,11 @@
+@@ -241,7 +377,11 @@
  static inline void
  dwc_wr(uint32_t off, uint32_t v)
  {
@@ -14847,7 +15002,7 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
  	__asm__ volatile ("dsb sy" ::: "memory");
  }
  
-@@ -278,14 +370,14 @@
+@@ -278,14 +418,14 @@
  		if (!(v & DEPCMD_CMDACT)) {
  			uint32_t status = (v >> 12) & 0xf;
  			if (status) {
@@ -14864,7 +15019,7 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
  	return -1;
  }
  
-@@ -351,7 +443,11 @@
+@@ -351,7 +491,11 @@
  };
  /* The host side's MAC (ECM iMACAddress); the phone's own is ..:02 */
  static const char *const ud_strings[] = {
@@ -14877,7 +15032,7 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
  };
  static const uint8_t ud_phone_mac[ETHER_ADDR_LEN] = { 0x02, 0x00, 0x5e, 0x77, 0xee, 0x02 };
  
-@@ -407,13 +503,16 @@
+@@ -407,13 +551,16 @@
  	    ud_epcmd(EP_INT, DEPCMD_SETEPCONFIG, (3u << 1) | (16u << 3) | (2u << 17),
  	    (1u << 8) | (8u << 16) | ((uint32_t)EP_INT << 25), 0) ||
  	    ud_epcmd(EP_INT, DEPCMD_SETTRANSFRESOURCE, 1, 0, 0)) {
@@ -14896,7 +15051,7 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
  }
  
  static void
-@@ -426,9 +525,13 @@
+@@ -426,9 +573,13 @@
  	uint16_t index = (uint16_t)(st[4] | st[5] << 8);
  	uint16_t length = (uint16_t)(st[6] | st[7] << 8);
  	uint32_t n = 0;
@@ -14913,7 +15068,7 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
  	ud.data_in = (type & 0x80) != 0;
  	if ((type & 0x60) == 0x20) {    /* class request (e.g. SET_ETHERNET_PACKET_FILTER) */
  		ok = (length == 0);
-@@ -444,12 +547,18 @@
+@@ -444,12 +595,18 @@
  	} else if (req == 5) {          /* SET_ADDRESS: takes effect now (DWC3 handles the timing) */
  		uint32_t dcfg = dwc_rd(DCFG) & ~(0x7fu << 3);
  		dwc_wr(DCFG, dcfg | ((uint32_t)(value & 0x7f) << 3));
@@ -14934,7 +15089,7 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
  	} else if (req == 8) {          /* GET_CONFIGURATION */
  		data[0] = ud.configured ? 1 : 0; n = 1;
  	} else if (req == 0) {          /* GET_STATUS */
-@@ -513,6 +622,17 @@
+@@ -513,6 +670,17 @@
  		    mbuf_mclget(MBUF_DONTWAIT, MBUF_TYPE_DATA, &m) == 0 &&
  		    (mbuf_flags(m) & MBUF_EXT) && mbuf_maxlen(m) >= len) {
  			struct ifnet_stat_increment_param stats = {};
@@ -14952,7 +15107,7 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
  			memcpy(mbuf_data(m), (const void *)(ud.dma + UD_RX), len);
  			mbuf_setlen(m, len);
  			mbuf_pkthdr_setlen(m, len);
-@@ -643,8 +763,8 @@
+@@ -643,8 +811,8 @@
  	init.ver = IFNET_INIT_CURRENT_VERSION;
  	init.len = sizeof(init);
  	init.flags = IFNET_INIT_LEGACY;
@@ -14963,7 +15118,7 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
  	init.name = "ue";
  	init.unit = 0;
  	init.family = IFNET_FAMILY_ETHERNET;
-@@ -660,7 +780,7 @@
+@@ -660,7 +828,7 @@
  	init.broadcast_addr = etherbroadcastaddr;
  	init.broadcast_len = ETHER_ADDR_LEN;
  	if (ifnet_allocate_extended(&init, &ud.ifp) != 0) {
@@ -14972,7 +15127,7 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
  		ud.ifp = NULL;
  		return;
  	}
-@@ -670,7 +790,7 @@
+@@ -670,7 +838,7 @@
  	ifnet_set_baudrate(ud.ifp, 480000000);
  	ifnet_set_flags(ud.ifp, IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST, 0xffff);
  	if (ifnet_attach(ud.ifp, NULL) != 0) {
@@ -14981,7 +15136,7 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
  		ud.ifp = NULL;
  		return;
  	}
-@@ -701,7 +821,7 @@
+@@ -701,7 +869,7 @@
  		sock_close(so);
  	}
  	ifnet_set_flags(ud.ifp, IFF_UP | IFF_RUNNING, IFF_UP | IFF_RUNNING);
@@ -14990,7 +15145,7 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
  }
  
  static void
-@@ -710,18 +830,24 @@
+@@ -710,18 +878,24 @@
  	if (ev & 1) {                   /* device event */
  		uint32_t type = (ev >> 8) & 0xf;
  		if (type == 1) {        /* USB reset */
@@ -15019,13 +15174,13 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
  		}
  		return;
  	}
-@@ -781,20 +907,36 @@
+@@ -781,20 +955,36 @@
  	uint32_t ticks = 0;
  	for (;;) {
  		uint32_t count = dwc_rd(GEVNTCOUNT) & 0xffff;
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
 +  if (count > UD_EVT_SIZE || (count & 3)) {
-+   marble_hwdiag_fail(1,MH_LAYOUT,5,"DWC event count invalid");
++   marble_hwdiag_fail(1,MH_DWC_EVENT,5,"DWC event count invalid");
 +   printf(USB_LOG "STOP: invalid event count=%u\n", count); ud.configured = false;
 +   (void)thread_terminate(current_thread());
 +  }
@@ -15060,7 +15215,7 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
  		}
  		ud_sleep_ms(1);
  	}
-@@ -826,6 +968,9 @@
+@@ -826,6 +1016,9 @@
  	to.sin_addr.s_addr = htonl(0xc0a80701);         /* 192.168.7.1 */
  	for (;;) {
  		ud_sleep_ms(100);
@@ -15070,7 +15225,7 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
  		if (!ud.configured) {
  			continue;
  		}
-@@ -834,6 +979,10 @@
+@@ -834,6 +1027,10 @@
  			continue;
  		}
  		uint32_t n;
@@ -15081,7 +15236,7 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
  		while ((n = sweet_log_copy(&pos, chunk, sizeof(chunk))) > 0) {
  			struct iovec iov = { .iov_base = chunk, .iov_len = n };
  			struct msghdr msg = {
-@@ -841,12 +990,55 @@
+@@ -841,12 +1038,55 @@
  				.msg_iov = &iov, .msg_iovlen = 1,
  			};
  			size_t sent = 0;
@@ -15141,32 +15296,26 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
  
  static void
  sweet_usb_gadget_start(vm_offset_t dwc)
-@@ -856,26 +1048,76 @@
+@@ -856,26 +1096,62 @@
  	ud.dwc = dwc;
  	if (kmem_alloc_contig(kernel_map, &ud.dma, UD_SIZE, PAGE_MASK, 0, 0,
  	    KMA_DATA | KMA_ZERO | KMA_PERMANENT, VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS) {
 -		printf("SWEET USB: no DMA memory\n");
 -		return;
 +		#ifdef ARM64_BOARD_CONFIG_MARBLE
-+  marble_hwdiag_fail(1,MH_MAPPING,12,"contiguous DMA allocation");
++  marble_hwdiag_fail(1,MH_DMA_ALLOC,12,"contiguous DMA allocation");
 +#endif
 + printf(USB_LOG "no DMA memory\n");
 +
-+#ifdef ARM64_BOARD_CONFIG_MARBLE
-+  marble_hwdiag_fail(1,MH_GATE,-1,"gadget startup refused");
-+#endif
 +  return;
  	}
  	ppnum_t pn = pmap_find_phys(kernel_pmap, (addr64_t)ud.dma);
  	if (!pn) {
 -		return;
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
-+  marble_hwdiag_fail(1,MH_MAPPING,14,"DMA physical lookup");
++  marble_hwdiag_fail(1,MH_DMA_PHYS,14,"DMA physical lookup");
 +#endif
 +
-+#ifdef ARM64_BOARD_CONFIG_MARBLE
-+  marble_hwdiag_fail(1,MH_GATE,-1,"gadget startup refused");
-+#endif
 +  return;
  	}
  	ud.dma_pa = ptoa_64(pn);
@@ -15179,18 +15328,13 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
 + marble_hwdiag_value(1,"DMA_PA/width",(uint32_t)ud.dma_pa,width);
 + if (width < 32 || width > 64 || (width < 64 &&
 +     (ud.dma_pa > ((1ull << width) - UD_SIZE)))) {
++  marble_hwdiag_fail(1,MH_DMA_WIDTH,-1,"DMA_ADDRESS_WIDTH");
 +  printf(USB_LOG "STOP: DMA PA=%#llx size=%#x exceeds AWIDTH=%u\n", ud.dma_pa, UD_SIZE, width);
-+#ifdef ARM64_BOARD_CONFIG_MARBLE
-+  marble_hwdiag_fail(1,MH_GATE,-1,"gadget startup refused");
-+#endif
 +  return;
 + }
 + if (!ud_marble_dma_ok()) {
 +  marble_hwdiag_fail(1,MH_DMA_TRANSLATED,6,"SID0 translation/fault/ambiguous; no owned domain");
 +  printf(USB_LOG "STOP: USB SID0 direct DMA not proven; no SMMU writes\n");
-+#ifdef ARM64_BOARD_CONFIG_MARBLE
-+  marble_hwdiag_fail(1,MH_GATE,-1,"gadget startup refused");
-+#endif
 +  return;
 + }
 + printf(USB_LOG "DMA direct PA=%#llx AWIDTH=%u inherited bypass validated\n", ud.dma_pa, width);
@@ -15217,17 +15361,14 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
  	if (dwc_rd(DCTL) & DCTL_CSFTRST) {
 -		return;
 +#ifdef ARM64_BOARD_CONFIG_MARBLE
-+  marble_hwdiag_fail(1,MH_TIMEOUT,60,"DWC device soft reset timeout");
++  marble_hwdiag_fail(1,MH_DWC_SOFT_RESET,60,"DWC device soft reset timeout");
 +#endif
 +
-+#ifdef ARM64_BOARD_CONFIG_MARBLE
-+  marble_hwdiag_fail(1,MH_GATE,-1,"gadget startup refused");
-+#endif
 +  return;
  	}
  
  	dwc_wr(GEVNTADRLO, (uint32_t)(ud.dma_pa + UD_EVT));
-@@ -890,14 +1132,24 @@
+@@ -890,14 +1166,21 @@
  	/* Events: disconnect, USB reset, connect done */
  	dwc_wr(DEVTEN, 0x7);
  
@@ -15244,18 +15385,15 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
 -		printf("SWEET USB: endpoint 0 setup failed\n");
 -		return;
 +		#ifdef ARM64_BOARD_CONFIG_MARBLE
-+  marble_hwdiag_fail(1,MH_TRANSPORT,5,"EP0 command failure");
++  marble_hwdiag_fail(1,MH_EP0_SETUP,5,"EP0 command failure");
 +#endif
 + printf(USB_LOG "endpoint 0 setup failed\n");
 +
-+#ifdef ARM64_BOARD_CONFIG_MARBLE
-+  marble_hwdiag_fail(1,MH_GATE,-1,"gadget startup refused");
-+#endif
 +  return;
  	}
  	dwc_wr(DALEPENA, 0x3);
  	ud_start_setup();
-@@ -905,27 +1157,63 @@
+@@ -905,27 +1188,60 @@
  	vm_offset_t qs = ml_io_map(QSCRATCH_PA, 0x100);
  	if (qs != 0) {
  		uint32_t hs = usb_rd(qs, QSCRATCH_HS_PHY_CTRL), ss = usb_rd(qs, QSCRATCH_SS_PHY_CTRL);
@@ -15286,10 +15424,7 @@ diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
 +	}
 +	#ifdef ARM64_BOARD_CONFIG_MARBLE
 + marble_hwdiag_value(1,"RUN_DCTL/DSTS",dwc_rd(DCTL),dwc_rd(DSTS));
-+ if (dwc_rd(DSTS) & DSTS_DEVCTRLHLT) { marble_hwdiag_fail(1,MH_TIMEOUT,60,"DEVCTRLHLT after RUN_STOP");
-+#ifdef ARM64_BOARD_CONFIG_MARBLE
-+  marble_hwdiag_fail(1,MH_GATE,-1,"gadget startup refused");
-+#endif
++ if (dwc_rd(DSTS) & DSTS_DEVCTRLHLT) { marble_hwdiag_fail(1,MH_DWC_RUN_HALT,60,"DEVCTRLHLT after RUN_STOP");
 +  return; }
 +#endif
 + printf(USB_LOG "running (DSTS 0x%08x after %d ms), DMA at 0x%llx\n", dwc_rd(DSTS), i, ud.dma_pa);
@@ -15381,21 +15516,27 @@ diff --git a/bsd/dev/marble_hwdiag.h b/bsd/dev/marble_hwdiag.h
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/marble_hwdiag.h
-@@ -0,0 +1,20 @@
+@@ -0,0 +1,26 @@
 +/* MARBLE only, bounded RAM diagnostics. No logger calls printf. */
 +#ifndef MARBLE_HWDIAG_H
 +#define MARBLE_HWDIAG_H
 +#include <sys/types.h>
 +enum mt_stage { MT_NONE, MT_WORKER, MT_MMIO, MT_POWER_RESET_ASSERT, MT_VDDIO,
 + MT_AVDD, MT_RESET_RELEASE, MT_RESET_WAIT, MT_GENI, MT_FIFO, MT_GPI, MT_CONFIRM,
-+ MT_VERSION, MT_ICINFO, MT_IRQ, MT_EVENT, MT_RUNNING, MT_FAILED };
++ MT_VERSION, MT_ICINFO, MT_IRQ, MT_EVENT, MT_RUNNING, MT_FAILED, MT_CLOCK_SOURCE, MT_CLOCK_M_AHB, MT_CLOCK_S_AHB, MT_CLOCK_S4 };
 +enum mu_stage { MU_NONE, MU_WORKER, MU_REGULATORS, MU_REPEATER_RESET, MU_REFCLK,
 + MU_PHY_RESET, MU_PHY_INIT, MU_GDSC, MU_CLOCKS, MU_DWC_RESET, MU_QSCRATCH,
 + MU_SMMU, MU_DMA, MU_EP0, MU_RUN, MU_BUS_RESET, MU_CONNECT_DONE, MU_ENUM,
-+ MU_ECM, MU_RUNNING, MU_FAILED };
++ MU_ECM, MU_RUNNING, MU_FAILED, MU_POST_CLOCKS, MU_DWC_MAP, MU_DWC_ID, MU_DEVICE_ROLE, MU_USB2_CONFIG };
 +enum mh_reason { MH_OK, MH_DISABLED, MH_MAPPING, MH_READBACK, MH_TIMEOUT,
 + MH_OWNERSHIP, MH_PROTOCOL, MH_FIFO_DISABLED, MH_BUSY, MH_TRANSPORT,
-+ MH_CHECKSUM, MH_LAYOUT, MH_DMA_TRANSLATED, MH_THREAD, MH_GATE };
++ MH_CHECKSUM, MH_LAYOUT, MH_DMA_TRANSLATED, MH_THREAD, MH_GATE,
++ MH_S4_RCG_UPDATE, MH_S4_RCG_ROOT, MH_S4_BRANCH, MH_M_AHB_BRANCH, MH_S_AHB_BRANCH,
++ MH_POST_GDSC_OFF, MH_POST_MASTER_OFF, MH_POST_SLEEP_OFF, MH_POST_UTMI_OFF,
++ MH_POST_CFGNOC_OFF, MH_POST_AGGRE_OFF, MH_POST_EUSB_REF_OFF, MH_DWC_MAP,
++ MH_GSNPSID_INVALID, MH_DWC_REVISION, MH_DEVICE_ROLE, MH_USB2_CONFIG,
++ MH_DMA_ALLOC, MH_DMA_PHYS, MH_DMA_WIDTH, MH_DWC_SOFT_RESET, MH_EP0_SETUP,
++ MH_DWC_RUN_HALT, MH_DWC_EVENT, MH_GCC_MAP };
 +void marble_hwdiag_stage(unsigned, unsigned);
 +void marble_hwdiag_fail(unsigned, enum mh_reason, int, const char *);
 +void marble_hwdiag_value(unsigned, const char *, uint32_t, uint32_t);
@@ -15406,7 +15547,7 @@ diff --git a/bsd/dev/marble_hwdiag.c b/bsd/dev/marble_hwdiag.c
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/marble_hwdiag.c
-@@ -0,0 +1,180 @@
+@@ -0,0 +1,203 @@
 +/* RAM survives hardware-worker exits. VFS snapshot never gates boot.
 + * Framebuffer uses the existing AppleCLCD mapping, avoiding cache aliases.
 + * See docs/MARBLE_TOUCH_USB_V3_RESEARCH.md for button/overlay contract. */
@@ -15437,8 +15578,11 @@ new file mode 100644
 + uint32_t magic, version; struct mh_section touch, usb;
 + int file_error; unsigned file_writes, file_attempts;
 +};
-+static struct marble_hw_diag mh = { .magic = 0x4d484433, .version = 3 };
-+static unsigned mh_lock;
++static struct marble_hw_diag mh = { .magic = 0x4d484433, .version = 4 };
++static unsigned mh_lock, mh_revision;
++static char mh_grid[70][65], mh_next_grid[70][65];
++static unsigned mh_draw_revision;
++static int mh_draw_page, mh_draw_valid;
 +static int mh_enabled, mh_active, mh_keys, mh_page, mh_chan;
 +static char mh_text[MH_TEXT], mh_screen[MH_TEXT];
 +static struct mh_section *mh_section(unsigned usb) { return usb ? &mh.usb : &mh.touch; }
@@ -15454,7 +15598,7 @@ new file mode 100644
 +   struct mh_record *r = &s->records[s->count++];
 +   strlcpy(r->name,"STAGE",sizeof(r->name)); r->before=s->stage; r->after=stage; r->time=mach_absolute_time();
 +  }
-+  s->stage=stage;
++  s->stage=stage; __atomic_add_fetch(&mh_revision,1,__ATOMIC_RELEASE);
 + }
 + mh_drop();
 +}
@@ -15464,6 +15608,7 @@ new file mode 100644
 + struct mh_section *s = mh_section(usb);
 + if (!s->reason) {
 +  s->failed_at = s->stage; s->stage = usb ? MU_FAILED : MT_FAILED;
++  __atomic_add_fetch(&mh_revision,1,__ATOMIC_RELEASE);
 +  s->reason = reason; s->error = error; strlcpy(s->gate, gate, sizeof(s->gate));
 + }
 + mh_drop();
@@ -15475,7 +15620,7 @@ new file mode 100644
 + if (s->count < MH_RECORDS) {
 +  struct mh_record *r = &s->records[s->count++];
 +  strlcpy(r->name, name, sizeof(r->name)); r->before = before; r->after = after;
-+  r->time = mach_absolute_time();
++  r->time = mach_absolute_time(); __atomic_add_fetch(&mh_revision,1,__ATOMIC_RELEASE);
 + } else s->dropped++;
 + mh_drop();
 +}
@@ -15497,7 +15642,7 @@ new file mode 100644
 + unsigned used = 0;
 + if (!mh_take()) return 0;
 + #define APPEND(...) do { if (used < capacity-1) { int n = snprintf(text+used, capacity-used, __VA_ARGS__); if (n > 0) used += MIN((unsigned)n, (unsigned)capacity-1-used); } } while (0)
-+ APPEND("MARBLE HWDIAG v3 file_error=%d writes=%u\n", mh.file_error, mh.file_writes);
++ APPEND("MARBLE HWDIAG v4 file_error=%d writes=%u\n", mh.file_error, mh.file_writes);
 + for (unsigned u = 0; u < 2; u++) {
 +  struct mh_section *s = mh_section(u);
 +  APPEND("%s stage=%u failed_at=%u reason=%u errno=%d gate=%s dropped=%u\n", u?"USB":"TOUCH", s->stage, s->failed_at, s->reason, s->error, s->gate, s->dropped);
@@ -15514,13 +15659,20 @@ new file mode 100644
 +int marble_hwdiag_overlay(uintptr_t, unsigned, unsigned, unsigned);
 +int marble_hwdiag_overlay(uintptr_t pixels, unsigned width, unsigned height, unsigned stride)
 +{
-+ if (!marble_hwdiag_active() || !pixels || width != 1080 || height != 2400 || stride != 4320) return 0;
++ if (!marble_hwdiag_active()) { mh_draw_valid=0; return 0; }
++ if (!pixels || width != 1080 || height != 2400 || stride != 4320) return 0;
++ unsigned revision=__atomic_load_n(&mh_revision,__ATOMIC_ACQUIRE);
++ if (mh_draw_valid && mh_draw_revision==revision && mh_draw_page==mh_page) return 1;
 + unsigned n = mh_format(mh_screen,sizeof(mh_screen)); if (!n) return 1;
 + volatile uint32_t *fb = (volatile uint32_t *)pixels;
-+ for (unsigned y = 0; y < height; y++) for (unsigned x = 0; x < width; x++) fb[y*(stride/4)+x] = 0x00101820;
++ if (!mh_draw_valid) {
++  for (unsigned y = 0; y < height; y++) for (unsigned x = 0; x < width; x++) fb[y*(stride/4)+x] = 0x00101820;
++  memset(mh_grid,0,sizeof(mh_grid));
++ }
++ memset(mh_next_grid,' ',sizeof(mh_next_grid));
 + /* 65 columns, 68 lines; page through records, header repeated on every page. */
 + char header[512];
-+ snprintf(header, sizeof(header), "MARBLE HW V3 PAGE %u\nTOUCH s%u at%u reason%u err%d\n%s\nUSB s%u at%u reason%u err%d\n%s\nVOL+: NEXT  VOL-: PREV  BOTH 2s: GUI\n", mh_page, mh.touch.stage, mh.touch.failed_at, mh.touch.reason, mh.touch.error, mh.touch.gate, mh.usb.stage, mh.usb.failed_at, mh.usb.reason, mh.usb.error, mh.usb.gate);
++ snprintf(header, sizeof(header), "MARBLE HW V4 PAGE %u\nTOUCH s%u at%u reason%u err%d\n%s\nUSB s%u at%u reason%u err%d\n%s\nVOL+: NEXT  VOL-: PREV  BOTH 2s: GUI\n", mh_page, mh.touch.stage, mh.touch.failed_at, mh.touch.reason, mh.touch.error, mh.touch.gate, mh.usb.stage, mh.usb.failed_at, mh.usb.reason, mh.usb.error, mh.usb.gate);
 + unsigned row = 0, col = 0, skip = (unsigned)mh_page * 45, line = 0;
 + for (unsigned part = 0; part < 2; part++) {
 +  const char *p = part ? mh_screen : header; unsigned len = part ? n : (unsigned)strlen(header);
@@ -15529,13 +15681,25 @@ new file mode 100644
 +   if (part && line < skip) { if (c == '\n') line++; continue; }
 +   if (c == '\n') { row++; col = 0; continue; }
 +   if (col >= 65) continue;
-+   const unsigned char *glyph = iso_font + c*16;
-+   for (unsigned gy = 0; gy < 16; gy++) for (unsigned gx = 0; gx < 8; gx++)
-+    if (glyph[gy] & (0x80u >> gx)) for (unsigned sy = 0; sy < 2; sy++) for (unsigned sx = 0; sx < 2; sx++)
-+     fb[(24+row*32+gy*2+sy)*(stride/4)+16+col*16+gx*2+sx] = 0x00ffffff;
++   mh_next_grid[row][col]=(char)c;
 +   col++;
 +  }
 + }
++ /* One renderer (vsync), only changed cells. LSB-first matches the proven
++  * pexpert/arm/pe_serial.c fbcon_transmit_data iso_font convention. */
++ for (unsigned y=0;y<70;y++) for (unsigned x=0;x<65;x++) {
++  unsigned char c=(unsigned char)mh_next_grid[y][x];
++  if(mh_grid[y][x]==(char)c) continue;
++  const unsigned char *glyph=iso_font+c*16;
++  for(unsigned gy=0;gy<16;gy++) for(unsigned gx=0;gx<8;gx++) {
++   uint32_t pixel=(glyph[gy] & (1u << gx)) ? 0x00ffffff : 0x00101820;
++   for(unsigned sy=0;sy<2;sy++) for(unsigned sx=0;sx<2;sx++)
++    fb[(24+y*32+gy*2+sy)*(stride/4)+16+x*16+gx*2+sx]=pixel;
++  }
++  mh_grid[y][x]=(char)c;
++ }
++ mh_draw_revision=revision; mh_draw_page=mh_page; mh_draw_valid=1;
++
 + return 1;
 +}
 +static void mh_file(void)

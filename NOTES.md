@@ -1,6 +1,34 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
 
+## Active MARBLE v4 — local validation complete, CI/package next
+
+User physically tested v3: Hello/keys pass; touch fails at MT_MMIO clock gate,
+USB fails after successful QSCRATCH. Persistent VFS file works (error0/writes4).
+See docs/MARBLE_TOUCH_USB_V4.md for exact physical results and pinned ledger.
+Starting HEAD5448620036ce4a7e8ca4a2bc6489fea6c0de872d; unrelated sparse-script
+mode/bootstrap doc/logs preserved. Live OEM DTS inspected read-only, not staged.
+
+V4 prepares S4 parent before separate M_AHB/S_AHB/S4 votes/polls; preserves DFS
+ownership and adds exact per-clock diagnostics. FIFO refusal snapshots OEM
+GPII1..6 and SID5b6 read-only; no GPI/SMMU writes or unsafe DMA added.
+USB successful hardware prepare and touch power files remain byte-identical.
+Post-QSCRATCH clock/map/ID/role/PHY failures are specific; recognized DWC3/31/32
+identity and version recorded before writes. Actual physical v3 ID unknown.
+Overlay uses console LSB-first font, one vsync render path, changed-cell cache;
+normal inactive display geometry/presentation unchanged. VFS writer retained.
+
+Local PASS: all82 patches replay, strict0082, all86generated files equal tested
+tree; fourmodified units compile actual CIheaders to arm64MachO; symbolclosure
+against linkedv3kernel+newobjects;20nonMARBLEpreprocessingchecks (SWEET/VMAPPLE/
+BCM2837/T8103); ASan/UBSan extracted clock/core faulttests, original Goodix/
+FIFO/power/USB100000-case fuzztests, V3 PHY/SPMI/diagnosticbounds including
+fontorientation/cacheguard,10Pythonunit tests. No phone operation executed.
+Next: commit/push exactsource, MARBLECI, verifyheadSha/buildtree/full-link,
+package new touchusb-v4 image with exact existing ADT; preserve alloldimages.
+Physical success NOT claimed. No root image/retention changes.
+
+
 ## FINAL MARBLE touch/USB v3 — packaged, physical test pending
 
 Kernel source `d5adb94de8e1a02442e844bcd5a5ebe7af890000`; exact successful
