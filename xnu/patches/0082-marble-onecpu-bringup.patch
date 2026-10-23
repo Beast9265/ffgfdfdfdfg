@@ -14068,7 +14068,7 @@ diff --git a/bsd/dev/marble_keys.c b/bsd/dev/marble_keys.c
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/marble_keys.c
-@@ -0,0 +1,141 @@
+@@ -0,0 +1,143 @@
 +/*
 + * MARBLE PMK8350 PON / PM8350 GPIO6, observer-only SPMI arbiter v7.
 + * Register provenance: docs/MARBLE_INPUT_HW.md. No PMIC/IRQ/reset writes.
@@ -14106,7 +14106,7 @@ new file mode 100644
 +static uint16_t mk_pon, mk_gpio;
 +static int mk_wait_chan, mk_diag;
 +static bool mk_started;
-+static uint32_t mk_logs;
++static uint32_t mk_logs, mk_status;
 +#define MK_INVALID 0xffffu
 +
 +static uint32_t
@@ -14138,6 +14138,7 @@ new file mode 100644
 + __asm__ volatile("dsb osh" ::: "memory");
 + for (unsigned n = 0; n < 1000; n++) {
 +  uint32_t status = mk_read(mk_obs, off + 8);
++  mk_status = status;
 +  if (status & 1) {
 +   if (status & 14) return false;
 +   *out = (uint8_t)mk_read(mk_obs, off + 0x18); return true;
@@ -14193,14 +14194,15 @@ new file mode 100644
 + }
 + mk_pon = mk_apid(0x013, count); /* SID0 PON_HLOS */
 + mk_gpio = mk_apid(0x18d, count); /* SID1 PM8350 GPIO6, base8800 +5*100 */
-+ uint8_t subtype, type, mode, en, pon, gpio;
-+ if (!mk_byte(mk_pon, 0x1305, &subtype) || subtype != 9 ||
++ uint8_t pon_type = 0xff, subtype = 0xff, type = 0xff, mode = 0xff, en = 0xff, pon = 0xff, gpio = 0xff;
++ if (!mk_byte(mk_pon, 0x1305, &pon_type) || pon_type != 9 ||
 +     !mk_byte(mk_gpio, 0x8d04, &type) || type != 0x10 ||
 +     !mk_byte(mk_gpio, 0x8d05, &subtype) || subtype < 0x10 || subtype > 0x13 ||
 +     !mk_byte(mk_gpio, 0x8d40, &mode) || (mode & 3) != 0 ||
 +     !mk_byte(mk_gpio, 0x8d46, &en) || !(en & 0x80) ||
 +     !mk_byte(mk_pon, 0x1310, &pon) || !mk_byte(mk_gpio, 0x8d10, &gpio)) {
-+  printf("MARBLE KEYS: PMK8350/PON9 or enabled PM8350 GPIO6 input not confirmed; withheld\n"); return;
++  printf("MARBLE KEYS: withheld arb=%#x APIDs=%u/%u status=%#x PON1305=%#x GPIO8d04/05=%#x/%#x mode=%#x en=%#x RT=%#x/%#x (ff may be unread)\n",
++      version, mk_pon, mk_gpio, mk_status, pon_type, type, subtype, mode, en, pon, gpio); return;
 + }
 + if (mk_diag) printf("MARBLE KEYS: arb=%#x apids=%u PON9 SID0:1310 apid%u bits7/6 high; PM8350 SID1:8d10 apid%u bit0 low; initial=%#x/%#x\n",
 +     version, count, mk_pon, mk_gpio, pon, gpio);
@@ -14214,7 +14216,7 @@ diff --git a/bsd/dev/marble_touch.c b/bsd/dev/marble_touch.c
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/marble_touch.c
-@@ -0,0 +1,307 @@
+@@ -0,0 +1,317 @@
 +/*
 + * MARBLE: inherited GENI SE4 SPI0 / Goodix GT9916S (Berlin-D).
 + * Original small FIFO transport + bounded protocol parser; register/protocol
@@ -14476,8 +14478,18 @@ new file mode 100644
 + uint8_t length[2];
 + if (!mt_read(0x10070, length, 2)) return false;
 + unsigned len = mt_le16(length);
-+ if (len < 34 || len >= MT_MAX || !mt_read(0x10070, mt_info, len) || !mt_parse_info(mt_info, len)) {
-+  printf("MARBLE TOUCH: IC-info/checksum/report geometry unsupported; withheld\n"); return false;
++ bool info_read = len >= 34 && len < MT_MAX && mt_read(0x10070, mt_info, len);
++ if (!info_read || !mt_parse_info(mt_info, len)) {
++  printf("MARBLE TOUCH: IC-info/checksum/report geometry unsupported len%u; withheld\n", len);
++  if (mt_diag && info_read) {
++   for (unsigned i = 0; i + 16 <= 64 && i + 16 <= len; i += 16)
++    printf("MARBLE TOUCH: IC-info[%u] %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x\n",
++        i, mt_info[i], mt_info[i+1], mt_info[i+2], mt_info[i+3],
++        mt_info[i+4], mt_info[i+5], mt_info[i+6], mt_info[i+7],
++        mt_info[i+8], mt_info[i+9], mt_info[i+10], mt_info[i+11],
++        mt_info[i+12], mt_info[i+13], mt_info[i+14], mt_info[i+15]);
++  }
++  return false;
 + }
 + return true;
 +}

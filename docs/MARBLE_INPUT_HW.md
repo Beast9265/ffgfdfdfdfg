@@ -227,7 +227,9 @@ With marbleguidiag=1: registration once/service; client-open max16/boot;
 shared HID key lines64/boot; touch down/move/up32/boot. Saturating atomic
 reservations keep budgets from wrapping. Key-driver transition lines64/boot,
 then event delivery continues silently. Hardware setup/probe logs are one-shot;
-no poll-by-poll logs. One failure terminates each hardware worker. Existing
+refusal includes PMIC register/status values, and unsupported IC-info may print
+at most64 bytes in4 complete16-byte rows after a successful read.
+No poll-by-poll logs. One failure terminates each hardware worker. Existing
 crash/stderr/heap diagnostic budgets remain unchanged.
 
 ## Local checks and build handoff
@@ -250,3 +252,57 @@ physical-success update in MARBLE_BOUNDINGPATH.md. .gitattributes exempts unifie
 patch context prefixes from source-style whitespace checks; actual source
 additions still pass git apply --whitespace=error. No generated/private blobs
 are staged. Build/source/artifact results are appended after exact CI finishes.
+
+
+## Final diagnostic recovery
+
+Recovered existing final diagnostic edits from authoritative0082, rather than
+recreating or copying another source representation. Fresh complete patch replay
+matches the surviving generation tree byte-for-byte. Both physical units plus
+the shared HID/config units compile with actual CI headers. Final replayed
+parser/FIFO sanitizer tests, shared non-MARBLE token equality, symbol closure,
+ten unit tests and repository validation pass again.
+
+Prior CI39896552164 completed successfully for9317cc483f485c130aa373a814c23c5b9e49d99b.
+It proves the main implementation builds, but predates the final diagnostics
+and is not the final packaged artifact. Final source/run/hashes follow below.
+Unrelated untracked bootstrap documentation and sparse-script executable-mode
+change remain outside the input commit. Exact Hello ADT bytes are reused;
+no root build, userdata edits or cleanup.
+
+Expected log forms (placeholders are not measured XNU values):
+
+```text
+MARBLE HID: buttons service registered (test delay N s)
+MARBLE HID: touch service registered
+MARBLE HID: SweetHIDButtons open by IOHIDEventServiceUserClient (backboardd) -> 1
+MARBLE KEYS: arb=... apids=... PON9 SID0:1310 apid... bits7/6 high; PM8350 SID1:8d10 apid... bit0 low; initial=.../...
+MARBLE KEYS: power down
+MARBLE KEYS: power up
+```
+
+If the identity/readability gate refuses keys, exact diagnostic format:
+
+```text
+MARBLE KEYS: withheld arb=%#x APIDs=%u/%u status=%#x PON1305=%#x GPIO8d04/05=%#x/%#x mode=%#x en=%#x RT=%#x/%#x (ff may be unread)
+```
+
+Touch probe reports inherited registers before writes, then either a refusal or:
+
+```text
+MARBLE TOUCH: SPI SE4@990000 CS0 fw=... proto... status=... DMA=... FIFO=.../... clock=... sel=...
+MARBLE TOUCH: identified GT9916R ROMBERLIN FW=00.80.02.94 sensor255
+MARBLE TOUCH: IC-info len191 event=0x10308 head8 point8 range10800x24000 factor10
+MARBLE TOUCH: polling active, inherited controller config, 10 contacts
+MARBLE TOUCH: id=0 down x=... y=...
+MARBLE TOUCH: id=0 move x=... y=...
+MARBLE TOUCH: id=0 up x=... y=...
+```
+
+The identification values above are expected from the saved Android log;
+new XNU output may differ. An unsupported metadata frame prints:
+`MARBLE TOUCH: IC-info/checksum/report geometry unsupported len%u; withheld`.
+With marbleguidiag=1 and a completed metadata read, at most4 rows of16 bytes
+follow as `MARBLE TOUCH: IC-info[%u] ...`; every row must be inside len and64.
+No hardware safety gate or acceptance criterion was weakened by these diagnostics.
+Physical input and UIKit receipt remain **UNTESTED**.

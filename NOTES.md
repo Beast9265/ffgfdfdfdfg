@@ -68,6 +68,26 @@ ICinfoschemas/checksums,10xmapping/downmoveup,duplicateatomicrejection,
 .gitattributes ignoresunifiedpatchcontextwhitespaceonly;strictgitapplyvalidates
 realnewsource. Nextcommit/push/exactMARBLE13.5DEVELOPMENTCI+twoimagepackage.
 
+Initial inputsource9317cc483f485c130aa373a814c23c5b9e49d99b pushed;
+CI39896552164 completed SUCCESS for9317cc4; superseded by diagnostic-only review: refusal
+now prints observed PMICregisters/status;unsupportedICinfo prints length and
+atmost64readmetadata bytes(4lines)onlyifreadcompleted. No functional gate change.
+Finalsource/exactCIpending;do not package supersededartifact.
+
+Final diagnostic recovery (same workspace, no functional changes): local and
+remote both9317cc483f485c130aa373a814c23c5b9e49d99b independently verified.
+Final edits already in authoritative0082; /tmp source agrees byte-for-byte.
+Freshfull0001..0082reverse/replay /tmp/marble-input-final-replay PASS;
+strict0082sourcewhitespace/equality PASS;4arm64CI-headercompiles PASS;
+SWEET/BCM2837/T8103sharedtoken-equivalence and input/HIDsymbolclosure PASS;
+ASan/UBSan finalreplayedparser/FIFO fixture PASS;10unit+repovalidation PASS.
+Hello rollback789377...b6242 and ADT35f0bf...4e3 reverified. ExactknownADT
+will be reused, no randomseed/phandle/orderchange. Unrelated untracked
+MARBLE_BOOTSTRAP_BREADCRUMBS.md inspected: older bootstrap documentation,
+preserved in place, excluded; sparse-scriptmode change also excluded.
+Next: commit only finaldiagnostics/docs, superseding exactCI, two boot images.
+Input/backboardd receipt/ABLinheritance all PHYSICALLY UNTESTED.
+
 ## Previous handoff: MARBLE UIKit bounding-path asset investigation (2026-10-23)
 
 Read full AGENTS.md and NOTES.md/history before changes;remote refs/heads/marble
