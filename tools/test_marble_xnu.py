@@ -24,7 +24,10 @@ class MarbleTreeTests(unittest.TestCase):
         self.assertEqual(u(cpus[0], 'reg'), 0)
         self.assertEqual(cpus[0].prop('compatible'), b'qcom,marble-cpu\0ARM,v8\0')
         io = child(root, 'arm-io')
-        self.assertEqual([c.name for c in io.children], ['gic'])
+        self.assertEqual([c.name for c in io.children], ['gic', 'disp0'])
+        display = child(io, 'disp0')
+        self.assertEqual((u(display, 'canvas-width'), u(display, 'canvas-height')), (1125, 2436))
+        self.assertEqual(u(chosen, 'display-scale'), 3)
         gic = child(io, 'gic')
         self.assertEqual(struct.unpack('<4Q', gic.prop('reg')),
                          (0x17100000-mkadt.SOC_BASE, 0x10000,

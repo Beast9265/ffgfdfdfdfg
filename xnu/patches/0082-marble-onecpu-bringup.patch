@@ -13444,38 +13444,49 @@ diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFrame
 diff --git a/bsd/kern/kern_exit.c b/bsd/kern/kern_exit.c
 --- a/bsd/kern/kern_exit.c
 +++ b/bsd/kern/kern_exit.c
-@@ -1897,6 +1897,31 @@
- 				    desc != NULL ? desc : "(none)");
- 			}
- 		}
-+#elif defined(ARM64_BOARD_CONFIG_MARBLE)
-+		/* Diagnostic only: never change exit/corpse handling. CPU0 bring-up. */
-+		{
-+			static unsigned int gui_crashes;
-+			int enabled = 0;
-+			if (p == current_proc() && gui_crashes < 32 &&
-+			    (!strcmp(p->p_comm, "backboardd") || !strcmp(p->p_comm, "SpringBoard")) &&
-+			    PE_parse_boot_argn("marbleguidiag", &enabled, sizeof(enabled)) && enabled) {
-+				gui_crashes++;
-+				if (WTERMSIG(rv) == 6 || WTERMSIG(rv) == 5) {
-+					extern void marble_crash_strings(const char *);
-+					marble_crash_strings(p->p_comm);
-+				}
-+				printf("CRASH %s[%d] sig %d code 0x%llx sub 0x%llx\n",
-+				    p->p_comm, proc_getpid(p), WTERMSIG(rv),
+@@ -1849,6 +1849,42 @@
+ 		proc_handle_critical_exit(p, rv);
+ 	}
+ 
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++	/* Observation only. Keep all original critical-exit/corpse decisions. */
++	{
++		static unsigned int events, per_name[9];
++		int enabled = 0;
++		if (p == current_proc() &&
++		    (WIFSIGNALED(rv) || WEXITSTATUS(rv) != 0 ||
++		    (proc_getcsflags(p) & CS_KILLED) ||
++		    (PROC_HAS_EXITREASON(p) && (PROC_EXITREASON_FLAGS(p) & OS_REASON_FLAG_GENERATE_CRASH_REPORT))) &&
++		    PE_parse_boot_argn("marbleguidiag", &enabled, sizeof(enabled)) && enabled) {
++			char name[64];
++			extern int marble_gui_diag_index(const char *);
++			extern bool marble_gui_diag_take(unsigned int *, unsigned int);
++			proc_selfname(name, sizeof(name));
++			int index = marble_gui_diag_index(name);
++			if (index >= 0 && marble_gui_diag_take(&per_name[index], 4) &&
++			    marble_gui_diag_take(&events, 32)) {
++				printf("CRASH %s[%d] sig %d code 0x%llx sub 0x%llx status %d\n",
++				    name, proc_getpid(p), WTERMSIG(rv),
 +				    ((uint64_t)ut->uu_exception << 32) | (uint32_t)ut->uu_code,
-+				    (uint64_t)ut->uu_subcode);
++				    (uint64_t)ut->uu_subcode, WEXITSTATUS(rv));
 +				if (PROC_HAS_EXITREASON(p)) {
 +					char *desc = exit_reason_get_string_desc(p->p_exit_reason);
-+					printf("CRASH %s reason ns %u code 0x%llx: %.512s\n", p->p_comm,
++					printf("CRASH %s reason ns %u code 0x%llx: %.512s\n", name,
 +					    p->p_exit_reason->osr_namespace, p->p_exit_reason->osr_code,
 +					    desc != NULL ? desc : "(none)");
 +				}
++				if (WTERMSIG(rv) == SIGABRT || WTERMSIG(rv) == SIGTRAP) {
++					extern void marble_crash_strings(const char *);
++					marble_crash_strings(name);
++				}
 +			}
 +		}
- #endif
- 		/* Defualt to EXC_CRASH if the exception is not an EXC_RESOURCE or EXC_GUARD */
- 		if (etype != EXC_RESOURCE || etype != EXC_GUARD) {
++	}
++#endif
++
+ 	/*
+ 	 * Generate a corefile/crashlog if:
+ 	 *      The process doesn't have an exit reason that indicates no crash report should be created
 diff --git a/bsd/dev/mem.c b/bsd/dev/mem.c
 --- a/bsd/dev/mem.c
 +++ b/bsd/dev/mem.c
@@ -13488,7 +13499,7 @@ diff --git a/bsd/dev/mem.c b/bsd/dev/mem.c
  /*
   * SWEET: daemons started by launchd write stdout/stderr to /dev/null, and
   * pointing a launchd job at /dev/console stops it from launching at all
-@@ -162,12 +162,28 @@
+@@ -162,12 +162,65 @@
   * /dev/null goes to the console (and so to the persistent log) as
   * "|name| text". sweetnull=- turns it off.
   */
@@ -13496,28 +13507,65 @@ diff --git a/bsd/dev/mem.c b/bsd/dev/mem.c
  static char sweet_null_names[128];
  static int sweet_null_parsed;
 +#endif
++
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++/* proc_selfname uses p_name, unlike truncated BSD p_comm/proc_name. */
++/* Saturating reservations keep budgets strict across preemption/threads. */
++bool marble_gui_diag_take(unsigned int *count, unsigned int limit);
++bool
++marble_gui_diag_take(unsigned int *count, unsigned int limit)
++{
++	unsigned int value = __atomic_load_n(count, __ATOMIC_RELAXED);
++	while (value < limit) {
++		if (__atomic_compare_exchange_n(count, &value, value + 1, false,
++		    __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
++			return true;
++		}
++	}
++	return false;
++}
++
++int marble_gui_diag_index(const char *name);
++int
++marble_gui_diag_index(const char *name)
++{
++	static const char * const names[] = {
++		"SpringBoard", "backboardd", "Setup", "nanotimekitcompaniond",
++		"maintenanced", "ReportCrash", "mobileactivationd",
++		"installcoordinationd", "mediaserverd"
++	};
++	for (unsigned int i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
++		if (!strcmp(name, names[i])) {
++			return (int)i;
++		}
++	}
++	return -1;
++}
++#endif
  
  static bool
  sweet_null_tee(char *name, size_t len)
  {
 +#if defined(ARM64_BOARD_CONFIG_MARBLE)
-+	/* Opt-in, fixed two-process allowlist; at most 256 chunks per boot. */
-+	static unsigned int chunks;
++	/* Per executable name across respawns: 64 x 256B; boot: 512 x 256B. */
++	static unsigned int chunks, per_name[9];
 +	int enabled = 0;
-+	if (chunks >= 256 || !PE_parse_boot_argn("marbleguidiag", &enabled, sizeof(enabled)) || !enabled) {
++	if (!PE_parse_boot_argn("marbleguidiag", &enabled, sizeof(enabled)) || !enabled) {
 +		return false;
 +	}
 +	proc_selfname(name, (int)len);
-+	if (strcmp(name, "backboardd") && strcmp(name, "SpringBoard")) {
++	int index = marble_gui_diag_index(name);
++	if (index < 0 || !marble_gui_diag_take(&per_name[index], 64) ||
++	    !marble_gui_diag_take(&chunks, 512)) {
 +		return false;
 +	}
-+	chunks++;
++
 +	return true;
 +#else
  	if (!sweet_null_parsed) {
  		if (!PE_parse_boot_argn("sweetnull", sweet_null_names, sizeof(sweet_null_names))) {
  			strlcpy(sweet_null_names, "backboardd,SpringBoard", sizeof(sweet_null_names));
-@@ -188,6 +204,7 @@
+@@ -188,6 +241,7 @@
  		t = end + 1;
  	}
  	return false;
@@ -13525,7 +13573,7 @@ diff --git a/bsd/dev/mem.c b/bsd/dev/mem.c
  }
  #endif
  
-@@ -254,7 +271,7 @@
+@@ -254,7 +308,7 @@
  			if (rw == UIO_READ) {
  				return 0;
  			}
@@ -13674,25 +13722,29 @@ diff --git a/osfmk/kern/exception.c b/osfmk/kern/exception.c
  	char *buf;
  	vm_map_t map = current_map();
  	vm_map_offset_t addr = 0;
-@@ -916,6 +925,17 @@
+@@ -916,6 +925,21 @@
  	int lines = 0;
  	char last[96] = "";
  
 +#if defined(ARM64_BOARD_CONFIG_MARBLE)
-+	/* Current exiting GUI task only; four scans per boot, opt-in. */
-+	static unsigned int scans;
++	/* Four scans/boot, one per executable name; ReportCrash excluded. */
++	static unsigned int scans, per_name[9];
 +	unsigned int regions = 0;
 +	int enabled = 0;
-+	if ((strcmp(name, "backboardd") && strcmp(name, "SpringBoard")) ||
-+	    scans >= 4 || !PE_parse_boot_argn("marbleguidiag", &enabled, sizeof(enabled)) || !enabled) {
++	extern int marble_gui_diag_index(const char *);
++	extern bool marble_gui_diag_take(unsigned int *, unsigned int);
++	int index = marble_gui_diag_index(name);
++	if (index < 0 || index == 5 || !PE_parse_boot_argn("marbleguidiag", &enabled, sizeof(enabled)) || !enabled) {
 +		return;
 +	}
-+	scans++;
++	if (!marble_gui_diag_take(&per_name[index], 1) || !marble_gui_diag_take(&scans, 4)) {
++		return;
++	}
 +#else
  	if (!PE_parse_boot_argn("sweetscan", names, sizeof(names))) {
  		strlcpy(names, "backboardd,SpringBoard", sizeof(names));
  	}
-@@ -935,6 +955,7 @@
+@@ -935,22 +959,39 @@
  	if (!found) {
  		return;
  	}
@@ -13700,7 +13752,18 @@ diff --git a/osfmk/kern/exception.c b/osfmk/kern/exception.c
  	buf = kalloc_data(65536, Z_WAITOK);
  	if (buf == NULL) {
  		return;
-@@ -946,11 +967,21 @@
+ 	}
+ 	printf("STR scan of %s heap\n", name);
+-	while (lines < 700 && scanned < (96ull << 20)) {
++	while (lines <
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++	    64 && scanned < (16ull << 20)
++#else
++	    700 && scanned < (96ull << 20)
++#endif
++	    ) {
+ 		vm_map_size_t size = 0;
+ 		natural_t depth = 0;
  		vm_region_submap_info_data_64_t info;
  		mach_msg_type_number_t count = VM_REGION_SUBMAP_INFO_V2_COUNT_64;
  
@@ -13722,15 +13785,18 @@ diff --git a/osfmk/kern/exception.c b/osfmk/kern/exception.c
  		addr += size;
  		if (info.is_submap || (info.protection & (VM_PROT_READ | VM_PROT_WRITE)) !=
  		    (VM_PROT_READ | VM_PROT_WRITE) || info.user_tag < 1 || info.user_tag > 11) {
-@@ -958,13 +989,26 @@
+@@ -958,13 +999,29 @@
  		}
  		for (vm_map_offset_t off = 0; off < size && lines < 700; off += 65536) {
  			size_t len = (size - off) < 65536 ? (size_t)(size - off) : 65536;
 +#if defined(ARM64_BOARD_CONFIG_MARBLE)
-+			if (scanned >= (96ull << 20)) {
++			if (scanned >= (16ull << 20)) {
 +				break;
 +			}
-+			/* Count failed copy attempts too; len is at most 64 KiB. */
++			/* Strict byte cap includes failed copies and the final chunk. */
++			if (len > (16ull << 20) - scanned) {
++				len = (size_t)((16ull << 20) - scanned);
++			}
 +			scanned += len;
 +#endif
  			if (copyin((user_addr_t)(base + off), buf, len) != 0) {
@@ -13744,13 +13810,31 @@ diff --git a/osfmk/kern/exception.c b/osfmk/kern/exception.c
 -			for (size_t i = 0; i <= len; i++) {
 +			for (size_t i = 0; i <= len
 +#if defined(ARM64_BOARD_CONFIG_MARBLE)
-+			    && lines < 700
++			    && lines < 64
 +#endif
 +			    ; i++) {
  				bool ok = i < len && ((unsigned char)buf[i] >= 0x20 && (unsigned char)buf[i] < 0x7f);
  				if (ok) {
  					spaces += buf[i] == ' ';
-@@ -990,6 +1034,17 @@
+@@ -976,7 +1033,16 @@
+ 					size_t m = run < sizeof(text) - 1 ? run : sizeof(text) - 1;
+ 					memcpy(text, buf + start, m);
+ 					text[m] = 0;
+-					if (strncmp(text, last, sizeof(last) - 1) != 0) {
++					if (
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++					    (strnstr(text, "Exception", sizeof(text)) || strnstr(text, "exception", sizeof(text)) ||
++					    strnstr(text, "reason", sizeof(text)) || strnstr(text, "abort", sizeof(text)) ||
++					    strnstr(text, "denied", sizeof(text)) || strnstr(text, "sandbox", sizeof(text)) ||
++					    strnstr(text, "container", sizeof(text)) || strnstr(text, "entitlement", sizeof(text)) ||
++					    strnstr(text, "activation", sizeof(text)) || strnstr(text, "service", sizeof(text)) ||
++					    strnstr(text, "EACCES", sizeof(text)) || strnstr(text, "failed", sizeof(text)) || strnstr(text, "Failed", sizeof(text))) &&
++#endif
++					    strncmp(text, last, sizeof(last) - 1) != 0) {
+ 						printf("STR %s\n", text);
+ 						lines++;
+ 						strlcpy(last, text, sizeof(last));
+@@ -990,6 +1056,17 @@
  	printf("STR done: %llu KiB scanned, %d strings\n", scanned >> 10, lines);
  	kfree_data(buf, 65536);
  }

@@ -568,3 +568,8 @@ persist writes are part of this workflow.
 fastboot -S 512M flash userdata ~/ios-marble/shim/out/marble-xnu/ios16-root-marble-20H392-nojournal.simg
 fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
 ```
+
+Future MARBLE root generations are finalized and pruned automatically; see
+[MARBLE_ROOT_RETENTION.md](MARBLE_ROOT_RETENTION.md) for validation gates, generation
+names, fallback retention, and `MARBLE_KEEP_ROOTS=all`. Kernel diagnostic builds
+do not build roots or trigger retention.

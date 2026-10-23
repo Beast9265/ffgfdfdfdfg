@@ -62,6 +62,11 @@ if [[ ${#missing_tools[@]} -gt 0 ]]; then
 	exit 1
 fi
 
+if [[ $board == marble ]]; then
+	mkdir -p "$(dirname "$(realpath "$0")")/../shim/out/marble-xnu"
+	python3 "$(dirname "$(realpath "$0")")/marble-root-finalize.py" --check-path "$out"
+fi
+
 work=$(mktemp -d)
 mounts=()
 cleanup() {
@@ -161,3 +166,11 @@ sudo umount "$work/root"
 # differently from Apple's tables; let fsck_hfs rewrite them, then verify.
 "$FSCK_HFSPLUS" -f -y "$out" | grep -v 'Illegal name' || true
 "$FSCK_HFSPLUS" -f -n "$out"
+
+# Only a successful MARBLE root build reaches packaging/retention. Kernel CI
+# never invokes this path. Finalizer independently revalidates before pruning.
+if [[ $board == marble && ${#journal_args[@]} -gt 0 ]]; then
+	python3 "$(dirname "$(realpath "$0")")/marble-root-finalize.py" "$out"
+elif [[ $board == marble ]]; then
+	echo 'Non-journaled root: no automatic finalization/cleanup; package manually.'
+fi

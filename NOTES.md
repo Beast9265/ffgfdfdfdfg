@@ -1,7 +1,82 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
 
-## Active handoff: MARBLE root-only migration experiment (2026-10-23)
+## Active handoff: MARBLE diagnostic-first Setup investigation (2026-10-23)
+
+USER PHYSICAL RESULT (overnight, supersedes all pending setup-fast claims):
+setup-fast root flashed and booted successfully PASS. First real iOS pixels
+PASS; migration progress UI PASS historically. fairplayd.H2 suppression FIXED:
+old FairPlay/xpcproxy flood gone. Old migration progress UI no longer remains
+on screen: setup-fast changed/bypassed the previous visible migration wall;
+this does NOT prove migration definitely completed. Later userspace reached.
+Overnight: exec xpcproxy, nanotimekitcompaniond and maintenanced continuously;
+repeated MARBLE AKS: ReportCrash sel 17 arg0 0 in 1/0 out 0/4096 -> 0x0;
+occasional coreduetd/other AKS users. No panic/reboot observed. No Setup/Hello
+UI, and no further visible progress overnight: Setup FAIL, blocker UNKNOWN.
+Daemon relaunches and ReportCrash AKS traffic are observations, not proof that
+those daemons block Setup or that ReportCrash itself is crashing.
+
+Diagnostic-only work in progress. Keep current setup-fast userdata, cpus=1,
+marbleguidiag=1, 1125x2436 presentation and 10 Hz throttle. No daemon disabling,
+audio/activation/root/migration/graphics/UFS/SMP change or phone interaction.
+No new root and no cleanup of existing root artifacts in this task.
+
+SWEET v12 audit: MARBLE FILESYS_BASE already lacks config_ext_resolver (0057);
+AKS35 shares17 device-state DER,101 succeeds;0056 pending-swap10Hz throttle,
+container hierarchy/personas/ACL compatibility,RENAME_SWAP and Sandbox policy
+all retained. VirtualAudio move targeted a mediaserverd fault, its effect at
+Hello unverified; no proof it gates MARBLE GUI, no audio change. SWEET Hello
+coexisted with mobileactivationd/~100 boot and other daemon loops. No specific
+nanotimekitcompaniond/maintenanced/ReportCrash v12 record in available handoff;
+external historical raw logs/reports unavailable locally, no invented results.
+
+0082 changes ONLY kern_exit.c,mem.c,exception.c diagnostic sections. Nine full
+p_name/proc_selfname matches: SpringBoard,backboardd,Setup,nanotimekitcompaniond,
+maintenanced,ReportCrash,mobileactivationd,installcoordinationd,mediaserverd.
+Opt-in abnormal-exit hook precedes crash-report eligibility; normal critical-exit,
+signal/corpse decisions recovered byte-identically after removing diagnostics.
+Crash32 events/boot,4/name,max64 lines,reason512chars;stderr64x256B/name and
+512x256B/boot(16KiB/name,128KiB/boot). Saturating atomic reservations.
+Heap SIGABRT/TRAP only,ReportCrash excluded,4 scans/boot,1/name,4096 regions,
+16MiB attempted bytes/scan(strict clamp,failed copies counted),64MiB/boot,
+64 strings/scan,159chars each,64KiB buffer;filtered exception/failure text.
+Existing short full-name exec logger retained; no Setup launch gate established
+before next physical evidence. Sampler NOT ported: mature SWEET holds task_lock
+while vm_map_read_user can page-fault,unbounded thread count; lowering schedule
+alone cannot guarantee bounded CPU0 latency. SWEET sampler remains unchanged.
+Details/interpretation docs/MARBLE_SETUP_DIAGNOSTICS.md.
+
+Local validation PASS: full0001..0082 reverse/replay,strict0082 whitespace apply,
+all3 changed units actual-CI-header arm64 compile;SWEET/BCM2837/T8103 preprocessed
+tokens unchanged(__LINE__ normalized). All other0082 sections byte-identical.
+Actual extracted helper ASan/UBSan tests pass full/truncated/unknown names,
+normal/noncurrent/disabled exits,32-event/64-line cap,atomic concurrent saturation,
+512 stderr chunks,heap4 scans/4096 regions/16MiB success+failed-copy/64 strings,
+zero-size and overflow termination. tools/test-marble-gui-diag.py TREE.
+Temporary scripts/logs /tmp/setup-diag-{validate.py,equivalence.py,replay.log,
+ci.log};objects /tmp/setup-diag-objects;source /tmp/setup-diag-build/xnu.
+
+Future root cleanup: mkiosroot.sh --board marble invokes new finalizer AFTER
+fsck;independent fsck+journal+readonly root validation+sparse/full expansion cmp+
+SHA256+atomic registry gates deletion. Retain latest raw+sparse and previous
+recorded validated sparse;bootstrap keeps all until verified fallback exists.
+Exact canonical output directory/name scope,symlinks rejected,KEEP/DELETE plan,
+locked exact rm -- paths;MARBLE_KEEP_ROOTS=all escape. Nonjournaled historical
+build path cannot pass journal gate and skips automatic finalization/cleanup.
+7 disposable fixture tests PASS including every validation-stage failure,
+symlinks/hash failures and protected files. docs/MARBLE_ROOT_RETENTION.md.
+No cleanup/registry access to current artifact set performed;no root creation.
+
+Existing tool suite initially exposed stale pre-graphics test expecting gic-only
+MARBLE ADT. Updated that test to assert existing gic+disp0,1125x2436 and scale3;
+no generator change. Seven existing tests now PASS.
+
+Next: commit/push exact diagnostic source,normal MARBLE Actions build and local
+boot-v4 packaging,then linked/hash verification. Physical blocker NOT fixed.
+No phone operations. Pre-existing iosroot-sparse.sh executable-mode change and
+untracked MARBLE_BOOTSTRAP_BREADCRUMBS.md preserved,not staged.
+
+## Previous handoff: MARBLE root-only migration experiment (2026-10-23)
 
 USER PHYSICAL MILESTONE: FIRST REAL iOS PIXELS ON MARBLE PASS; IOSurface CPU
 rendering/IOMobileFramebuffer presentation/AppleCLCD panel copy/data migration
