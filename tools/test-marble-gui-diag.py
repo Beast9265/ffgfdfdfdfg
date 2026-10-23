@@ -45,7 +45,7 @@ static void kfree_data(void *p,size_t size) { (void)size;free(p); }
 static size_t test_strlcpy(char *out,const char *in,size_t size) { size_t len=strlen(in);if(size)snprintf(out,size,"%s",in);return len; }
 #define strlcpy test_strlcpy
 static char *strnstr(const char *s,const char *find,size_t size) { (void)size;return strstr(s,find); }
-static int diag_print(const char *fmt,...) { if(!strcmp(fmt,"STR %s\n"))strings++;if(!strncmp(fmt,"CRASH ",6)){if(strstr(fmt,"reason ns"))reasons++;else crashes++;}return 0; }
+static int diag_print(const char *fmt,...) { if(!strcmp(fmt,"STR %s\n"))strings++;if(!strncmp(fmt,"CRASH ",6)){if(strstr(fmt,"reason ns")){reasons++;va_list args;va_start(args,fmt);(void)va_arg(args,const char *);(void)va_arg(args,unsigned);(void)va_arg(args,uint64_t);const char *text=va_arg(args,const char *);assert(!strpbrk(text,"\n\r"));assert(strlen(text)<=512);va_end(args);}else crashes++;}return 0; }
 #define printf diag_print
 typedef void *vm_map_t;
 typedef uint64_t vm_map_offset_t;
@@ -83,7 +83,7 @@ static struct process test_proc={&test_reason,0};
 static struct process *current_proc(void) { return &test_proc; }
 static int proc_getcsflags(struct process *p) { return p->flags; }
 static int proc_getpid(struct process *p) { (void)p;return 42; }
-static char *exit_reason_get_string_desc(struct reason *r) { (void)r;return "failure reason"; }
+static char *exit_reason_get_string_desc(struct reason *r) { (void)r;return "failure\nreason"; }
 #define PROC_HAS_EXITREASON(p) ((p)->p_exit_reason!=NULL)
 #define PROC_EXITREASON_FLAGS(p) 0
 static void marble_crash_strings(const char *name) { sweet_crash_strings(name); }

@@ -54,7 +54,8 @@ are rejected. Saturating atomic reservations prevent preemption overruns.
 * Abnormal exits: 32 events/boot, at most 4/name across respawns. One signal /
   exception-code / subcode / exit-status line, plus one namespace/code/reason
   line if a reason exists; **64 CRASH lines maximum**, reason text capped at
-  512 characters. Hook precedes the crash-report eligibility filter so
+  512 characters, with controls/newlines replaced by spaces to keep one
+  physical console line. Hook precedes the crash-report eligibility filter so
   NO_CRASH_REPORT does not hide abnormal exits. Original critical-exit,
   signal, crash-report and corpse behavior is unchanged.
 * /dev/null stdout/stderr tee: 64 chunks/name across respawns and 512 chunks

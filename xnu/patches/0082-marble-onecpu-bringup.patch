@@ -13444,7 +13444,7 @@ diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFrame
 diff --git a/bsd/kern/kern_exit.c b/bsd/kern/kern_exit.c
 --- a/bsd/kern/kern_exit.c
 +++ b/bsd/kern/kern_exit.c
-@@ -1849,6 +1849,42 @@
+@@ -1849,6 +1849,52 @@
  		proc_handle_critical_exit(p, rv);
  	}
  
@@ -13470,10 +13470,20 @@ diff --git a/bsd/kern/kern_exit.c b/bsd/kern/kern_exit.c
 +				    ((uint64_t)ut->uu_exception << 32) | (uint32_t)ut->uu_code,
 +				    (uint64_t)ut->uu_subcode, WEXITSTATUS(rv));
 +				if (PROC_HAS_EXITREASON(p)) {
-+					char *desc = exit_reason_get_string_desc(p->p_exit_reason);
++					const char *desc = exit_reason_get_string_desc(p->p_exit_reason);
++					char reason[513];
++					unsigned int n = 0;
++					if (desc == NULL) {
++						desc = "(none)";
++					}
++					/* One physical console line, even for multiline payloads. */
++					while (n < sizeof(reason) - 1 && desc[n]) {
++						unsigned char c = (unsigned char)desc[n];
++						reason[n++] = c >= 0x20 && c < 0x7f ? (char)c : ' ';
++					}
++					reason[n] = 0;
 +					printf("CRASH %s reason ns %u code 0x%llx: %.512s\n", name,
-+					    p->p_exit_reason->osr_namespace, p->p_exit_reason->osr_code,
-+					    desc != NULL ? desc : "(none)");
++					    p->p_exit_reason->osr_namespace, p->p_exit_reason->osr_code, reason);
 +				}
 +				if (WTERMSIG(rv) == SIGABRT || WTERMSIG(rv) == SIGTRAP) {
 +					extern void marble_crash_strings(const char *);

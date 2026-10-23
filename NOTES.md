@@ -71,8 +71,13 @@ Existing tool suite initially exposed stale pre-graphics test expecting gic-only
 MARBLE ADT. Updated that test to assert existing gic+disp0,1125x2436 and scale3;
 no generator change. Seven existing tests now PASS.
 
-Next: commit/push exact diagnostic source,normal MARBLE Actions build and local
-boot-v4 packaging,then linked/hash verification. Physical blocker NOT fixed.
+Initial source722eabbbd6cf18e0e14b5c2c56ec262a40bf0e28 / Actions39887730292
+superseded: final review found exit-reason embedded newlines could turn one
+record into multiple physical lines. Added bounded512-byte ASCII sanitization;
+ASan/UBSan actual-hook multiline test PASS; full replay/3 arm64 compiles and
+all9 non-MARBLE equivalence checks rerun PASS. Cancellation requested for
+39887730292; do not use its artifact. Next: commit/push final revision and
+exact MARBLE workflow,then linked/hash verification. Physical blocker NOT fixed.
 No phone operations. Pre-existing iosroot-sparse.sh executable-mode change and
 untracked MARBLE_BOOTSTRAP_BREADCRUMBS.md preserved,not staged.
 
