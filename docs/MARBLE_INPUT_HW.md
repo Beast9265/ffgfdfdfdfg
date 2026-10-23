@@ -306,3 +306,70 @@ With marbleguidiag=1 and a completed metadata read, at most4 rows of16 bytes
 follow as `MARBLE TOUCH: IC-info[%u] ...`; every row must be inside len and64.
 No hardware safety gate or acceptance criterion was weakened by these diagnostics.
 Physical input and UIKit receipt remain **UNTESTED**.
+
+
+## Final packaged input test — awaiting physical validation
+
+Final source: `7f2758cd0f89ff5cd68cde63475aaa354074ce79`
+(`marble: improve guarded input diagnostics`).
+[CI39897578714](https://github.com/Beast9265/ios-marble/actions/runs/39897578714)
+completed **success**, with headSha exactly matching that source and inputs
+13.5 / DEVELOPMENT / MARBLE / keep_going=true. Fresh artifact directory:
+`xnu/out-marble-ci-39897578714`. Prior successful39896552164 is not packaged.
+
+| Final artifact | SHA256 |
+|---|---|
+| Kernel | `79dccb0c015e7490b6a9467ceb727d055b83013d21d5e4de632a5a45ffd6db8d` |
+| ADT (same physical Hello bytes) | `35f0bff762c339e86a0e67392267ed148ae06b24703b682ce2327c9296ed84e3` |
+| Physical payload | `ded93b3420d89485575a113fe604bb587662c4f62e371a589d4abca113281e56` |
+| latest-marble-xnu.img | `a9dfc2ef7fe7990411a6403a7503694ec55fbcbdc8383a91b77c9ecc5a0cb3e8` |
+| Synthetic payload | `bfa66d40e3df1dca5c2f2de7e77080406d74005fcbf16d54216d872dbb64062b` |
+| latest-marble-xnu-hidtest.img | `dd2ef2d1355a7f1ca71ddd43c8a4ce1d78b4d4fed087a52298c287b7b8821236` |
+
+Images/payloads/ADT are under `shim/out/marble-xnu/`; generated manifest
+`marble-input-39897578714.json` records exact arguments and hashes. Known-good
+Hello image `hello-known-good-marble-xnu.img` remains
+`789377d9cc9de5027038b074e3c0c61121f2229594e7895282933a44b1eb6242`.
+The setup-fast raw/sparse were rehashed and match the checkpoint table above.
+No new root, writes to userdata, root cleanup or physical phone operations.
+
+Physical payload command line is byte-identical to the Hello image's line:
+
+```text
+debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1 ufsrw=1 rootrw=1 launchd_unsecure_cache=1 marbleguidiag=1
+```
+
+Synthetic image adds only `marblehidtest=300 marblekeys=0 marbletouch=0`.
+Both use identical final kernel segments and exact known-good ADT. The earlier
+regeneration semantic check normalized bookkeeping only; packaged bytes are
+extracted/verified against the physical Hello image, preserving random seed,
+phandles, ordering and all /product properties. No input ADT changes required.
+
+Post-build verification passed: artifact SHA256SUMS, arm64 Mach-O, full link
+with zero undefined symbols; every payload segment matches the exact rebased
+CI kernel; independent boot-v4 header/stock metadata/bounds/padding/size/shim/
+locator footer checks on both images; bootstrap mapping/capacity/alias audit.
+Shim SHA256 remains586713d3b4c5862f73443cb1e5f555e465a9ffa5f3e2662672d41fff1715ee05.
+Linked personality string now contains SweetHIDButtons and SweetHIDTouch on
+IOResources, without SweetBattery. Linked physical entry points and the final
+refusal diagnostic strings are present. No physical-timer instructions, one
+CNTV_CTL MSR; SWEET sampler remains excluded. Full CI logs confirm0082 applied
+and physical/HID units compiled. Runtime service registration/opening, actual
+inherited state, real input and UIKit receipt remain **UNTESTED**.
+
+Only manual phone commands, synthetic first (allow~300s plus readiness and
+settling for its one volume-up/info-tap sequence):
+
+```sh
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu-hidtest.img
+```
+
+Then test physical power/volume/tap/drag and bottom-edge swipe:
+
+```sh
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
+```
+
+No userdata flash is needed. The next physical success criterion is retained
+Hello rendering, HID service opens by backboardd, key transitions and contact
+down/move/up reaching iOS, then a real bottom-edge swipe advancing Hello.

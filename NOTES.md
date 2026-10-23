@@ -25,6 +25,53 @@ No userdata changes planned;preserve /product,graphics,geometry3x,10Hz,cpus1.
 Input source audit/local controlled stages underway;no physical success claimed.
 
 
+FINAL INPUT BUILD READY — PHYSICAL INPUT UNTESTED:
+Recovered final pre-limit diagnostics already in0082; no recreation/functional
+change. Source7f2758cd0f89ff5cd68cde63475aaa354074ce79 committed/pushed.
+Exact CI39897578714 completed SUCCESS,13.5/DEVELOPMENT/MARBLE/keep_going=true;
+headSha matches source. Prior39896552164 SUCCESS9317cc4 is superseded and
+NOT used. Freshartifact xnu/out-marble-ci-39897578714, SHA256SUMS verified;
+arm64 full link/no undefined symbols, actualCIcompiles bothphysicalunits and
+SweetHID.cpp, finallinked personalities include both HID services onIOResources,
+SweetBattery absent. Runtime registration/backboardd opens still untested.
+Finalsetup diagnostics and guards verified linked. Every payloadsegment equals
+exactrebasednewkernel. Boot-v4 independentbounds/padding/stockmetadata/footer,
+contents/size and bootstrapmapping/capacity/aliases audits PASS. NoCNTP ops,
+oneCNTV_CTLMSR,cpus1/noSWEETsampler. Same shim586713d3...1715ee05.
+
+Kernel SHA256 79dccb0c015e7490b6a9467ceb727d055b83013d21d5e4de632a5a45ffd6db8d
+ADT SHA256 35f0bff762c339e86a0e67392267ed148ae06b24703b682ce2327c9296ed84e3
+Physical payload ded93b3420d89485575a113fe604bb587662c4f62e371a589d4abca113281e56
+Physical boot a9dfc2ef7fe7990411a6403a7503694ec55fbcbdc8383a91b77c9ecc5a0cb3e8
+Synthetic payload bfa66d40e3df1dca5c2f2de7e77080406d74005fcbf16d54216d872dbb64062b
+Synthetic boot dd2ef2d1355a7f1ca71ddd43c8a4ce1d78b4d4fed087a52298c287b7b8821236
+Finalimages shim/out/marble-xnu/latest-marble-xnu.img and
+latest-marble-xnu-hidtest.img. Manifest marble-input-39897578714.json.
+Both reuse EXACT Hello ADT extracted independently from rollbackimage. No
+randomseed/phandle/order/product/display/CPU change. Physical cmdline EXACT
+Hello cmdline inclcpus=1 marbleguidiag=1; synthetic addsONLY
+marblehidtest=300 marblekeys=0 marbletouch=0. Bounded onevolup+infotap after
+Setupalive/servicesopen/settle; noHome/Setupskipevent/no continuous injection.
+
+Hello rollbackimage789377d9cc9de5027038b074e3c0c61121f2229594e7895282933a44b1eb6242
+preserved/reverified. setup-fastraw/sparse rehashedunchanged7ca8...22798 /
+cec3...4aa01; no root built/written/mounted/cleaned, no phone commands.
+Key/touch source-backedgates unchanged; firstphysicalreadiness/power/probe not
+measuredyet. Readonly refusal if inherited bus/mux/clock/reset/config unsafe;
+no RPMh,firmware,reset orconfig fallback. Exactlogforms docs/MARBLE_INPUT_HW.md.
+Logs /tmp/marble-input-final-{ci.log,run.json,audit.log,root-hashes.txt};
+packscript/log /tmp/marble-input-package.py/.log; source-replay
+/tmp/marble-input-final-replay. Independent linkeddisassemblies
+/tmp/marble-input-final-linked-*.txt, personalitystring in
+/tmp/marble-input-final-personalities.txt.
+
+NEXT USER MANUAL synthetic test (wait~300s plus readiness/settle):
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu-hidtest.img
+Then USER MANUAL physicalkeys/touch/swipe test:
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
+No userdata flash. Preserve Hello rollback. No physicalinput success claimed.
+
+
 Input local milestone: actual Hello Mach-O has all0058 HID classes/hooks but
 its KernelConfigTables lacks the SWEET-only personalities.0082 now shares
 ONLY Buttons/Touch personalities, not battery. Apple IOHIDEvent/queue/userclient
