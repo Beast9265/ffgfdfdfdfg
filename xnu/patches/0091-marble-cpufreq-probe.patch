@@ -1,0 +1,117 @@
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -39,6 +39,9 @@
+ #include <pexpert/device_tree.h>
+ #include <libkern/libkern.h>
+ #include <machine/atomic.h>
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++#include "marble_hwdiag.h"
++#endif
+ 
+ extern ppnum_t pmap_find_phys(pmap_t pmap, addr64_t va);
+ /* osfmk/arm/machine_routines.h, not exported to the BSD layer */
+@@ -67,6 +70,94 @@
+ #endif
+ #define REG_VER         0x08
+ 
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++/*
++ * SM8475 EPSS CPU frequency hardware. Linux describes three 4 KiB domains:
++ *   CPU0-3  0x17d91000
++ *   CPU4-6  0x17d92000
++ *   CPU7    0x17d93000
++ * This diagnostic is deliberately read-only.  Enable with marblecpufreq=1.
++ */
++#define MARBLE_EPSS_ENABLE       0x000u
++#define MARBLE_EPSS_DOMAIN_STATE 0x020u
++#define MARBLE_EPSS_DCVS_CTRL    0x0b0u
++#define MARBLE_EPSS_FREQ_LUT     0x100u
++#define MARBLE_EPSS_VOLT_LUT     0x200u
++#define MARBLE_EPSS_PERF_STATE   0x320u
++#define MARBLE_EPSS_LUT_MAX      40u
++
++static inline uint32_t
++marble_epss_read(vm_offset_t base, uint32_t off)
++{
++	return *(volatile uint32_t *)(base + off);
++}
++
++static uint32_t
++marble_epss_mhz(uint32_t row)
++{
++	uint32_t src = (row >> 30) & 3u;
++	uint32_t lval = row & 0xffu;
++	/* qcom-cpufreq-hw: src 0 is GPLL0 / 2 = 300 MHz; other sources use 19.2 MHz XO * L. */
++	return src ? (19200u * lval) / 1000u : 300u;
++}
++
++static void
++marble_cpufreq_probe(void)
++{
++	uint32_t on = 0;
++	static const vm_offset_t pa[3] = { 0x17d91000u, 0x17d92000u, 0x17d93000u };
++
++	PE_parse_boot_argn("marblecpufreq", &on, sizeof(on));
++	if (on != 1) {
++		return;
++	}
++
++	for (unsigned d = 0; d < 3; d++) {
++		vm_offset_t base = ml_io_map(pa[d], 0x1000);
++		char key[32];
++		if (base == 0) {
++			snprintf(key, sizeof(key), "CPUF D%u MAP", d);
++			marble_hwdiag_value(1, key, (uint32_t)pa[d], 0);
++			printf("MARBLE CPUFREQ: domain%u map failed at 0x%lx\n", d, pa[d]);
++			continue;
++		}
++
++		uint32_t enable = marble_epss_read(base, MARBLE_EPSS_ENABLE);
++		uint32_t state = marble_epss_read(base, MARBLE_EPSS_DOMAIN_STATE);
++		uint32_t dcvs = marble_epss_read(base, MARBLE_EPSS_DCVS_CTRL);
++		uint32_t perf = marble_epss_read(base, MARBLE_EPSS_PERF_STATE);
++		uint32_t current_raw = perf < MARBLE_EPSS_LUT_MAX ?
++		    marble_epss_read(base, MARBLE_EPSS_FREQ_LUT + perf * 4) : 0;
++		uint32_t current_mhz = perf < MARBLE_EPSS_LUT_MAX ? marble_epss_mhz(current_raw) : 0;
++
++		snprintf(key, sizeof(key), "CPUF D%u ENABLE/STATE", d);
++		marble_hwdiag_value(1, key, enable, state);
++		snprintf(key, sizeof(key), "CPUF D%u DCVS/PERF", d);
++		marble_hwdiag_value(1, key, dcvs, perf);
++		snprintf(key, sizeof(key), "CPUF D%u CURraw/MHz", d);
++		marble_hwdiag_value(1, key, current_raw, current_mhz);
++		printf("MARBLE CPUFREQ: d%u enable=0x%x state=0x%x dcvs=0x%x perf=%u raw=0x%x ~= %u MHz\n",
++		    d, enable, state, dcvs, perf, current_raw, current_mhz);
++
++		uint32_t prev_mhz = UINT32_MAX;
++		for (uint32_t i = 0; i < MARBLE_EPSS_LUT_MAX; i++) {
++			uint32_t raw = marble_epss_read(base, MARBLE_EPSS_FREQ_LUT + i * 4);
++			uint32_t volt = marble_epss_read(base, MARBLE_EPSS_VOLT_LUT + i * 4);
++			uint32_t mhz = marble_epss_mhz(raw);
++			uint32_t cores = (raw >> 16) & 7u;
++			snprintf(key, sizeof(key), "CPUF D%u L%02u raw/MHz", d, i);
++			marble_hwdiag_value(1, key, raw, mhz);
++			printf("MARBLE CPUFREQ: d%u lut%02u raw=0x%08x ~= %u MHz cores=%u volt=0x%08x%s\n",
++			    d, i, raw, mhz, cores, volt, cores == 1 ? " turbo" : "");
++			if (i > 0 && mhz == prev_mhz) {
++				break;
++			}
++			prev_mhz = mhz;
++		}
++	}
++}
++#endif /* ARM64_BOARD_CONFIG_MARBLE */
++
+ #define REG_CAP         0x00
+ #define REG_IS          0x20
+ #define REG_IE          0x24
+@@ -961,6 +1052,9 @@
+ 	su.writable = (rw != 0);
+ #endif
+ 	su.ready = true;
++#ifdef ARM64_BOARD_CONFIG_MARBLE
++	marble_cpufreq_probe();
++#endif
+ 	printf(UFS_LOG "\"%s\" on LUN %u: first block 0x%llx, %llu MiB, %s, DMA at 0x%llx\n",
+ 	    want, su.lun, su.first_block, su.nblocks * UFS_BLOCK >> 20,
+ 	    su.writable ? "read-write" : "read-only", su.dma_pa);
