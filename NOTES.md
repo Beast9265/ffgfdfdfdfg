@@ -2,6 +2,19 @@
 
 
 
+## MARBLE CPU-frequency probe CI success (2026-10-24)
+
+Exact workflow run 40091465366 / job 120864842043 succeeded on branch `marble`
+with head SHA `5226882c0502699f269af14f5965ed2c23a97877`. Build inputs:
+macOS 13.5, DEVELOPMENT, MARBLE. Artifact `xnu-kernel` ID 12559058657;
+`kernel.development.marble` is 17,878,712 bytes, Mach-O arm64 with NOUNDEFS,
+SHA256 `b7dae34256d9932b54708aa0d73987d9af1daf0b3e4d2d65532ad20c6a4c6858`.
+Linked kernel contains `marblecpufreq` and MARBLE CPUFREQ diagnostic strings.
+Next physical test should use the exact run artifact and boot with
+`marblecpufreq=1 marblehwdiag=1`; cpus=1 is preferred for the first readout to
+avoid SMP debug spam because CPU0-3 share EPSS domain0. No phone command has
+been run by the agent.
+
 ## Active MARBLE CPU-frequency probe (2026-10-24)
 
 Source commit `7ad7959f3e6a1481ff4c4db24de0375f4ecd8ec8` adds
