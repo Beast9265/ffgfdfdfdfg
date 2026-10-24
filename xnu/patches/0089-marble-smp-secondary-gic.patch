@@ -1,0 +1,239 @@
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -487,6 +487,125 @@
+ Lmarble_secondary_bad_el:
+ 	b		.
+ Lmarble_secondary_el1:
++	/*
++	 * HelioDarwin x676c and ios-topaz topaz prepare secondary Qualcomm
++	 * redistributors before XNU because otherwise SGIs and the vtimer remain
++	 * ineligible after initCPU. Pixel3's p1-probe independently uses the same
++	 * Group-1/priority/enable sequence. MARBLE's MMU-on write to the protected
++	 * SGI frame aborted; perform the physical MMIO while translation is off.
++	 *
++	 * CPU1 (MPIDR 0x100) is physically known-good and receives no redistributor
++	 * or CPU-interface change. Restrict this first correction to CPU2/CPU3. Scan
++	 * GICR_TYPER rather than assuming frame order; SM8450 DT proves
++	 * 17180000/200000 and a 40000 redistributor stride.
++	 */
++	mrs		x1, MPIDR_EL1
++	and		x1, x1, #0xffff
++	cmp		x1, #0x200
++	b.eq	Lmarble_secondary_gic_prepare
++	cmp		x1, #0x300
++	b.ne	Lmarble_secondary_gic_done
++Lmarble_secondary_gic_prepare:
++	/* Match reset_vector: install a valid EL1 vector before any MMIO load. */
++	adrp	x3, EXT(LowExceptionVectorBase)@page
++	add		x3, x3, EXT(LowExceptionVectorBase)@pageoff
++	msr		VBAR_EL1, x3
++	isb
++	lsr		x2, x1, #8			// logical A510 index: 2 or 3
++	adrp	x10, EXT(marble_secondary_gic_diag)@page
++	add		x10, x10, EXT(marble_secondary_gic_diag)@pageoff
++	add		x10, x10, x2, lsl #6		// 16 u32, private cache line
++	mov		w11, #0x8000			// attempted; miss until matched
++	str		w11, [x10]
++	MOV64	x6, 0x17180000
++	mov		w5, #8
++Lmarble_secondary_gic_scan:
++	ldr		x7, [x6, #8]			// GICR_TYPER
++	lsr		x8, x7, #32
++	and		x8, x8, #0xffff
++	cmp		x8, x1
++	b.eq	Lmarble_secondary_gic_found
++	add		x6, x6, #0x40, lsl #12	// SM8450 stride 0x40000
++	subs	w5, w5, #1
++	b.ne	Lmarble_secondary_gic_scan
++	b		Lmarble_secondary_gic_store_status
++Lmarble_secondary_gic_found:
++	mov		w11, #1				// frame found / setup attempted
++	str		w6, [x10, #4]
++	str		w8, [x10, #8]
++	ldr		w3, [x6, #0x14]		// GICR_WAKER before
++	str		w3, [x10, #12]
++	ldr		w4, [x6]			// GICR_CTLR before
++	str		w4, [x10, #20]
++	mov		x9, #0x10000
++	add		x9, x6, x9			// SGI/PPI frame
++	ldr		w4, [x9, #0x80]		// GICR_IGROUPR0 before
++	str		w4, [x10, #24]
++	ldr		w4, [x9, #0xd00]		// GICR_IGRPMODR0 before
++	str		w4, [x10, #28]
++	ldr		w4, [x9, #0x400]		// priorities INTID0..3 before
++	str		w4, [x10, #32]
++	ldrb	w4, [x9, #0x41b]		// MARBLE virtual timer INTID27
++	str		w4, [x10, #60]
++	ldr		w4, [x9, #0x100]		// GICR_ISENABLER0 before
++	str		w4, [x10, #36]
++	// Wake this redistributor. A bounded timeout is recorded, never hidden.
++	tbz		w3, #1, Lmarble_secondary_gic_wake_begin
++	bic		w3, w3, #2
++	str		w3, [x6, #0x14]
++Lmarble_secondary_gic_wake_begin:
++	mov		w5, #0x40000
++Lmarble_secondary_gic_wake_wait:
++	ldr		w3, [x6, #0x14]
++	tbz		w3, #2, Lmarble_secondary_gic_awake
++	subs	w5, w5, #1
++	b.ne	Lmarble_secondary_gic_wake_wait
++	orr		w11, w11, #2			// ChildrenAsleep timeout
++	str		w3, [x10, #16]
++	b		Lmarble_secondary_gic_store_status
++Lmarble_secondary_gic_awake:
++	str		w3, [x10, #16]		// WAKER after bounded wake
++	// Non-secure Group 1, priority 0xa0, SGI1 + MARBLE vtimer PPI27.
++	mov		w4, #0xffffffff
++	str		w4, [x9, #0x80]		// GICR_IGROUPR0
++	mov		w4, #0xa0
++	mov		w5, #32
++	add		x7, x9, #0x400
++Lmarble_secondary_gic_priority:
++	strb	w4, [x7], #1
++	subs	w5, w5, #1
++	b.ne	Lmarble_secondary_gic_priority
++	mov		w4, #2
++	orr		w4, w4, #(1 << 27)
++	str		w4, [x9, #0x100]		// GICR_ISENABLER0
++	dsb		sy
++	// GICR_CTLR.RWP is bit3. Bound the wait and preserve timeout evidence.
++	mov		w5, #0x40000
++Lmarble_secondary_gic_rwp_wait:
++	ldr		w4, [x6]
++	tbz		w4, #3, Lmarble_secondary_gic_rwp_done
++	subs	w5, w5, #1
++	b.ne	Lmarble_secondary_gic_rwp_wait
++	orr		w11, w11, #4
++Lmarble_secondary_gic_rwp_done:
++	ldr		w4, [x9, #0x80]
++	str		w4, [x10, #40]
++	ldr		w4, [x9, #0xd00]
++	str		w4, [x10, #44]
++	ldr		w4, [x9, #0x400]
++	str		w4, [x10, #48]
++	ldrb	w4, [x9, #0x41b]
++	ldr		w5, [x10, #60]
++	orr		w5, w5, w4, lsl #8
++	str		w5, [x10, #60]		// timer before low8, after next8
++	ldr		w4, [x9, #0x100]
++	str		w4, [x10, #52]
++	ldr		w4, [x6]
++	str		w4, [x10, #56]
++Lmarble_secondary_gic_store_status:
++	str		w11, [x10]
++	dsb		sy
++Lmarble_secondary_gic_done:
+ 	/* x0 is deliberately unused; reset_vector selects CPU data by MPIDR. */
+ 	msr		SPSel, #1
+ 	b		EXT(LowResetVectorBase)
+diff --git a/pexpert/arm/pe_fiq.c b/pexpert/arm/pe_fiq.c
+--- a/pexpert/arm/pe_fiq.c
++++ b/pexpert/arm/pe_fiq.c
+@@ -26,6 +26,16 @@
+ static vm_offset_t gicr_base;
+ static vm_offset_t gicr_size;
+ 
++#if defined(MARBLE)
++/*
++ * Written by marble_secondary_entry with the MMU off, then read here after
++ * normal secondary initialization.  One cache line per logical A510 keeps
++ * independent CPUs from sharing an early diagnostic line.
++ */
++volatile uint32_t marble_secondary_gic_diag[MARBLE_SMP_MAX_CPUS][16]
++    __attribute__((aligned(64)));
++#endif
++
+ static uint32_t
+ _gic_read32(vm_offset_t addr)
+ {
+@@ -75,9 +85,11 @@
+ 
+ #if defined(MARBLE)
+ /*
+- * Read-only local GIC snapshot for SMP bring-up.  In particular, ISPENDR0
+- * distinguishes "SGI never arrived" from "SGI is pending but not eligible".
+- * Keep the protected priority/group programming windows untouched.
++ * Read-only local GIC snapshot for SMP bring-up. ISPENDR0 distinguishes
++ * "SGI never arrived" from "SGI is pending but not eligible". Group reads
++ * can be RAZ/WI in a non-secure view, so preserve IGRPMODR and priority too.
++ * ICC_IAR1_EL1 is deliberately not read: acknowledging here would consume
++ * the self-test interrupt before sleh_irq/cpu_signal_handler sees it.
+  */
+ void
+ marble_gic_debug_local(const char *tag)
+@@ -85,9 +97,16 @@
+ 	vm_offset_t gicr_pe_base = find_gicr_pe_base();
+ 	uint64_t mpidr = __builtin_arm_rsr64("MPIDR_EL1") & 0xffffULL;
+ 	uint64_t typer = gicr_read64(GICR_TYPER);
++	uint32_t gicr_ctlr = gicr_read32(GICR_CTLR);
++	uint32_t waker = gicr_read32(GICR_WAKER);
++	uint32_t group = gicr_read32(GICR_IGROUPR0);
++	uint32_t groupmod = gicr_read32(GICR_IGRPMODR0);
++	uint32_t priorities = gicr_read32(GICR_IPRIORITYR0);
++	uint32_t timer_priority = _gic_read32(gicr_pe_base +
++	    GICR_IPRIORITYR0 + (sweet_vtimer_intid & ~3U));
+ 	uint32_t enabled = gicr_read32(GICR_ISENABLER0);
+-	uint32_t pending = _gic_read32(gicr_pe_base + 0x10200); /* GICR_ISPENDR0 */
+-	uint32_t active = _gic_read32(gicr_pe_base + 0x10300);  /* GICR_ISACTIVER0 */
++	uint32_t pending = gicr_read32(GICR_ISPENDR0);
++	uint32_t active = gicr_read32(GICR_ISACTIVER0);
+ 	uint32_t gicd_ctlr = gicd_read32(GICD_CTLR);
+ 	uint64_t sre = __builtin_arm_rsr64("ICC_SRE_EL1");
+ 	uint64_t igrpen1 = __builtin_arm_rsr64("ICC_IGRPEN1_EL1");
+@@ -97,12 +116,32 @@
+ 	uint64_t hppir0 = __builtin_arm_rsr64("ICC_HPPIR0_EL1") & 0xffffffULL;
+ 	uint64_t hppir1 = __builtin_arm_rsr64("ICC_HPPIR1_EL1") & 0xffffffULL;
+ 
++	unsigned int cpu = ml_get_cpu_number_local();
++	volatile uint32_t *early = cpu < MARBLE_SMP_MAX_CPUS ?
++	    marble_secondary_gic_diag[cpu] : NULL;
++	if (early != NULL && early[0] != 0) {
++		kprintf("MARBLE GICEARLY: cpu=%u flags=0x%08x frame=0x%08x "
++		    "typer_hi=0x%08x WAKER=%08x->%08x CTLR=%08x->%08x "
++		    "GROUP=%08x->%08x MOD=%08x->%08x PRI=%08x->%08x "
++		    "TIMER%uPRI=%02x->%02x EN=%08x->%08x\n",
++		    cpu, early[0], early[1], early[2],
++		    early[3], early[4], early[5], early[14], early[6], early[10],
++		    early[7], early[11], early[8], early[12], sweet_vtimer_intid,
++		    early[15] & 0xff, (early[15] >> 8) & 0xff, early[9], early[13]);
++	}
+ 	kprintf("MARBLE GICDBG: %s cpu=%u mpidr=0x%llx typer=0x%llx "
+-	    "en=0x%08x pend=0x%08x active=0x%08x GICD_CTLR=0x%08x "
++	    "GICR_CTLR=0x%08x RWP=%u WAKER=0x%08x GROUP=0x%08x MOD=0x%08x "
++	    "SGI1PRI=0x%02x TIMER%uPRI=0x%02x en=0x%08x pend=0x%08x "
++	    "active=0x%08x GICD_CTLR=0x%08x "
+ 	    "SRE=0x%llx IGRPEN1=0x%llx PMR=0x%llx BPR1=0x%llx CTLR=0x%llx "
+ 	    "HPPIR0=%llu HPPIR1=%llu\n",
+-	    tag, ml_get_cpu_number_local(), mpidr, typer, enabled, pending, active,
+-	    gicd_ctlr, sre, igrpen1, pmr, bpr1, ctlr, hppir0, hppir1);
++	    tag, cpu, mpidr, typer, gicr_ctlr,
++	    (unsigned int)!!(gicr_ctlr & GICR_CTLR_RWP),
++	    waker, group, groupmod, (priorities >> 8) & 0xff,
++	    sweet_vtimer_intid,
++	    (timer_priority >> (8 * (sweet_vtimer_intid & 3))) & 0xff,
++	    enabled, pending, active, gicd_ctlr, sre, igrpen1, pmr, bpr1, ctlr,
++	    hppir0, hppir1);
+ }
+ #endif
+ 
+diff --git a/pexpert/pexpert/arm64/MARBLE.h b/pexpert/pexpert/arm64/MARBLE.h
+--- a/pexpert/pexpert/arm64/MARBLE.h
++++ b/pexpert/pexpert/arm64/MARBLE.h
+@@ -48,10 +48,16 @@
+ #define GICD_CTLR_ARE_NS          0x10
+ #define GICD_CTLR_RWP             0x80000000
+ 
++#define GICR_CTLR                               0x00000
++#define GICR_CTLR_RWP                           0x00000008
+ #define GICR_TYPER                              0x08
+ #define GICR_WAKER                              0x14
+ #define GICR_IGROUPR0                           0x10080
+ #define GICR_ISENABLER0                         0x10100
++#define GICR_ISPENDR0                           0x10200
++#define GICR_ISACTIVER0                         0x10300
++#define GICR_IPRIORITYR0                        0x10400
++#define GICR_IGRPMODR0                          0x10D00
+ 
+ #define GICR_TYPER_AFFINITY_VALUE_SHIFT         32
+ #define GICR_TYPER_LAST                         0x10
