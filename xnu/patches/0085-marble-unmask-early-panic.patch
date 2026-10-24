@@ -1,0 +1,25 @@
+diff --git a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -477,6 +477,13 @@
+ 	// rdar://80659177
+ 	// Read SoCD tracepoints up to twice — once the first time we call panic and
+ 	// another time if we encounter a nested panic after that.
++	//
++	// SWEET/MARBLE can take an exception before machine_set_current_thread().
++	// SOCD_TRACE_XNU reaches PERCPU_GET -> current_percpu_base(), which then
++	// dereferences current_thread()==NULL and replaces the original fault with
++	// a nested FAR=0x220 abort. Skip only this optional trace so the early
++	// framebuffer panic path can report the real first exception.
++#if !defined(SWEET) && !defined(MARBLE)
+ 	static int twice = 2;
+ 	if (twice > 0) {
+ 		twice--;
+@@ -485,6 +492,7 @@
+ 		    PACK_2X32(VALUE(state->esr), VALUE(state->cpsr)),
+ 		    VALUE(state->far));
+ 	}
++#endif
+ 
+ 	panic_plain("%s at pc 0x%016llx, lr 0x%016llx (saved state: %p%s)\n"
+ 	    "\t  x0:  0x%016llx x1:  0x%016llx  x2:  0x%016llx  x3:  0x%016llx\n"
