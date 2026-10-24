@@ -13651,7 +13651,7 @@ diff --git a/bsd/dev/marble_touch.c b/bsd/dev/marble_touch.c
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/marble_touch.c
-@@ -0,0 +1,695 @@
+@@ -0,0 +1,847 @@
 +/* MARBLE Berlin-D active initialization; references and ownership in
 + * docs/MARBLE_INPUT_HW.md. No firmware/config upload or Berlin-A operations. */
 +#if defined(ARM64_BOARD_CONFIG_MARBLE)
@@ -13680,6 +13680,7 @@ new file mode 100644
 +static unsigned mt_factor, mt_clock_level;
 +static bool mt_rcg_forced;
 +static bool mt_use_gpi;
++static bool mt_use_bitbang;
 +static bool mh_first_spi;
 +static bool mt_started, mt_bad, mt_legacy_range, mt_down[MT_FINGERS];
 +static int mt_x[MT_FINGERS], mt_y[MT_FINGERS], mt_chan, mt_diag;
@@ -13978,12 +13979,141 @@ new file mode 100644
 + return mt_rd(mt_se,0x48)==0x21 && mt_rd(mt_se,0x7c)==mt_clock_level ? true : mt_stop("SE4 clock readback");
 +}
 +
-+/* Little-endian CPU FIFO words; MSB-first bits within each 8-bit SPI word.
++/*
++ * MARBLE Goodix fallback transport.
++ *
++ * Physically proven on marble by jebbranch:
++ *   GPIO16 MISO
++ *   GPIO17 MOSI
++ *   GPIO18 CLK
++ *   GPIO19 CS
++ *   mode 0, 8-bit, MSB first
++ *
++ * GPIO20 reset and GPIO21 IRQ remain owned by our existing code.
++ */
++static void
++mt_bb_delay(void)
++{
++ for (volatile unsigned i = 0; i < 32; i++) {
++ }
++ __asm__ volatile("dmb osh" ::: "memory");
++}
++
++static void
++mt_bb_io(unsigned pin, bool high)
++{
++ unsigned off = pin * 0x1000 + 4;
++ uint32_t value = mt_rd(mt_tlmm, off);
++ mt_store(mt_tlmm, off, high ? (value | 2u) : (value & ~2u));
++}
++
++static bool
++mt_bb_setup(void)
++{
++ /*
++  * Set output latches before changing mux/function to GPIO:
++  * CS high, CLK low, MOSI low.
++  */
++ if (!mt_mask(mt_tlmm, 0x13004, 2, 2) ||
++     !mt_mask(mt_tlmm, 0x12004, 2, 0) ||
++     !mt_mask(mt_tlmm, 0x11004, 2, 0))
++  return mt_stop("bitbang GPIO output latch");
++
++ /*
++  * GPIO19 CS   output, no pull
++  * GPIO18 CLK  output, no pull
++  * GPIO17 MOSI output, no pull
++  * GPIO16 MISO input, pull-up
++  */
++ if (!mt_mask(mt_tlmm, 0x13000, 0x3ff,
++         (1u << 9) | (3u << 6)) ||
++     !mt_mask(mt_tlmm, 0x12000, 0x3ff,
++         (1u << 9) | (3u << 6)) ||
++     !mt_mask(mt_tlmm, 0x11000, 0x3ff,
++         (1u << 9) | (3u << 6)) ||
++     !mt_mask(mt_tlmm, 0x10000, 0x3ff,
++         (3u << 6) | 3))
++  return mt_stop("bitbang GPIO pinctrl");
++
++ printf("MARBLE TOUCH: bitbang GPIO ready "
++     "MISO16 MOSI17 CLK18 CS19 cfg=%#x/%#x/%#x/%#x\n",
++     mt_rd(mt_tlmm, 0x10000),
++     mt_rd(mt_tlmm, 0x11000),
++     mt_rd(mt_tlmm, 0x12000),
++     mt_rd(mt_tlmm, 0x13000));
++
++ return true;
++}
++
++static uint8_t
++mt_bb_byte(uint8_t out)
++{
++ uint8_t in = 0;
++
++ for (int bit = 7; bit >= 0; bit--) {
++  mt_bb_io(17, (out >> bit) & 1u);
++
++  /* SPI mode 0: idle low, sample on rising edge. */
++  mt_bb_io(18, false);
++  mt_bb_delay();
++
++  mt_bb_io(18, true);
++  mt_bb_delay();
++
++  in = (uint8_t)((in << 1) |
++      (mt_rd(mt_tlmm, 0x10004) & 1u));
++
++  mt_bb_io(18, false);
++  mt_bb_delay();
++ }
++
++ return in;
++}
++
++static bool
++mt_bitbang_exchange(unsigned n)
++{
++ if (!n || n > sizeof(mt_tx) || mt_bad ||
++     (mt_tx[0] != 0xf1 && mt_tx[0] != 0xf0))
++  return false;
++
++ bool read = mt_tx[0] == 0xf1;
++ bzero(mt_rx, n);
++
++ /* CS active low. */
++ mt_bb_io(19, false);
++ mt_bb_delay();
++
++ for (unsigned i = 0; i < n; i++) {
++  uint8_t out = mt_tx[i];
++
++  /*
++   * Berlin-D:
++   *   F1 + BE32 address + three dummy FF bytes
++   *
++   * The next transfer clocks data byte zero.  jebbranch proved that
++   * byte using FF.  Store its received value at mt_rx[8], preserving
++   * our existing mt_read() ABI exactly.
++   */
++  if (read && i == 8)
++   out = 0xff;
++
++  mt_rx[i] = mt_bb_byte(out);
++ }
++
++ mt_bb_io(19, true);
++ mt_bb_delay();
++ return true;
++}
++
+++/* Little-endian CPU FIFO words; MSB-first bits within each 8-bit SPI word.
 + * All RX words/counts are validated; no DMA or physical address descriptors. */
 +static bool
 +mt_exchange(unsigned n)
 +{
 + if (!mh_first_spi) { mh_first_spi = true; marble_hwdiag_value(0, "first_SPI", n, mt_tx[0]); }
++ if (mt_use_bitbang)
++  return mt_bitbang_exchange(n);
 + if (mt_use_gpi) {
 +  if(!n || n>sizeof(mt_tx) || mt_bad || (mt_tx[0]!=0xf1 && mt_tx[0]!=0xf0)) return false;
 +  if(marble_gpi_spi_xfer(mt_tx,mt_rx,n,mt_tx[0]==0xf1)) { mt_bad=true; return false; }
@@ -14165,6 +14295,24 @@ new file mode 100644
 + }
 + printf("MARBLE TOUCH: initial reset physical=%u IRQ physical=%u\n",
 +     mt_rd(mt_tlmm, 0x14004) & 1, mt_rd(mt_tlmm, 0x15004) & 1);
++
++ /*
++  * GPIO transport needs no GENI clocks, FIFO, GPI or SMMU context.
++  * Keep our existing regulator/reset sequence, then take pins 16..19
++  * back from QUP and operate them directly through TLMM.
++  */
++ if (mt_use_bitbang) {
++  if (!mt_active)
++   return mt_stop("bitbang requires marbletouchinit=1");
++  if (!mt_power_on())
++   return false;
++  if (!mt_bb_setup())
++   return false;
++  marble_hwdiag_value(0, "transport_bitbang", 1, 1);
++  printf("MARBLE TOUCH: SPI transport ready: GPIO bitbang mode0 8-bit MSB\n");
++  goto transport_ready;
++ }
++
 + if (mt_active && !mt_clocks()) return false;
 + if (!mt_active) {
 +  mt_clock_snapshot(false);
@@ -14296,8 +14444,9 @@ new file mode 100644
 +{
 + (void)arg; (void)result;
 + marble_hwdiag_stage(0, MT_WORKER);
-+ printf("MARBLE TOUCH: worker started; probe after 60s active-init=%d\n", mt_active);
-+ mt_wait(60000);
++ printf("MARBLE TOUCH: worker started; probe after %us active-init=%d bitbang=%d\n",
++     mt_use_bitbang ? 15u : 60u, mt_active, mt_use_bitbang);
++ mt_wait(mt_use_bitbang ? 15000 : 60000);
 + if (mt_probe()) {
 +  printf("MARBLE TOUCH: polling active, 10 contacts, 10ms\n");
 +  marble_hwdiag_stage(0, MT_IRQ);
@@ -14324,7 +14473,7 @@ new file mode 100644
 +     if (++bad >= 3) { mt_stop("three consecutive malformed snapshots; no invalid ACK"); break; }
 +    } else bad = 0;
 +   }
-+   mt_wait(10);
++   mt_wait(mt_use_bitbang ? 2 : 10);
 +  }
 + }
 + for (unsigned id = 0; id < MT_FINGERS; id++) if (mt_down[id]) marble_hid_touch(id, 0, mt_x[id], mt_y[id]);
@@ -14336,7 +14485,10 @@ new file mode 100644
 +{
 + if (mt_started) return;
 + mt_started = true;
++ int bitbang = 0;
 + PE_parse_boot_argn("marbletouchinit", &mt_active, sizeof(mt_active));
++ PE_parse_boot_argn("marbletouchbb", &bitbang, sizeof(bitbang));
++ mt_use_bitbang = bitbang != 0;
 + int enabled = 1;
 + PE_parse_boot_argn("marbletouch", &enabled, sizeof(enabled));
 + PE_parse_boot_argn("marbleguidiag", &mt_diag, sizeof(mt_diag));
@@ -16410,9 +16562,10 @@ diff --git a/bsd/dev/marble_gpi_smmu.c b/bsd/dev/marble_gpi_smmu.c
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/marble_gpi_smmu.c
-@@ -0,0 +1,258 @@
-+/* MARBLE GPI SID5b6 only. Register/program order: Linux 734bef548 arm-smmu.c
-+ * and arm-smmu.h. 4K context/table encoding cross-checked with UniXNU
+@@ -0,0 +1,322 @@
++/* MARBLE GPI SID5b6 only. Ownership/ASID/program order: Pzqqt cf63f539
++ * drivers/iommu/arm/arm-smmu/{arm-smmu.c,arm-smmu-qcom.c,arm-smmu.h};
++ * register/table cross-check: Linux 734bef548 and UniXNU
 + * ArmSmmu4K 4d0d6598. No global SMMU writes, no PA-as-IOVA fallback.
 + * Caller must establish all APSS GPI clients quiescent before route changes.
 + * Allocations and table leases are permanent, including on failure. */
@@ -16458,6 +16611,39 @@ new file mode 100644
 +}
 +static void ms_pair(const char *name,uint64_t v)
 +{ marble_hwdiag_value(0,name,(uint32_t)v,(uint32_t)(v>>32)); }
++/* Pzqqt cf63f539 arm-smmu.h CB offsets. Disabled banks retain stale
++ * configuration: arm_smmu_write_context_bank only clears SCTLR when unassigned.
++ * Capture a complete selection lease, not a requirement for zero roots. */
++struct ms_cb_state {
++ uint64_t ttbr0,ttbr1;
++ uint32_t sctlr,cbar,cba2r,tcr,tcr2,mair0,mair1,fsr,fsynr,actlr,contextidr;
++};
++static bool ms_cb_read(unsigned bank,unsigned off,struct ms_cb_state *s)
++{
++ memset(s,0,sizeof(*s));
++ s->sctlr=ms_read(off); s->cbar=ms_read(ms_gr1+bank*4);
++ s->cba2r=ms_read(ms_gr1+0x800+bank*4);
++ s->ttbr0=ms_read64(off+0x20); s->ttbr1=ms_read64(off+0x28);
++ s->tcr=ms_read(off+0x30); s->tcr2=ms_read(off+0x10);
++ s->mair0=ms_read(off+0x38); s->mair1=ms_read(off+0x3c);
++ s->fsr=ms_read(off+0x58); s->fsynr=ms_read(off+0x68);
++ s->actlr=ms_read(off+4); s->contextidr=ms_read(off+0x34);
++ return s->sctlr!=0xffffffffu && s->cbar!=0xffffffffu && s->cba2r!=0xffffffffu &&
++  s->ttbr0!=~0ull && s->ttbr1!=~0ull && s->tcr!=0xffffffffu && s->tcr2!=0xffffffffu &&
++  s->mair0!=0xffffffffu && s->mair1!=0xffffffffu && s->fsr!=0xffffffffu &&
++  s->fsynr!=0xffffffffu && s->actlr!=0xffffffffu && s->contextidr!=0xffffffffu;
++}
++static void ms_cb_record(const struct ms_cb_state *s)
++{
++ marble_hwdiag_value(0,"GPI_CB_SELECTED/SCTLR",ms_cb,s->sctlr);
++ marble_hwdiag_value(0,"GPI_CB_CBAR/CBA2R",s->cbar,s->cba2r);
++ ms_pair("GPI_CB_TTBR0_lo/hi",s->ttbr0); ms_pair("GPI_CB_TTBR1_lo/hi",s->ttbr1);
++ marble_hwdiag_value(0,"GPI_CB_TCR/TCR2",s->tcr,s->tcr2);
++ marble_hwdiag_value(0,"GPI_CB_MAIR0/1",s->mair0,s->mair1);
++ marble_hwdiag_value(0,"GPI_CB_FSR/FSYNR",s->fsr,s->fsynr);
++ marble_hwdiag_value(0,"GPI_CB_ACTLR/CONTEXTIDR",s->actlr,s->contextidr);
++ marble_hwdiag_value(0,"GPI_CB_ASID",ms_cb,ms_asid);
++}
 +static bool ms_fail(enum mh_reason why,const char *gate)
 +{ marble_hwdiag_failure_snapshot(0); marble_gpi_dma_snapshot(); marble_hwdiag_fail(0,why,-1,gate); return false; }
 +static int ms_error(enum mh_reason why,const char *gate)
@@ -16555,6 +16741,9 @@ new file mode 100644
 +  return ms_error(MH_GPI_SMMU_CAPS,"GPI SMMU capabilities/active geometry");
 + /* No CB outside the live DT NS bank override may be claimed. */
 + banks=MIN(banks,MS_CBS); ms_gr1=pgsize;
++ if(s2>=banks) return ms_error(MH_GPI_SMMU_CAPS,"GPI no legal Stage-1 context bank");
++ marble_hwdiag_value(0,"GPI_SMMU_OWNERSHIP_BUILD",6,7);
++ marble_hwdiag_value(0,"GPI_CB_TOTAL",banks,banks-s2);
 + uint32_t smr[MS_SMRS],s2cr[MS_SMRS]; bool used[128]={false};
 + unsigned matches=0,entry=MS_SMRS,free_entry=MS_SMRS;
 + for(unsigned i=0;i<count;i++) {
@@ -16565,7 +16754,11 @@ new file mode 100644
 +  unsigned mask=(smr[i]>>16)&(exid?65535:32767);
 +  if(valid && ((s2cr[i]>>16)&3)==0) {
 +   unsigned cb=s2cr[i]&255;
-+   if(cb<banks) used[cb]=true;
++   if(cb>=banks) {
++    marble_hwdiag_value(0,"GPI_bad_stream/CB",i,cb);
++    return ms_error(MH_GPI_SMMU_OWNERSHIP,"GPI translating stream CB inaccessible");
++   }
++   used[cb]=true;
 +  }
 +  if(!valid && smr[i]==0 && !(s2cr[i]&~(3u<<16)) && free_entry==MS_SMRS) free_entry=i;
 +  if(valid && !(((smr[i]&65535)^MG_SID)&~mask)) {
@@ -16588,26 +16781,40 @@ new file mode 100644
 + if(matches>1 || (!matches && free_entry==MS_SMRS))
 +  return ms_error(MH_GPI_SMMU_OWNERSHIP,"GPI SID ambiguous/no free stream slot");
 + if(!matches) entry=free_entry;
-+ /* Never overwrite inherited tables or a live bank. Select an unreferenced,
-+  * disabled bank with empty roots, and an ASID absent from all NS banks.
-+  * Other streams/context banks, including QUP SID5a3, remain untouched. */
-+ bool asids[256]={false}; ms_cb=banks;
-+ for(unsigned b=0;b<banks;b++) {
++ /* Pzqqt cf63f539 __arm_smmu_alloc_cb/arm_smmu_init_domain_context:
++  * ownership is stream/bitmap based, Stage-1 starts at NUMS2CB, ASID=CB.
++  * qsmmuv500_impl has no allocator override. XNU additionally requires an
++  * accessible, unreferenced bank with SCTLR.M clear and a stable lease.
++  * Stale TTBR/TCR/MAIR or other M-clear SCTLR bits do not imply ownership. */
++ struct ms_cb_state selected={0},candidate;
++ unsigned stream_used=0,active=0,unreadable=0,candidates=0;
++ ms_cb=banks;
++ for(unsigned b=s2;b<banks;b++) {
++  if(used[b]) { stream_used++; continue; }
 +  unsigned off=(pages+b)*pgsize; uint32_t ctl=ms_read(off);
-+  if(ctl==0xffffffffu) { used[b]=true; continue; }
-+  uint64_t root0=ms_read64(off+0x20),root1=ms_read64(off+0x28);
-+  asids[(root0>>48)&255]=true; asids[(root1>>48)&255]=true;
-+  /* Linux's AArch32 short-descriptor contexts carry ASID in CONTEXTIDR
-+   * rather than TTBR. Conservatively exclude that namespace too. */
-+  if(ctl&1) asids[ms_read(off+0x34)&255]=true;
-+  if(b>=s2 && !used[b] && ctl==0 && root0==0 && root1==0 && ms_cb==banks) ms_cb=b;
++  if(ctl==0xffffffffu) { unreadable++; continue; }
++  if(ctl&1) { active++; continue; } /* arm-smmu.h ARM_SMMU_SCTLR_M */
++  if(!ms_cb_read(b,off,&candidate)) { unreadable++; continue; }
++  if(candidate.sctlr&1) { active++; continue; }
++  candidates++;
++  if(ms_cb==banks) { ms_cb=b; selected=candidate; }
 + }
-+ ms_asid=1; while(ms_asid<256 && asids[ms_asid]) ms_asid++;
-+ if(ms_cb==banks || ms_asid==256)
-+  return ms_error(MH_GPI_SMMU_OWNERSHIP,"GPI no provably free context/ASID");
++ marble_hwdiag_value(0,"GPI_CB_STREAM_USED",0,stream_used);
++ marble_hwdiag_value(0,"GPI_CB_ACTIVE",0,active);
++ marble_hwdiag_value(0,"GPI_CB_UNREADABLE",0,unreadable);
++ marble_hwdiag_value(0,"GPI_CB_CANDIDATES",0,candidates);
++ if(ms_cb==banks) {
++  const char *gate=stream_used==banks-s2 ? "GPI all Stage-1 CBs stream-referenced" :
++   active==banks-s2-stream_used ? "GPI all unreferenced CBs active" :
++   unreadable==banks-s2-stream_used ? "GPI all unreferenced CBs unreadable" :
++   "GPI no CB: stream-used/active/unreadable (see counts)";
++  return ms_error(MH_GPI_SMMU_OWNERSHIP,gate);
++ }
++ ms_asid=ms_cb; /* Vendor arm-smmu.c cfg->asid=cfg->cbndx; ASID0 is valid. */
 + ms_context=(pages+ms_cb)*pgsize;
 + marble_hwdiag_value(0,"GPI_SMR_index/CB",entry,ms_cb);
 + marble_hwdiag_value(0,"GPI_ASID/granule",ms_asid,MG_PAGE);
++ ms_cb_record(&selected);
 + marble_hwdiag_stage(0,MT_GPI_MEMORY);
 + vm_offset_t allocation=0;
 + if(kmem_alloc_contig(kernel_map,&allocation,MS_ALLOCATION,PAGE_MASK,0,0,
@@ -16635,10 +16842,19 @@ new file mode 100644
 + ms_pair("GPI_memory_PA",physical);
 + marble_hwdiag_value(0,"GPI_IOVA_first/last",MG_IOVA,MG_IOVA+5*MG_PAGE-1);
 + marble_hwdiag_stage(0,MT_GPI_SMMU);
-+ /* Revalidate lease immediately before any SMMU write. */
-+ if(ms_read(0)!=cr0 || ms_read(ms_context)!=0 || ms_read64(ms_context+0x20)!=0 ||
-+    ms_read64(ms_context+0x28)!=0 || ms_read(0x800+entry*4)!=smr[entry] || ms_read(0xc00+entry*4)!=s2cr[entry])
-+  return ms_error(MH_GPI_SMMU_OWNERSHIP,"GPI SMMU lease changed");
++ /* Revalidate every stream, not just SID5b6: no other master may have
++  * acquired this bank while pages were allocated. Then compare all selected
++  * CB state (including stale roots) immediately before the first SMMU write. */
++ for(unsigned i=0;i<count;i++) {
++  if(ms_read(0x800+i*4)!=smr[i] || ms_read(0xc00+i*4)!=s2cr[i]) {
++   marble_hwdiag_value(0,"GPI_lease_stream",i,ms_cb);
++   return ms_error(MH_GPI_SMMU_OWNERSHIP,"GPI SMMU stream lease changed");
++  }
++ }
++ if(ms_read(0)!=cr0 || !ms_cb_read(ms_cb,ms_context,&candidate) ||
++    memcmp(&candidate,&selected,sizeof(selected)))
++  return ms_error(MH_GPI_SMMU_OWNERSHIP,"GPI SMMU context lease changed");
++ marble_hwdiag_value(0,"GPI_CB_LEASE_VALID",ms_cb,ms_asid);
 + /* Exact SID route is faulted while the new bank is prepared; no global CR0
 +  * changes or unrelated SMR/S2CR writes. Existing context is not modified. */
 + uint32_t valid=exid?1u<<10:0;
