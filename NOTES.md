@@ -1,6 +1,25 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
 
+
+## Active MARBLE CPU-frequency probe (2026-10-24)
+
+Source commit `7ad7959f3e6a1481ff4c4db24de0375f4ecd8ec8` adds
+`xnu/patches/0091-marble-cpufreq-probe.patch`. The probe is read-only and
+opt-in with `marblecpufreq=1`. It maps the SM8475 EPSS domains at
+`0x17d91000` (CPU0-3), `0x17d92000` (CPU4-6), and `0x17d93000` (CPU7),
+reads ENABLE, DOMAIN_STATE, DCVS_CTRL, PERF_STATE, frequency LUT and voltage
+LUT, and records values into the existing MARBLE HW V4 overlay plus console.
+No EPSS register is written; no clock/voltage state is changed. The patch was
+replayed with `git apply --check` against the exact successful 0090 buildtree
+from run 40075316831 and `git diff --check` passed. CI is still pending because
+the current ChatGPT GitHub connector exposes repository writes/Actions reads
+but no workflow-dispatch action. Next: dispatch xnu.yml with
+macos_version=13.5, kernel_config=DEVELOPMENT, machine_config=MARBLE,
+keep_going=true; after success package a cpus=2 image with
+`marblecpufreq=1 marblehwdiag=1`, using the preserved known-good shim. No phone
+command has been run.
+
 ## FINAL MARBLE GPI touch v6 — packaged; physical test pending
 
 Source `c1ae515efec3c59f34cf8ed056739bb0a3adce23`; successful exact CI
