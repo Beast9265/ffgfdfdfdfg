@@ -1,0 +1,12 @@
+diff --git a/pexpert/pexpert/arm64/board_config.h b/pexpert/pexpert/arm64/board_config.h
+--- a/pexpert/pexpert/arm64/board_config.h
++++ b/pexpert/pexpert/arm64/board_config.h
+@@ -111,7 +111,7 @@
+ #ifdef ARM64_BOARD_CONFIG_MARBLE
+ #include <pexpert/arm64/MARBLE.h>
+ #define MAX_L2_CLINE 6
+-#define MAX_CPUS 1
++#define MAX_CPUS MARBLE_SMP_MAX_CPUS
+ #define MAX_CPU_CLUSTERS 1
+ #define CORE_NCTRS 8 /* Software KPC stub only. */
+ #endif
