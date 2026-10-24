@@ -14106,7 +14106,7 @@ new file mode 100644
 + return true;
 +}
 +
-++/* Little-endian CPU FIFO words; MSB-first bits within each 8-bit SPI word.
++/* Little-endian CPU FIFO words; MSB-first bits within each 8-bit SPI word.
 + * All RX words/counts are validated; no DMA or physical address descriptors. */
 +static bool
 +mt_exchange(unsigned n)
