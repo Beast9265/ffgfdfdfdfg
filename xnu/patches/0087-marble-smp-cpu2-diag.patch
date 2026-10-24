@@ -1,0 +1,65 @@
+diff --git a/iokit/Kernel/arm/MarbleCPU.cpp b/iokit/Kernel/arm/MarbleCPU.cpp
+--- a/iokit/Kernel/arm/MarbleCPU.cpp
++++ b/iokit/Kernel/arm/MarbleCPU.cpp
+@@ -151,15 +151,30 @@ MarbleCPU::startAll(void *arg __unused, wait_result_t result __unused)
+ 	}
+ 	for (unsigned int i = 0; i < topology->num_cpus; i++) {
+ 		MarbleCPU *cpu = __atomic_load_n(&marble_cpus[i], __ATOMIC_ACQUIRE);
++		kprintf("MARBLE SMPDBG: cpu=%u before processor_start initialized=%u signal=%u\n",
++		    i, __atomic_load_n(&cpu->initialized, __ATOMIC_ACQUIRE),
++		    marble_cpu_signal_is_enabled(i));
+ 		kern_return_t kr = processor_start(cpu->machProcessor);
++		kprintf("MARBLE SMPDBG: cpu=%u processor_start returned kr=%d initialized=%u signal=%u\n",
++		    i, kr, __atomic_load_n(&cpu->initialized, __ATOMIC_ACQUIRE),
++		    marble_cpu_signal_is_enabled(i));
+ 		if (kr != KERN_SUCCESS) {
+ 			panic("MARBLE CPU: cpu=%u processor_start failed: %d", i, kr);
+ 		}
+ 		/* processor_start() is asynchronous for secondaries in this XNU. */
+ 		nanoseconds_to_deadline(5 * NSEC_PER_SEC, &deadline);
++		uint64_t report_deadline;
++		nanoseconds_to_deadline(NSEC_PER_SEC, &report_deadline);
+ 		while (__atomic_load_n(&cpu->initialized, __ATOMIC_ACQUIRE) == 0 ||
+ 		    !marble_cpu_signal_is_enabled(i)) {
+-			if (mach_absolute_time() > deadline) {
++			uint64_t now = mach_absolute_time();
++			if (now > report_deadline) {
++				kprintf("MARBLE SMPDBG: cpu=%u waiting initialized=%u signal=%u\n",
++				    i, __atomic_load_n(&cpu->initialized, __ATOMIC_ACQUIRE),
++				    marble_cpu_signal_is_enabled(i));
++				nanoseconds_to_deadline(NSEC_PER_SEC, &report_deadline);
++			}
++			if (now > deadline) {
+ 				IOLog("MARBLE CPU: cpu=%u mpidr=0x%x NOT alive after 5s\n",
+ 				    i, topology->cpus[i].phys_id);
+ 				panic("MARBLE CPU: cpu=%u startup timeout (reset/MMU/GIC/SGI)", i);
+@@ -200,11 +215,15 @@ MarbleCPU::initCPU(bool boot)
+ 	 * startAll waits for its delivery after the startup thread unmasks IRQs.
+ 	 * Waiting here with DAIF.I set would deadlock every secondary. */
+ 	signalCPU(this);
++	uint64_t hppir1 = __builtin_arm_rsr64("ICC_HPPIR1_EL1");
++	kprintf("MARBLE SMPDBG: cpu=%u after self-SGI HPPIR1=%llu\n",
++	    getCPUNumber(), hppir1 & 0xffffffULL);
+ 	setCPUState(kIOCPUStateRunning);
+ 	kprintf("MARBLE CPU: cpu=%u entered initCPU mpidr=0x%llx EL%llu IRQs=%u\n",
+ 	    getCPUNumber(), __builtin_arm_rsr64("MPIDR_EL1") & 0xffffULL,
+ 	    __builtin_arm_rsr64("CurrentEL") >> 2, ml_get_interrupts_enabled());
+ 	__atomic_store_n(&initialized, 1, __ATOMIC_RELEASE);
++	kprintf("MARBLE SMPDBG: cpu=%u initialized published\n", getCPUNumber());
+ }
+
+ void
+diff --git a/pexpert/arm/pe_fiq.c b/pexpert/arm/pe_fiq.c
+--- a/pexpert/arm/pe_fiq.c
++++ b/pexpert/arm/pe_fiq.c
+@@ -191,7 +191,9 @@ pe_init_fiq()
+ #endif
+ 	gicr_write32(GICR_ISENABLER0, (1U << sweet_vtimer_intid) | (1U << QUALCOMM_IPI_SGI));
+ #if defined(MARBLE)
+-	kprintf("MARBLE GIC: enable PPI/SGI done\n");
++	kprintf("MARBLE GIC: enable PPI/SGI done cpu=%u IGROUPR0=0x%08x ISENABLER0=0x%08x\n",
++	    ml_get_cpu_number_local(), gicr_read32(GICR_IGROUPR0),
++	    gicr_read32(GICR_ISENABLER0));
+ #endif
+ #else
+ 	// Configure timers and legacy FIQ to be group 0
