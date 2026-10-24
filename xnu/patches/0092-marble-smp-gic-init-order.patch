@@ -1,0 +1,159 @@
+diff --git a/pexpert/arm/pe_fiq.c b/pexpert/arm/pe_fiq.c
+--- a/pexpert/arm/pe_fiq.c
++++ b/pexpert/arm/pe_fiq.c
+@@ -243,45 +243,19 @@
+-#if (defined(SWEET) || defined(MARBLE))
+-	/*
+-	 * Real hardware with two security states: Group 0 is TrustZone's and
+-	 * non-secure writes to it are ignored. Everything we own is Group 1 NS
+-	 * and arrives as an IRQ (see sleh_irq). GICR_IGROUPR0 reads as zero
+-	 * from the non-secure side even after this write; delivery still works.
+-	 */
+-#if defined(MARBLE)
+-	/*
+-	 * 0090 isolates the remaining priority hypothesis.  Touch only SGI1 and
+-	 * the architected virtual timer PPI27 after this CPU's redistributor is
+-	 * awake on the failing logical CPU2; never write IGROUPR0/IGRPMODR0 and
+-	 * leave the known-good CPU1 byte-for-byte at its inherited priorities.
+-	 */
+-	if (ml_get_cpu_number_local() == 2) {
+-		*((volatile uint8_t *)(gicr_pe_base + GICR_IPRIORITYR0 + QUALCOMM_IPI_SGI)) = 0xA0;
+-		*((volatile uint8_t *)(gicr_pe_base + GICR_IPRIORITYR0 + sweet_vtimer_intid)) = 0xA0;
+-		__builtin_arm_dsb(DSB_SY);
+-	}
+-	/* Firmware owns group routing; MMU-on write at PA 0x17190080 aborts. */
+-	kprintf("MARBLE GIC: skip GICR_IGROUPR0\n");
+-#else
+-	gicr_write32(GICR_IGROUPR0, 0xFFFFFFFF);
+-#endif
+-#if !defined(MARBLE) /* Protected window: MARBLE aborts at 0x17190400. */
+-	for (unsigned int i = 0; i < 32; i += 4) {
+-		gicr_write32(GICR_IPRIORITYR0 + i, 0xA0A0A0A0);
+-	}
+-#endif
+-#if defined(MARBLE)
+-	kprintf("MARBLE GIC: enable PPI/SGI begin\n");
+-#endif
+-	gicr_write32(GICR_ISENABLER0, (1U << sweet_vtimer_intid) | (1U << QUALCOMM_IPI_SGI));
+-#if defined(MARBLE)
+-	kprintf("MARBLE GIC: enable PPI/SGI done cpu=%u IGROUPR0=0x%08x ISENABLER0=0x%08x\n",
+-	    ml_get_cpu_number_local(), gicr_read32(GICR_IGROUPR0),
+-	    gicr_read32(GICR_ISENABLER0));
+-#endif
+-#else
+-	// Configure timers and legacy FIQ to be group 0
+-	gicr_write32(GICR_IGROUPR0, 0x81FFFFFF);
+-
+-	// Enable PPI 27
+-	gicr_write32(GICR_ISENABLER0, (1 << 27));
++#if defined(SWEET)
++	/*
++	 * Real hardware with two security states: Group 0 is TrustZone's and
++	 * non-secure writes to it are ignored. Everything we own is Group 1 NS
++	 * and arrives as an IRQ (see sleh_irq). GICR_IGROUPR0 reads as zero
++	 * from the non-secure side even after this write; delivery still works.
++	 */
++	gicr_write32(GICR_IGROUPR0, 0xFFFFFFFF);
++	for (unsigned int i = 0; i < 32; i += 4) {
++		gicr_write32(GICR_IPRIORITYR0 + i, 0xA0A0A0A0);
++	}
++	gicr_write32(GICR_ISENABLER0, (1U << sweet_vtimer_intid) | (1U << QUALCOMM_IPI_SGI));
++#elif !defined(MARBLE)
++	// Configure timers and legacy FIQ to be group 0
++	gicr_write32(GICR_IGROUPR0, 0x81FFFFFF);
++
++	// Enable PPI 27
++	gicr_write32(GICR_ISENABLER0, (1 << 27));
+ #endif /* SWEET */
+@@ -314,27 +288,65 @@
+-#if (defined(SWEET) || defined(MARBLE))
+-#if defined(MARBLE)
+-	kprintf("MARBLE GIC: GICD_CTLR begin\n");
+-#endif
+-	// ABL leaves only ARE_NS set; Linux writes ARE_NS | EnableGrp1A | EnableGrp1
+-	uint32_t gicd_ctlr = gicd_read32(GICD_CTLR);
+-	gicd_ctlr |= GICD_CTLR_ARE_NS | GICD_CTLR_ENABLEGRP1A | GICD_CTLR_ENABLEGRP1;
+-	gicd_write32(GICD_CTLR, gicd_ctlr);
+-	while (gicd_read32(GICD_CTLR) & GICD_CTLR_RWP) {
+-		;
+-	}
+-#if defined(MARBLE)
+-	kprintf("MARBLE GIC: GICD_CTLR done\n");
+-#endif
+-	__builtin_arm_wsr64("ICC_IGRPEN1_EL1", 1);
+-	__builtin_arm_isb(ISB_SY);
+-#if defined(MARBLE)
+-	kprintf("MARBLE GIC: ICC_IGRPEN1_EL1 done\n");
+-#endif
+-#else
+-	// Enable the forwarding of the vtimer interrupt
+-	uint32_t gicd_ctlr = gicd_read32(GICD_CTLR);
+-	gicd_ctlr |= GICD_CTLR_ENABLEGRP0;
+-	gicd_write32(GICD_CTLR, gicd_ctlr);
+-	__builtin_arm_wsr64("ICC_IGRPEN0_EL1", 1);
+-	__builtin_arm_isb(ISB_SY);
++#if defined(SWEET)
++	// ABL leaves only ARE_NS set; Linux writes ARE_NS | EnableGrp1A | EnableGrp1
++	uint32_t gicd_ctlr = gicd_read32(GICD_CTLR);
++	gicd_ctlr |= GICD_CTLR_ARE_NS | GICD_CTLR_ENABLEGRP1A | GICD_CTLR_ENABLEGRP1;
++	gicd_write32(GICD_CTLR, gicd_ctlr);
++	while (gicd_read32(GICD_CTLR) & GICD_CTLR_RWP) {
++		;
++	}
++	__builtin_arm_wsr64("ICC_IGRPEN1_EL1", 1);
++	__builtin_arm_isb(ISB_SY);
++#elif defined(MARBLE)
++	/*
++	 * Sagit/MSM8998 proved that changing ARE_NS after programming a local
++	 * redistributor resets SGI/PPI state.  Publish the distributor mode once,
++	 * on CPU0, before any MARBLE redistributor priority/enable write.  A
++	 * secondary must never rewrite this global register after its GICR setup.
++	 */
++	if (ml_get_cpu_number_local() == 0) {
++		uint32_t gicd_ctlr = gicd_read32(GICD_CTLR);
++		if (!(gicd_ctlr & GICD_CTLR_ARE_NS)) {
++			gicd_write32(GICD_CTLR, gicd_ctlr | GICD_CTLR_ARE_NS);
++			while (gicd_read32(GICD_CTLR) & GICD_CTLR_RWP) {
++				;
++			}
++			gicd_ctlr = gicd_read32(GICD_CTLR);
++		}
++		uint32_t wanted = gicd_ctlr | GICD_CTLR_ENABLEGRP1A |
++		    GICD_CTLR_ENABLEGRP1;
++		if (wanted != gicd_ctlr) {
++			gicd_write32(GICD_CTLR, wanted);
++			while (gicd_read32(GICD_CTLR) & GICD_CTLR_RWP) {
++				;
++			}
++		}
++		kprintf("MARBLE GIC: distributor initialized CTLR=0x%08x\n",
++		    gicd_read32(GICD_CTLR));
++	}
++
++	__builtin_arm_wsr64("ICC_IGRPEN1_EL1", 1);
++	__builtin_arm_isb(ISB_SY);
++
++	/*
++	 * Keep MARBLE's protected group registers untouched.  Program only the
++	 * two proven-safe priority bytes on CPU2, then enable the local SGI/PPI;
++	 * this is deliberately after the final distributor write.
++	 */
++	if (ml_get_cpu_number_local() == 2) {
++		*((volatile uint8_t *)(gicr_pe_base + GICR_IPRIORITYR0 + QUALCOMM_IPI_SGI)) = 0xA0;
++		*((volatile uint8_t *)(gicr_pe_base + GICR_IPRIORITYR0 + sweet_vtimer_intid)) = 0xA0;
++	}
++	gicr_write32(GICR_ISENABLER0,
++	    (1U << sweet_vtimer_intid) | (1U << QUALCOMM_IPI_SGI));
++	__builtin_arm_dsb(DSB_SY);
++	__builtin_arm_isb(ISB_SY);
++	kprintf("MARBLE GIC: local final cpu=%u CTLR=0x%08x EN=0x%08x\n",
++	    ml_get_cpu_number_local(), gicd_read32(GICD_CTLR),
++	    gicr_read32(GICR_ISENABLER0));
++#else
++	// Enable the forwarding of the vtimer interrupt
++	uint32_t gicd_ctlr = gicd_read32(GICD_CTLR);
++	gicd_ctlr |= GICD_CTLR_ENABLEGRP0;
++	gicd_write32(GICD_CTLR, gicd_ctlr);
++	__builtin_arm_wsr64("ICC_IGRPEN0_EL1", 1);
++	__builtin_arm_isb(ISB_SY);
+ #endif /* SWEET */
