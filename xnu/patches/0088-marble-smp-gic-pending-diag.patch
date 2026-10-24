@@ -1,0 +1,75 @@
+diff --git a/iokit/Kernel/arm/MarbleCPU.cpp b/iokit/Kernel/arm/MarbleCPU.cpp
+index c4b5560..884cb72 100644
+--- a/iokit/Kernel/arm/MarbleCPU.cpp
++++ b/iokit/Kernel/arm/MarbleCPU.cpp
+@@ -21,6 +21,7 @@
+ 
+ extern "C" void marble_secondary_entry(void);
+ extern "C" boolean_t marble_cpu_signal_is_enabled(unsigned int cpu);
++extern "C" void marble_gic_debug_local(const char *tag);
+ 
+ class MarbleCPU;
+ static MarbleCPU *marble_cpus[MAX_CPUS];
+@@ -214,7 +215,9 @@ MarbleCPU::initCPU(bool boot)
+ 	/* Secondary startup runs at splsched: queue the self-IPI and return.
+ 	 * startAll waits for its delivery after the startup thread unmasks IRQs.
+ 	 * Waiting here with DAIF.I set would deadlock every secondary. */
++	marble_gic_debug_local("before-self-sgi");
+ 	signalCPU(this);
++	marble_gic_debug_local("after-self-sgi");
+ 	uint64_t hppir1 = __builtin_arm_rsr64("ICC_HPPIR1_EL1");
+ 	kprintf("MARBLE SMPDBG: cpu=%u after self-SGI HPPIR1=%llu\n",
+ 	    getCPUNumber(), hppir1 & 0xffffffULL);
+@@ -244,6 +247,8 @@ MarbleCPU::signalCPU(IOCPU *target)
+ 	    (((mpidr >> 16) & 0xff) << 32) |
+ 	    (((mpidr >> 8) & 0xff) << 16) |
+ 	    ((uint64_t)MARBLE_IPI_SGI << 24) | (1ULL << aff0);
++	kprintf("MARBLE SMPDBG: SGI send sender=0x%llx target_cpu=%u target=0x%llx SGI1R=0x%llx\n",
++	    __builtin_arm_rsr64("MPIDR_EL1") & 0xffffULL, logical, mpidr, sgi);
+ 	__builtin_arm_dsb(DSB_ISHST);
+ 	__builtin_arm_wsr64("ICC_SGI1R_EL1", sgi);
+ 	__builtin_arm_isb(ISB_SY);
+diff --git a/pexpert/arm/pe_fiq.c b/pexpert/arm/pe_fiq.c
+index b232483..23524a4 100644
+--- a/pexpert/arm/pe_fiq.c
++++ b/pexpert/arm/pe_fiq.c
+@@ -73,6 +73,39 @@ find_gicr_pe_base()
+ 	panic("%s: cannot find GICR base for core %u", __func__, ml_get_cpu_number(phys_id));
+ }
+ 
++#if defined(MARBLE)
++/*
++ * Read-only local GIC snapshot for SMP bring-up.  In particular, ISPENDR0
++ * distinguishes "SGI never arrived" from "SGI is pending but not eligible".
++ * Keep the protected priority/group programming windows untouched.
++ */
++void
++marble_gic_debug_local(const char *tag)
++{
++	vm_offset_t gicr_pe_base = find_gicr_pe_base();
++	uint64_t mpidr = __builtin_arm_rsr64("MPIDR_EL1") & 0xffffULL;
++	uint64_t typer = gicr_read64(GICR_TYPER);
++	uint32_t enabled = gicr_read32(GICR_ISENABLER0);
++	uint32_t pending = _gic_read32(gicr_pe_base + 0x10200); /* GICR_ISPENDR0 */
++	uint32_t active = _gic_read32(gicr_pe_base + 0x10300);  /* GICR_ISACTIVER0 */
++	uint32_t gicd_ctlr = gicd_read32(GICD_CTLR);
++	uint64_t sre = __builtin_arm_rsr64("ICC_SRE_EL1");
++	uint64_t igrpen1 = __builtin_arm_rsr64("ICC_IGRPEN1_EL1");
++	uint64_t pmr = __builtin_arm_rsr64("ICC_PMR_EL1");
++	uint64_t bpr1 = __builtin_arm_rsr64("ICC_BPR1_EL1");
++	uint64_t ctlr = __builtin_arm_rsr64("ICC_CTLR_EL1");
++	uint64_t hppir0 = __builtin_arm_rsr64("ICC_HPPIR0_EL1") & 0xffffffULL;
++	uint64_t hppir1 = __builtin_arm_rsr64("ICC_HPPIR1_EL1") & 0xffffffULL;
++
++	kprintf("MARBLE GICDBG: %s cpu=%u mpidr=0x%llx typer=0x%llx "
++	    "en=0x%08x pend=0x%08x active=0x%08x GICD_CTLR=0x%08x "
++	    "SRE=0x%llx IGRPEN1=0x%llx PMR=0x%llx BPR1=0x%llx CTLR=0x%llx "
++	    "HPPIR0=%llu HPPIR1=%llu\n",
++	    tag, ml_get_cpu_number_local(), mpidr, typer, enabled, pending, active,
++	    gicd_ctlr, sre, igrpen1, pmr, bpr1, ctlr, hppir0, hppir1);
++}
++#endif
++
+ void
+ pe_init_fiq()
+ {
