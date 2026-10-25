@@ -1,3 +1,6 @@
 # Unified patch context has a leading space before source tabs/blank lines.
 # Validate actual added source whitespace with git apply --whitespace=error.
 xnu/patches/0082-marble-onecpu-bringup.patch whitespace=-blank-at-eol,-space-before-tab
+xnu/patches/0093-marble-smp-spi-ipi-fallback.patch whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+xnu/patches/0094-marble-cpufreq-vote.patch whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+xnu/patches/0095-marble-a725-probe.patch whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab

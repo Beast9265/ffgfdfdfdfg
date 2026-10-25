@@ -1,5 +1,28 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## Active MARBLE SPI-IPI / EPSS vote / A725 probe (2026-10-25)
+
+Starting checkpoint is `b46943594cfa675cdddec14ca3a51fa757cbc26f`
+(known-good CI run 40093847565). New ordered follow-ups are 0093 SPI-IPI,
+0094 domain0 EPSS vote, and 0095 A725 discovery. SPI mode is default-off and
+requires both `marblespiipi=1` and an explicit `marbleipibase`; runtime
+GICD_TYPER bounds and unused-state readbacks gate CPU0-3 configuration. SGI1
+is unchanged without those arguments. EPSS mode 1 remains read-only; mode 2
+votes only domain0 after enable/state/LUT validation and mirrors the vote to
+CPU0-3 only when DCVS_CTRL bit0 requests Linux's per-core semantics. The GPU
+probe is read-only/default-off and stops at GPUCC power-state gates; it adds no
+power vote, firmware, IRQ handler, SMMU write, accelerated device, or display
+change.
+
+Observed validation: all 95 repository patches, including pinned libpthread,
+BearSSL and HFS staging, apply in order to clean Apple xnu-8796.141.3. The new
+patches also apply strictly after the exact 0092 buildtree and have clean
+diffs. Existing ADT unit tests and UFS/static GUI tests pass. The broad input
+extractor currently fails before running due to pre-existing extracted
+`marble_touch.c` declaration-order errors; none of 0093-0095 touches input.
+Pending: source commit/push, exact MARBLE CI, head/artifact verification. No
+shim build/repack and no phone command are authorized for this task.
+
 
 
 ## MARBLE CPU-frequency probe CI success (2026-10-24)
