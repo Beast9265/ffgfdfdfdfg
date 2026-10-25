@@ -20,8 +20,15 @@ patches also apply strictly after the exact 0092 buildtree and have clean
 diffs. Existing ADT unit tests and UFS/static GUI tests pass. The broad input
 extractor currently fails before running due to pre-existing extracted
 `marble_touch.c` declaration-order errors; none of 0093-0095 touches input.
-Pending: source commit/push, exact MARBLE CI, head/artifact verification. No
-shim build/repack and no phone command are authorized for this task.
+Source commits are `6b7ca3a98963af92e3889dc8cd9eac79f3e981e3` and compile-fix
+`f6e90e60bcb851df11e13bc63b544627f981359e`, both pushed to `origin/marble`.
+First exact run 40186190648 failed because the two new sleh declarations were
+inside XNU's HAS_IPI guard; the second commit moved only those declarations.
+Exact run 40186497618 succeeded with head SHA equal to `f6e90e6` and artifact
+`xnu-kernel`. Its `kernel.development.marble` is Mach-O arm64, NOUNDEFS,
+17,879,176 bytes, SHA256
+`c47041a9c84f789ee4934472f6bbdacf944978b87365a07042669a4bdf5e4eb4`.
+No shim build/repack, boot-image packaging, or phone command was performed.
 
 
 
