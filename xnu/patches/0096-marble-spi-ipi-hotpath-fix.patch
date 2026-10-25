@@ -1,0 +1,94 @@
+diff --git a/iokit/Kernel/arm/MarbleCPU.cpp b/iokit/Kernel/arm/MarbleCPU.cpp
+index e0cbbce..8507791 100644
+--- a/iokit/Kernel/arm/MarbleCPU.cpp
++++ b/iokit/Kernel/arm/MarbleCPU.cpp
+@@ -24,6 +24,8 @@ extern "C" boolean_t marble_cpu_signal_is_enabled(unsigned int cpu);
+ extern "C" void marble_gic_debug_local(const char *tag);
+ extern "C" boolean_t marble_spi_ipi_enabled(void);
+ extern "C" void marble_spi_ipi_send(unsigned int cpu);
++extern "C" uint64_t marble_spi_ipi_sent_count(unsigned int cpu);
++extern "C" uint64_t marble_spi_ipi_handled_count(unsigned int cpu);
+ 
+ class MarbleCPU;
+ static MarbleCPU *marble_cpus[MAX_CPUS];
+@@ -154,6 +156,8 @@ MarbleCPU::startAll(void *arg __unused, wait_result_t result __unused)
+ 	}
+ 	for (unsigned int i = 0; i < topology->num_cpus; i++) {
+ 		MarbleCPU *cpu = __atomic_load_n(&marble_cpus[i], __ATOMIC_ACQUIRE);
++		uint64_t spi_handled_before = marble_spi_ipi_enabled() ?
++		    marble_spi_ipi_handled_count(i) : 0;
+ 		kprintf("MARBLE SMPDBG: cpu=%u before processor_start initialized=%u signal=%u\n",
+ 		    i, __atomic_load_n(&cpu->initialized, __ATOMIC_ACQUIRE),
+ 		    marble_cpu_signal_is_enabled(i));
+@@ -184,9 +188,18 @@ MarbleCPU::startAll(void *arg __unused, wait_result_t result __unused)
+ 			}
+ 			IOSleep(1);
+ 		}
+-	IOLog("MARBLE CPU: cpu=%u mpidr=0x%x came alive; %s IPI OK\n",
+-	    i, topology->cpus[i].phys_id,
+-	    marble_spi_ipi_enabled() ? "SPI" : "SGI1");
++		if (marble_spi_ipi_enabled()) {
++			uint64_t sent = marble_spi_ipi_sent_count(i);
++			uint64_t handled = marble_spi_ipi_handled_count(i);
++			if (handled <= spi_handled_before) {
++				panic("MARBLE CPU: cpu=%u startup completed without SPI IPI delivery", i);
++			}
++			IOLog("MARBLE SPI IPI: cpu=%u startup complete sent=%llu handled=%llu\n",
++			    i, sent, handled);
++		}
++		IOLog("MARBLE CPU: cpu=%u mpidr=0x%x came alive; %s IPI OK\n",
++		    i, topology->cpus[i].phys_id,
++		    marble_spi_ipi_enabled() ? "SPI" : "SGI1");
+ 	}
+ 	/* Publish exactly once, after every selected CPU has completed initCPU(). */
+ 	ml_cpu_init_completed();
+diff --git a/pexpert/arm/pe_fiq.c b/pexpert/arm/pe_fiq.c
+index b2fcf4b..f1a7746 100644
+--- a/pexpert/arm/pe_fiq.c
++++ b/pexpert/arm/pe_fiq.c
+@@ -73,18 +73,24 @@ marble_spi_ipi_handled_one(uint32_t intid)
+ {
+ 	uint32_t cpu = intid - marble_spi_ipi_base;
+ 	if (cpu < MARBLE_SMP_MAX_CPUS) {
+-		uint64_t handled = __atomic_add_fetch(&marble_spi_ipi_handled[cpu], 1,
+-		    __ATOMIC_RELAXED);
+-		uint32_t word = (intid / 32) * 4;
+-		uint32_t bit = 1U << (intid % 32);
+-		kprintf("MARBLE SPI IPI: handled cpu=%u intid=%u handled=%llu sent=%llu pend=%u active=%u HPPIR1=%llu\n",
+-		    cpu, intid, handled, marble_spi_ipi_sent[cpu],
+-		    !!(gicd_read32(MARBLE_GICD_ISPENDR + word) & bit),
+-		    !!(gicd_read32(MARBLE_GICD_ISACTIVER + word) & bit),
+-		    __builtin_arm_rsr64("ICC_HPPIR1_EL1") & 0xffffffULL);
++		__atomic_add_fetch(&marble_spi_ipi_handled[cpu], 1, __ATOMIC_RELAXED);
+ 	}
+ }
+ 
++uint64_t
++marble_spi_ipi_sent_count(unsigned int cpu)
++{
++	return cpu < MARBLE_SMP_MAX_CPUS ?
++	    __atomic_load_n(&marble_spi_ipi_sent[cpu], __ATOMIC_ACQUIRE) : 0;
++}
++
++uint64_t
++marble_spi_ipi_handled_count(unsigned int cpu)
++{
++	return cpu < MARBLE_SMP_MAX_CPUS ?
++	    __atomic_load_n(&marble_spi_ipi_handled[cpu], __ATOMIC_ACQUIRE) : 0;
++}
++
+ void
+ marble_spi_ipi_send(unsigned int cpu)
+ {
+@@ -99,11 +105,6 @@ marble_spi_ipi_send(unsigned int cpu)
+ 	__builtin_arm_dsb(DSB_ISHST);
+ 	gicd_write32(MARBLE_GICD_ISPENDR + word, bit);
+ 	__builtin_arm_dsb(DSB_SY);
+-	kprintf("MARBLE SPI IPI: send cpu=%u intid=%u sent=%llu pend=%u active=%u HPPIR1=%llu\n",
+-	    cpu, intid, marble_spi_ipi_sent[cpu],
+-	    !!(gicd_read32(MARBLE_GICD_ISPENDR + word) & bit),
+-	    !!(gicd_read32(MARBLE_GICD_ISACTIVER + word) & bit),
+-	    __builtin_arm_rsr64("ICC_HPPIR1_EL1") & 0xffffffULL);
+ }
+ 
+ static void

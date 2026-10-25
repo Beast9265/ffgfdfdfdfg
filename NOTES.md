@@ -1,5 +1,25 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## Active MARBLE SPI-IPI hot-path fix (2026-10-25)
+
+Physical observation from the user: `cpus=2 marblespiipi=1 marbleipibase=1008`
+delivered INTID1008 to CPU0 and completed CPU0 startup, then restarted during
+CPU1 bring-up after INTID1009 configuration and normal signalling began. The
+0093 send and IRQ-accounting paths both performed unconditional `kprintf` and
+diagnostic MMIO/system-register reads in scheduler/IRQ context; this differs
+from UniXNU's minimal working hot paths.
+
+Prepared `0096-marble-spi-ipi-hotpath-fix.patch` only. It leaves 0093 intact,
+removes all printing and diagnostic reads from `marble_spi_ipi_send()` and
+`marble_spi_ipi_handled_one()`, and retains only atomic accounting, barriers
+and the GICD_ISPENDR write. Atomic read-only counter accessors let the existing
+`MarbleCPU::startAll()` thread snapshot handled count before `processor_start`,
+require it to increase, and log sent/handled counts after startup succeeds.
+No sleh mapping/EOI/handler change and no GIC, PSCI, topology or subsystem
+configuration change. Full 96-patch replay from clean xnu-8796.141.3 passes;
+the generated hot functions contain no logging or diagnostic reads. Pending
+commit, push and exact MARBLE CI. No shim, boot image, flash or phone command.
+
 ## Active MARBLE SPI-IPI / EPSS vote / A725 probe (2026-10-25)
 
 Starting checkpoint is `b46943594cfa675cdddec14ca3a51fa757cbc26f`
