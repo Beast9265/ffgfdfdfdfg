@@ -46,20 +46,20 @@ index 884cb72..e0cbbce 100644
  	if (aff0 >= 16) {
  		panic("MARBLE CPU: SGI target requires unsupported range selector");
 diff --git a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
-index f796ab7..b718bf3 100644
+index f796ab7..d1fde09 100644
 --- a/osfmk/arm64/sleh.c
 +++ b/osfmk/arm64/sleh.c
-@@ -259,6 +259,10 @@ extern void arm64_thread_exception_return(void) __dead2;
+@@ -257,6 +257,10 @@ extern void arm64_thread_exception_return(void) __dead2;
+ #define WT_REASON_REG_VIOLATION  8
+ #endif
  
- #if defined(HAS_IPI)
- void cpu_signal_handler(void);
 +#if defined(MARBLE)
 +extern boolean_t marble_spi_ipi_is_intid(uint32_t intid);
 +extern void marble_spi_ipi_handled_one(uint32_t intid);
 +#endif
+ #if defined(HAS_IPI)
+ void cpu_signal_handler(void);
  extern unsigned int gFastIPI;
- #endif /* defined(HAS_IPI) */
- 
 @@ -1895,11 +1899,20 @@ sleh_irq(arm_saved_state_t *state)
  		rtclock_intr(TRUE);
  		INTERRUPT_MASKED_DEBUG_END();
