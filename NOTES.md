@@ -14,8 +14,11 @@ passes its ADT `phys_id` to the unchanged configuration point. It requires the
 MARBLE CPU0-3 mapping 0x000/0x100/0x200/0x300. Raw MPIDR is read only for the
 configuration-time diagnostic; it is never used to program IROUTER. Strict
 route readback validation remains. 0096's send, handled and sleh hot paths are
-unchanged and contain no logging or diagnostic reads. Pending full replay,
-commit/push and exact CI. No shim, boot image, flash or phone command.
+unchanged and contain no logging or diagnostic reads. Full 97-patch replay
+passes. Source commit `f17e3c8367df5410f9282b50e9783a17985fe389`
+is pushed; exact workflow run 40188906058 succeeded with matching head SHA and
+artifact `xnu-kernel`. No shim, boot image, flash or phone command was used.
+First physical test: `cpus=2 marblespiipi=1 marbleipibase=1008`.
 
 ## Active MARBLE SPI-IPI hot-path fix (2026-10-25)
 
