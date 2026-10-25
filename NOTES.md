@@ -1,5 +1,22 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## Active MARBLE SPI-IPI canonical affinity (2026-10-25)
+
+Physical 0096 result with `cpus=2 marblespiipi=1 marbleipibase=1008`: CPU0
+completed with sent=1/handled=1. CPU1 reached PSCI CPU_ON, local GIC setup and
+INTID1009 configuration, but IROUTER read back 0 instead of the requested
+affinity and the existing strict mismatch panic restarted the phone. This
+identifies routing affinity configuration, not an unexplained watchdog.
+
+Prepared only `0097-marble-spi-ipi-canonical-affinity.patch`. In SPI mode,
+`pe_init_fiq()` now resolves the current logical CPU through XNU topology and
+passes its ADT `phys_id` to the unchanged configuration point. It requires the
+MARBLE CPU0-3 mapping 0x000/0x100/0x200/0x300. Raw MPIDR is read only for the
+configuration-time diagnostic; it is never used to program IROUTER. Strict
+route readback validation remains. 0096's send, handled and sleh hot paths are
+unchanged and contain no logging or diagnostic reads. Pending full replay,
+commit/push and exact CI. No shim, boot image, flash or phone command.
+
 ## Active MARBLE SPI-IPI hot-path fix (2026-10-25)
 
 Physical observation from the user: `cpus=2 marblespiipi=1 marbleipibase=1008`

@@ -5,3 +5,4 @@ xnu/patches/0093-marble-smp-spi-ipi-fallback.patch whitespace=-blank-at-eol,-bla
 xnu/patches/0094-marble-cpufreq-vote.patch whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
 xnu/patches/0095-marble-a725-probe.patch whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
 xnu/patches/0096-marble-spi-ipi-hotpath-fix.patch whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+xnu/patches/0097-marble-spi-ipi-canonical-affinity.patch whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab

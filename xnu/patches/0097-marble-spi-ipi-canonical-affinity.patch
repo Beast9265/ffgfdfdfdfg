@@ -1,0 +1,57 @@
+diff --git a/pexpert/arm/pe_fiq.c b/pexpert/arm/pe_fiq.c
+index f1a7746..e945727 100644
+--- a/pexpert/arm/pe_fiq.c
++++ b/pexpert/arm/pe_fiq.c
+@@ -108,7 +108,7 @@ marble_spi_ipi_send(unsigned int cpu)
+ }
+ 
+ static void
+-marble_spi_ipi_configure(unsigned int cpu, uint64_t mpidr)
++marble_spi_ipi_configure(unsigned int cpu, uint64_t affinity)
+ {
+ 	if (!marble_spi_ipi_mode || cpu >= MARBLE_SMP_MAX_CPUS) {
+ 		return;
+@@ -118,7 +118,6 @@ marble_spi_ipi_configure(unsigned int cpu, uint64_t mpidr)
+ 	uint32_t bit = 1U << (intid % 32);
+ 	uint32_t cfg_off = MARBLE_GICD_ICFGR + (intid / 16) * 4;
+ 	uint32_t cfg_shift = (intid % 16) * 2;
+-	uint64_t affinity = mpidr & 0xff00ffffffULL;
+ 	if ((gicd_read32(MARBLE_GICD_ISENABLER + word) & bit) ||
+ 	    (gicd_read32(MARBLE_GICD_ISPENDR + word) & bit) ||
+ 	    (gicd_read32(MARBLE_GICD_ISACTIVER + word) & bit)) {
+@@ -148,8 +147,9 @@ marble_spi_ipi_configure(unsigned int cpu, uint64_t mpidr)
+ 	uint32_t edge = (gicd_read32(cfg_off) >> (cfg_shift + 1)) & 1U;
+ 	uint32_t priority = *((volatile uint8_t *)(gicd_base +
+ 	    MARBLE_GICD_IPRIORITYR + intid));
+-	kprintf("MARBLE SPI IPI: cpu=%u intid=%u mpidr=0x%llx route=0x%llx group=%u edge=%u pri=0x%02x en=%u pend=%u active=%u\n",
+-	    cpu, intid, mpidr, route, group, edge, priority, enabled,
++	uint64_t raw_mpidr = __builtin_arm_rsr64("MPIDR_EL1");
++	kprintf("MARBLE SPI IPI: cpu=%u raw_mpidr=0x%llx canonical_affinity=0x%llx intid=%u route=0x%llx group=%u edge=%u pri=0x%02x en=%u pend=%u active=%u\n",
++	    cpu, raw_mpidr, affinity, intid, route, group, edge, priority, enabled,
+ 	    !!(gicd_read32(MARBLE_GICD_ISPENDR + word) & bit),
+ 	    !!(gicd_read32(MARBLE_GICD_ISACTIVER + word) & bit));
+ 	if (!group || !enabled || !edge || priority != 0xa0 || route != affinity) {
+@@ -477,8 +477,21 @@ pe_init_fiq()
+ 		kprintf("MARBLE GIC: distributor initialized CTLR=0x%08x\n",
+ 		    gicd_read32(GICD_CTLR));
+ 	}
+-	marble_spi_ipi_configure(ml_get_cpu_number_local(),
+-	    __builtin_arm_rsr64("MPIDR_EL1"));
++	if (marble_spi_ipi_mode) {
++		unsigned int logical = ml_get_cpu_number_local();
++		const ml_topology_info_t *topology = ml_get_topology_info();
++		if (logical >= topology->num_cpus || logical >= MARBLE_SMP_MAX_CPUS) {
++			panic("MARBLE SPI IPI: logical CPU %u is outside topology count %u",
++			    logical, topology->num_cpus);
++		}
++		uint64_t canonical_affinity = topology->cpus[logical].phys_id;
++		uint64_t expected_affinity = (uint64_t)logical << 8;
++		if (canonical_affinity != expected_affinity) {
++			panic("MARBLE SPI IPI: cpu=%u canonical affinity 0x%llx expected 0x%llx",
++			    logical, canonical_affinity, expected_affinity);
++		}
++		marble_spi_ipi_configure(logical, canonical_affinity);
++	}
+ 
+ 	__builtin_arm_wsr64("ICC_IGRPEN1_EL1", 1);
+ 	__builtin_arm_isb(ISB_SY);
