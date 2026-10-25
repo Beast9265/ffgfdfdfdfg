@@ -17,8 +17,11 @@ and the GICD_ISPENDR write. Atomic read-only counter accessors let the existing
 require it to increase, and log sent/handled counts after startup succeeds.
 No sleh mapping/EOI/handler change and no GIC, PSCI, topology or subsystem
 configuration change. Full 96-patch replay from clean xnu-8796.141.3 passes;
-the generated hot functions contain no logging or diagnostic reads. Pending
-commit, push and exact MARBLE CI. No shim, boot image, flash or phone command.
+the generated hot functions contain no logging or diagnostic reads. Source
+commit `eca67cc3032ecc3eb61ac0bf3364c701f2a6943c` is pushed. Exact workflow
+run 40188051887 succeeded with matching head SHA and produced `xnu-kernel`.
+No shim, boot image, flash or phone command was performed. First physical test:
+`cpus=2 marblespiipi=1 marbleipibase=1008`.
 
 ## Active MARBLE SPI-IPI / EPSS vote / A725 probe (2026-10-25)
 
