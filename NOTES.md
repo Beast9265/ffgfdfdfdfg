@@ -19,8 +19,20 @@ their pre-existing whitespace warnings); `pe_fiq.c` compiles to an arm64 Mach-O
 object with the exact prior CI-generated headers. Static checks confirm 0098
 touches only `pexpert/arm/pe_fiq.c` and `pexpert/pexpert/arm64/MARBLE.h`, SWEET
 preprocessing is unaffected by MARBLE-guarded code/header changes, and 0096 hot
-IPI send/handled paths still contain no logging. CI, exact-artifact packaging,
-and physical testing remain pending. No phone command has been run.
+IPI send/handled paths still contain no logging. Source commit
+`afadffdd2fa913731ce9afcd209470c234cb833e` is pushed. Exact workflow run
+`40289056327` succeeded with matching head SHA and artifact `xnu-kernel`.
+The exact kernel SHA256 is
+`e7e8f069e6cf0ca6708bc4b14846f17c02a22e5cc3db69590ef1243c338794f7`;
+the mandated cpus=1 baseline payload is
+`695e1f62d33cea21a5cfc5edbf76fb71a86e90a9298221ff949712b355da65fd`;
+the verified boot-v4 image is
+`a6fccefed760eb598bd71c47fe2411b9c2af82a5108020398fd85ae4e87c81b9`
+at `shim/out/marble-xnu/latest-marble-xnu.img`. ADT SHA256 is
+`906e1c3b5ebe7cbcde809c1016339821cbd158f2c45b385ccec2f852ba3133dc`.
+The previous latest image was preserved as `latest-marble-xnu.pre-0098.img`.
+Physical CPU2 testing still requires a cpus=2/marblegicclean=1 payload; no phone
+command has been run.
 
 ## Active MARBLE SPI-IPI canonical affinity (2026-10-25)
 
