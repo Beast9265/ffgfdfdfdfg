@@ -1,0 +1,88 @@
+diff --git a/pexpert/arm/pe_fiq.c b/pexpert/arm/pe_fiq.c
+--- a/pexpert/arm/pe_fiq.c
++++ b/pexpert/arm/pe_fiq.c
+@@ -44,6 +44,7 @@
+ static uint32_t marble_spi_ipi_mode;
+ static uint32_t marble_spi_ipi_base;
+ static uint32_t marble_gic_intids;
++static uint32_t marble_gic_clean;
+ volatile uint64_t marble_spi_ipi_sent[MARBLE_SMP_MAX_CPUS];
+ volatile uint64_t marble_spi_ipi_handled[MARBLE_SMP_MAX_CPUS];
+ 
+@@ -356,6 +357,10 @@
+ 		uint32_t base = 0;
+ 		PE_parse_boot_argn("marblespiipi", &requested, sizeof(requested));
+ 		boolean_t have_base = PE_parse_boot_argn("marbleipibase", &base, sizeof(base));
++#if defined(MARBLE)
++		PE_parse_boot_argn("marblegicclean", &marble_gic_clean,
++		    sizeof(marble_gic_clean));
++#endif
+ 		kprintf("MARBLE GIC: TYPER=0x%08x implemented_intids=%u SPI_IPI_requested=%u base=%u supplied=%u\n",
+ 		    typer, marble_gic_intids, requested, base, have_base);
+ 		if (requested) {
+@@ -393,6 +398,35 @@
+ 
+ #if defined(MARBLE)
+ 	kprintf("MARBLE GIC: WAKER done\n");
++	unsigned int marble_cpu = ml_get_cpu_number_local();
++	if (marble_gic_clean && (marble_cpu == 2 || marble_cpu == 3)) {
++		uint32_t before_en = gicr_read32(GICR_ISENABLER0);
++		uint32_t before_pend = gicr_read32(GICR_ISPENDR0);
++		uint32_t before_active = gicr_read32(GICR_ISACTIVER0);
++		uint32_t before_ctlr = gicr_read32(GICR_CTLR);
++		uint32_t before_waker = gicr_read32(GICR_WAKER);
++
++		kprintf("MARBLE GIC CLEAN: cpu=%u before en=0x%08x pend=0x%08x active=0x%08x CTLR=0x%08x WAKER=0x%08x\n",
++		    marble_cpu, before_en, before_pend, before_active, before_ctlr,
++		    before_waker);
++		gicr_write32(GICR_ICENABLER0, 0xffffffffU);
++		gicr_write32(GICR_ICPENDR0, 0xffffffffU);
++		__builtin_arm_dsb(DSB_SY);
++
++		uint64_t clean_deadline;
++		nanoseconds_to_deadline(GICR_WAKE_TIMEOUT_NS, &clean_deadline);
++		while (gicr_read32(GICR_CTLR) & GICR_CTLR_RWP) {
++			if (mach_absolute_time() > clean_deadline) {
++				panic("MARBLE GIC CLEAN: cpu=%u timed out waiting for GICR_CTLR.RWP",
++				    marble_cpu);
++			}
++		}
++
++		kprintf("MARBLE GIC CLEAN: cpu=%u after en=0x%08x pend=0x%08x active=0x%08x CTLR=0x%08x WAKER=0x%08x\n",
++		    marble_cpu, gicr_read32(GICR_ISENABLER0),
++		    gicr_read32(GICR_ISPENDR0), gicr_read32(GICR_ISACTIVER0),
++		    gicr_read32(GICR_CTLR), gicr_read32(GICR_WAKER));
++	}
+ #endif
+ 
+ #if defined(SWEET)
+@@ -509,9 +543,13 @@
+ 	    (1U << sweet_vtimer_intid) | (1U << QUALCOMM_IPI_SGI));
+ 	__builtin_arm_dsb(DSB_SY);
+ 	__builtin_arm_isb(ISB_SY);
+-	kprintf("MARBLE GIC: local final cpu=%u CTLR=0x%08x EN=0x%08x\n",
+-	    ml_get_cpu_number_local(), gicd_read32(GICD_CTLR),
+-	    gicr_read32(GICR_ISENABLER0));
++	kprintf("MARBLE GIC CLEAN FINAL: cpu=%u en=0x%08x pend=0x%08x active=0x%08x IGRPEN1=0x%llx PMR=0x%llx HPPIR0=%llu HPPIR1=%llu\n",
++	    ml_get_cpu_number_local(), gicr_read32(GICR_ISENABLER0),
++	    gicr_read32(GICR_ISPENDR0), gicr_read32(GICR_ISACTIVER0),
++	    __builtin_arm_rsr64("ICC_IGRPEN1_EL1"),
++	    __builtin_arm_rsr64("ICC_PMR_EL1"),
++	    __builtin_arm_rsr64("ICC_HPPIR0_EL1") & 0xffffffULL,
++	    __builtin_arm_rsr64("ICC_HPPIR1_EL1") & 0xffffffULL);
+ #else
+ 	// Enable the forwarding of the vtimer interrupt
+ 	uint32_t gicd_ctlr = gicd_read32(GICD_CTLR);
+diff --git a/pexpert/pexpert/arm64/MARBLE.h b/pexpert/pexpert/arm64/MARBLE.h
+--- a/pexpert/pexpert/arm64/MARBLE.h
++++ b/pexpert/pexpert/arm64/MARBLE.h
+@@ -54,7 +54,9 @@
+ #define GICR_WAKER                              0x14
+ #define GICR_IGROUPR0                           0x10080
+ #define GICR_ISENABLER0                         0x10100
++#define GICR_ICENABLER0                         0x10180
+ #define GICR_ISPENDR0                           0x10200
++#define GICR_ICPENDR0                           0x10280
+ #define GICR_ISACTIVER0                         0x10300
+ #define GICR_IPRIORITYR0                        0x10400
+ #define GICR_IGRPMODR0                          0x10D00

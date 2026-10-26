@@ -1,5 +1,27 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## Active MARBLE local GICR cleanup experiment (2026-10-26)
+
+Prepared `0098-marble-gic-local-clean.patch` on top of source commit
+`f17e3c8367df5410f9282b50e9783a17985fe389`, while preserving later
+documentation commits. The default-off `marblegicclean=1` experiment affects
+logical CPU2/CPU3 only. Immediately after redistributor discovery and WAKER
+completion, before ICC_SRE and the existing 0092 final local setup, it snapshots
+enable/pending/active/CTLR/WAKER, writes only ICENABLER0 and ICPENDR0, executes
+DSB SY, and waits up to one second for GICR_CTLR.RWP. It does not clear active
+state, write IGROUPR0/IGRPMODR0 or priority arrays, or sweep global distributor
+SPIs. After the normal SGI1/PPI27 enable it reports enable/pending/active and
+IGRPEN1/PMR/HPPIR0/HPPIR1. SPI IPI remains present and default-off.
+
+Local observations: strict 0098 application to exact run 40188906058 source
+passes; complete 98-patch reverse/replay passes (historical patches retain
+their pre-existing whitespace warnings); `pe_fiq.c` compiles to an arm64 Mach-O
+object with the exact prior CI-generated headers. Static checks confirm 0098
+touches only `pexpert/arm/pe_fiq.c` and `pexpert/pexpert/arm64/MARBLE.h`, SWEET
+preprocessing is unaffected by MARBLE-guarded code/header changes, and 0096 hot
+IPI send/handled paths still contain no logging. CI, exact-artifact packaging,
+and physical testing remain pending. No phone command has been run.
+
 ## Active MARBLE SPI-IPI canonical affinity (2026-10-25)
 
 Physical 0096 result with `cpus=2 marblespiipi=1 marbleipibase=1008`: CPU0
