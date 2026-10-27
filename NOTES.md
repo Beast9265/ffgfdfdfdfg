@@ -1,5 +1,29 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## MARBLE SMP8 read-only CPU performance diagnostic (2026-10-27)
+
+User physical observation: `marble-smp8-test.img` from source
+`22f219d4a033ec7e5019e6698278f029c859e6a8` / CI run `40502438219`
+successfully boots iOS with all eight CPUs. This is now the known-good SMP
+baseline; the physical result belongs to the user, not an agent-run boot.
+
+Prepared `shim/out/marble-xnu/marble-smp8-cpufreq-readonly-test.img` without
+rebuilding XNU or the shim. Its payload uses the exact run-40502438219 kernel,
+the exact tested eight-core ADT and all tested root/UFS/HFS, bitbang-touch,
+display, button and USB-disabled arguments. The only payload bytes changed from
+the tested SMP8 payload are 16 command-line bytes adding `marblecpufreq=1`;
+`cpus=8`, `marblesmpsample=1` and `marblehwdiag=1` are present exactly once.
+SPI-IPI, `marblegicclean`, GPU, `marblecpufreq=2` and `marblecpucap` are absent.
+
+Audits: source mode 1 performs only EPSS reads for all three domains; every
+PERF_STATE write is inside `if (on == 2 && d == 0)`. Embedded ADT SHA256
+`6704c745...` has MPIDRs `0x000..0x700`; shim SHA256 `586713d3...` is
+byte-identical to the tested image; boot-v4 inspection passes. Diagnostic image
+SHA256 is `291666c9b565aac1792097f86302fd788d5f36d5a533c081bce97ea61a71051e`.
+The original tested image remains unchanged at SHA256 `2d08c2be...`. No device
+command was run. Await physical diagnostic logs before any three-domain voting
+implementation.
+
 ## Active MARBLE Jebbranch SMP8 port (2026-10-27)
 
 Pinned and reconstructed Jebbranch `f3861a38d52f66cff35de15f2d5194ac2c364299`
