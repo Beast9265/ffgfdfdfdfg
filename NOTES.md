@@ -21,8 +21,23 @@ explicit topologies; CPU0-3 use 1.8048 GHz, CPU4-6 2.496 GHz, CPU7 2.9184 GHz
 descriptive maxima. The stock live DTB independently confirms MPIDRs
 `0x000..0x700`. Local PASS: strict 0099 application to the exact 0098 buildtree,
 full 99-patch reverse/replay, ADT unit tests, and generated four/eight-node ADT
-validation. CI, exact artifact download, and four-image packaging remain next;
-no device command has been run and physical SMP success is not claimed.
+validation. Source commit `22f219d4a033ec7e5019e6698278f029c859e6a8` is
+pushed. Exact workflow run `40502438219` succeeded with matching head SHA; its
+Mach-O `kernel.development.marble` SHA256 is
+`46e56be11c965e65421c02f851307ad9dd5c8a220b13b761bfb9896a8d59474a`.
+
+Packaged the controlled matrix without rebuilding the shim. All four images
+embed shim SHA256 `586713d3b4c5862f73443cb1e5f555e465a9ffa5f3e2662672d41fff1715ee05`,
+byte-identical to the known-good SMP4 reference. SMP2/3/4 use the exact known
+four-node ADT (`58d68536...`); SMP8 extends only `/cpus`, leaving every non-CPU
+root child byte-identical (`6704c745...`). Embedded payload audits verified
+`cpus=N`, node counts/affinities, touch/UFS/HFS/display/USB arguments,
+`marblesmpsample=1`, and absence of SPI-IPI/GIC-clean/cpufreq/GPU enable args.
+Images: SMP2 `27de3bcf...`, SMP3 `536aa0f3...`, SMP4 `8c2a45ee...`, SMP8
+`2d08c2be...`; full hashes are in the final handoff. `latest-marble-xnu.img` is
+an exact copy of SMP2; the old 0098 baseline was preserved as
+`latest-marble-xnu.pre-smp8-port.img`. No device command has been run and
+physical SMP success is not claimed. First manual test is SMP2, then 3, 4, 8.
 
 ## Active MARBLE local GICR cleanup experiment (2026-10-26)
 
