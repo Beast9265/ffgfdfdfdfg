@@ -61,7 +61,9 @@ def validate_gmu(image):
 def validate_sqe(image):
     if len(image) < 8 or len(image) % 4:
         raise ValueError('SQE firmware must be a nonempty dword stream')
-    version, = struct.unpack_from('<I', image)
+    # KGSL's adreno_get_firmware() discards dword 0 and derives the ucode
+    # version from dword 1 (with a legacy data[3] extension when needed).
+    version, = struct.unpack_from('<I', image, 4)
     if version in (0, 0xffffffff):
         raise ValueError('SQE firmware has an invalid version word')
     return dict(format='a7xx-sqe-dwords', version=hex(version), dwords=len(image) // 4)

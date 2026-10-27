@@ -1,7 +1,7 @@
 diff --git a/bsd/dev/marble_a725_probe.c b/bsd/dev/marble_a725_probe.c
 --- a/bsd/dev/marble_a725_probe.c
 +++ b/bsd/dev/marble_a725_probe.c
-@@ -1,130 +1,266 @@
+@@ -1,130 +1,267 @@
 -/*
 - * Default-off SM7475 / Adreno 725 discovery only.
 - *
@@ -242,8 +242,9 @@ diff --git a/bsd/dev/marble_a725_probe.c b/bsd/dev/marble_a725_probe.c
 +		return a725_validate_gmu(image, length);
 +	}
 +	if (kind == A725_FW_SQE) {
-+		return length >= 8 && !(length & 3) && a725_le32(image) != 0 &&
-+		    a725_le32(image) != 0xffffffffu;
++		/* KGSL derives the SQE ucode version from dword 1, not dword 0. */
++		return length >= 8 && !(length & 3) && a725_le32(image + 4) != 0 &&
++		    a725_le32(image + 4) != 0xffffffffu;
 +	}
 +	/* Qualcomm MDT is a little-endian ELF32 header plus program headers. */
 +	if (length < 0x34 || image[0] != 0x7f || image[1] != 'E' ||

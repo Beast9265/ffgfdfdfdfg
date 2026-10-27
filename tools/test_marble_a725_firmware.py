@@ -22,9 +22,9 @@ class FirmwareTest(unittest.TestCase):
             FW.validate_gmu(struct.pack('<4I4s', 0x20000000, 4, 0, 0, b'bad!'))
 
     def test_sqe_and_mdt(self):
-        self.assertEqual(FW.validate_sqe(struct.pack('<2I', 1, 2))['dwords'], 2)
+        self.assertEqual(FW.validate_sqe(struct.pack('<2I', 0, 2))['dwords'], 2)
         with self.assertRaises(ValueError):
-            FW.validate_sqe(struct.pack('<I', 0))
+            FW.validate_sqe(struct.pack('<2I', 1, 0))
         mdt = bytearray(0x54)
         mdt[:6] = b'\x7fELF\x01\x01'
         struct.pack_into('<I', mdt, 0x1c, 0x34)
@@ -36,7 +36,7 @@ class FirmwareTest(unittest.TestCase):
             root = pathlib.Path(directory)
             (root / 'gmu_gen70000.bin').write_bytes(
                 struct.pack('<4I4s', 0, 4, 0, 0, b'GMU!'))
-            (root / 'a730_sqe.fw').write_bytes(struct.pack('<2I', 1, 2))
+            (root / 'a730_sqe.fw').write_bytes(struct.pack('<2I', 0, 2))
             mdt = bytearray(0x54)
             mdt[:6] = b'\x7fELF\x01\x01'
             struct.pack_into('<I', mdt, 0x1c, 0x34)

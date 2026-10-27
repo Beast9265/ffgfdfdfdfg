@@ -57,6 +57,14 @@ The DT reserves a zap-shader region and names three stock firmware components:
 segments).  The checked local firmware extraction does not contain these files,
 so no hashes are claimed here.
 
+Upstream linux-firmware currently provides two redistributable reference files:
+`gmu_gen70000.bin` SHA-256 `b2d3f0e2a98fd6259ab9ffef16df63265542e6cc9a970d53d476e823d432042a`
+and `a730_sqe.fw` SHA-256
+`4f8b288f340ff5b4881bed8dfea90bb4a1b967556ca2df6d07f4ed4e4a28d071`.
+Both pass the structural validator.  They are not asserted to match the
+phone's factory build, and linux-firmware does not supply the signed zap MDT
+and segments required by this device, so they are not packaged in a test ADT.
+
 Mesa maps `0x07030002` to FD725, A7xx generation 1, four CCUs, A730 magic
 registers, and `highest_bank_bit = 16`.  Qualcomm's Gen7.4 table independently
 selects 2 MiB GMEM, GMU firmware protocol version 4.0.7, the same three firmware
