@@ -1,0 +1,400 @@
+diff --git a/bsd/dev/marble_a725_probe.c b/bsd/dev/marble_a725_probe.c
+--- a/bsd/dev/marble_a725_probe.c
++++ b/bsd/dev/marble_a725_probe.c
+@@ -1,130 +1,266 @@
+-/*
+- * Default-off SM7475 / Adreno 725 discovery only.
+- *
+- * Resource addresses come from the marble -> SM7475/Cape vendor DTS chain.
+- * This file deliberately contains no A740 tables, power votes, firmware,
+- * interrupt registration, SMMU writes, or accelerated-device publication.
+- */
+-#include <pexpert/arm64/board_config.h>
+-
+-#if defined(ARM64_BOARD_CONFIG_MARBLE)
+-#include <sys/systm.h>
+-#include <machine/machine_routines.h>
+-#include <pexpert/pexpert.h>
+-
+-extern vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
+-
+-#define A725_GPU_PA       0x03d00000u
+-#define A725_GPU_SIZE     0x00040000u
+-#define A725_GPU_SPI      300u
+-#define A725_GMU_PA       0x03d68000u
+-#define A725_GMU_SIZE     0x00037000u
+-#define A725_GMU_HFI_SPI  304u
+-#define A725_GMU_SPI      305u
+-#define A725_GPUCC_PA     0x03d90000u
+-#define A725_GPUCC_SIZE   0x0000a000u
+-#define A725_SMMU_PA      0x03da0000u
+-#define A725_SMMU_SIZE    0x00040000u
+-
+-/* waipio/cape GPUCC GDSCs; PWR_ON is the architectural Qualcomm bit 31. */
+-#define A725_GPUCC_GX_GDSCR 0x905cu
+-#define A725_GPUCC_CX_GDSCR 0x9108u
+-#define A725_GDSC_PWR_ON     (1u << 31)
+-
+-struct marble_a725_resources {
+-	vm_offset_t gpu;
+-	vm_offset_t gmu;
+-	vm_offset_t smmu;
+-	vm_offset_t gpucc;
+-};
+-
+-static inline uint32_t
+-a725_read32(vm_offset_t base, uint32_t offset)
+-{
+-	return *(volatile uint32_t *)(base + offset);
+-}
+-
+-static boolean_t
+-a725_valid_read(uint32_t value)
+-{
+-	return value != 0xffffffffu;
+-}
+-
+-static boolean_t
+-a725_probe_smmu(const struct marble_a725_resources *r)
+-{
+-	/* ARM SMMUv2 global capability/state registers; discovery is read-only. */
+-	uint32_t scr0 = a725_read32(r->smmu, 0x000);
+-	uint32_t id0 = a725_read32(r->smmu, 0x020);
+-	uint32_t id1 = a725_read32(r->smmu, 0x024);
+-	uint32_t id2 = a725_read32(r->smmu, 0x028);
+-	printf("MARBLE A725: stage=SMMU CR0=%08x ID0=%08x ID1=%08x ID2=%08x\n",
+-	    scr0, id0, id1, id2);
+-	if (!a725_valid_read(scr0) || !a725_valid_read(id0) ||
+-	    !a725_valid_read(id1) || !a725_valid_read(id2)) {
+-		printf("MARBLE A725: stop=SMMU_UNREADABLE\n");
+-		return FALSE;
+-	}
+-	return TRUE;
+-}
+-
+-void
+-marble_a725_probe(void)
+-{
+-	uint32_t enabled = 0;
+-	PE_parse_boot_argn("marblegpu", &enabled, sizeof(enabled));
+-	if (enabled != 1) {
+-		return;
+-	}
+-
+-	struct marble_a725_resources r = { 0 };
+-	printf("MARBLE A725: stage=RESOURCES model=A725 gpu=%x/%x irq=%u gmu=%x/%x hfi=%u irq=%u gpucc=%x/%x smmu=%x/%x\n",
+-	    A725_GPU_PA, A725_GPU_SIZE, A725_GPU_SPI,
+-	    A725_GMU_PA, A725_GMU_SIZE, A725_GMU_HFI_SPI, A725_GMU_SPI,
+-	    A725_GPUCC_PA, A725_GPUCC_SIZE, A725_SMMU_PA, A725_SMMU_SIZE);
+-
+-	r.gpucc = ml_io_map(A725_GPUCC_PA, A725_GPUCC_SIZE);
+-	if (!r.gpucc) {
+-		printf("MARBLE A725: stop=GPUCC_MAP\n");
+-		return;
+-	}
+-	uint32_t cx = a725_read32(r.gpucc, A725_GPUCC_CX_GDSCR);
+-	uint32_t gx = a725_read32(r.gpucc, A725_GPUCC_GX_GDSCR);
+-	printf("MARBLE A725: stage=POWER CX_GDSCR=%08x on=%u GX_GDSCR=%08x on=%u\n",
+-	    cx, !!(cx & A725_GDSC_PWR_ON), gx, !!(gx & A725_GDSC_PWR_ON));
+-	if (!a725_valid_read(cx) || !a725_valid_read(gx)) {
+-		printf("MARBLE A725: stop=GPUCC_UNREADABLE\n");
+-		return;
+-	}
+-	if (!(cx & A725_GDSC_PWR_ON)) {
+-		printf("MARBLE A725: stop=CX_POWER_COLLAPSED (no SMMU/GMU/GPU access)\n");
+-		return;
+-	}
+-
+-	r.smmu = ml_io_map(A725_SMMU_PA, A725_SMMU_SIZE);
+-	if (!r.smmu) {
+-		printf("MARBLE A725: stop=SMMU_MAP\n");
+-		return;
+-	}
+-	if (!a725_probe_smmu(&r)) {
+-		return;
+-	}
+-
+-	r.gmu = ml_io_map(A725_GMU_PA, A725_GMU_SIZE);
+-	if (!r.gmu) {
+-		printf("MARBLE A725: stop=GMU_MAP\n");
+-		return;
+-	}
+-	printf("MARBLE A725: stage=GMU mapped=1 (register reads deferred until firmware/power sequencing is derived)\n");
+-	if (!(gx & A725_GDSC_PWR_ON)) {
+-		printf("MARBLE A725: stop=GX_POWER_COLLAPSED (no GPU access)\n");
+-		return;
+-	}
+-	r.gpu = ml_io_map(A725_GPU_PA, A725_GPU_SIZE);
+-	if (!r.gpu) {
+-		printf("MARBLE A725: stop=GPU_MAP\n");
+-		return;
+-	}
+-	printf("MARBLE A725: stage=GPU mapped=1; stop=DISCOVERY_COMPLETE (register IDs deferred: no pinned A725-safe list yet)\n");
+-}
+-#endif
++/*
++ * Default-off SM7475 / Adreno 725 discovery only.
++ *
++ * Resource addresses come from the marble -> SM7475/Cape vendor DTS chain.
++ * This file deliberately contains no A740 tables, power votes, firmware,
++ * interrupt registration, SMMU writes, or accelerated-device publication.
++ */
++#include <pexpert/arm64/board_config.h>
++
++#if defined(ARM64_BOARD_CONFIG_MARBLE)
++#include <sys/systm.h>
++#include <machine/machine_routines.h>
++#include <pexpert/pexpert.h>
++#include <pexpert/device_tree.h>
++#include <libkern/crypto/sha2.h>
++
++extern vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
++
++#define A725_GPU_PA       0x03d00000u
++#define A725_GPU_SIZE     0x00040000u
++#define A725_GPU_SPI      300u
++#define A725_GMU_PA       0x03d68000u
++#define A725_GMU_SIZE     0x00037000u
++#define A725_GMU_HFI_SPI  304u
++#define A725_GMU_SPI      305u
++#define A725_GPUCC_PA     0x03d90000u
++#define A725_GPUCC_SIZE   0x0000a000u
++#define A725_SMMU_PA      0x03da0000u
++#define A725_SMMU_SIZE    0x00040000u
++
++/* waipio/cape GPUCC GDSCs; PWR_ON is the architectural Qualcomm bit 31. */
++#define A725_GPUCC_GX_GDSCR 0x905cu
++#define A725_GPUCC_CX_GDSCR 0x9108u
++#define A725_GDSC_PWR_ON     (1u << 31)
++
++struct marble_a725_resources {
++	vm_offset_t gpu;
++	vm_offset_t gmu;
++	vm_offset_t smmu;
++	vm_offset_t gpucc;
++};
++
++struct a725_firmware_spec {
++	const char *property;
++	const char *digest_property;
++	enum { A725_FW_GMU, A725_FW_SQE, A725_FW_ZAP } kind;
++};
++
++static const struct a725_firmware_spec a725_firmware[] = {
++	{ "gmu_gen70000-bin", "gmu_gen70000-bin-sha256", A725_FW_GMU },
++	{ "a730_sqe-fw", "a730_sqe-fw-sha256", A725_FW_SQE },
++	{ "a730_zap-mdt", "a730_zap-mdt-sha256", A725_FW_ZAP },
++};
++
++static uint32_t
++a725_le32(const uint8_t *p)
++{
++	return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 |
++	    (uint32_t)p[3] << 24;
++}
++
++static boolean_t
++a725_gmu_range(uint32_t address, uint32_t size)
++{
++	uint64_t end = (uint64_t)address + size;
++	return (address < 0x00004000u && end <= 0x00004000u) ||
++	    (address >= 0x00004000u && end <= 0x01000000u) ||
++	    (address >= 0x10004000u && end <= 0x10008000u) ||
++	    (address >= 0x60000000u && end <= 0x80000000u) ||
++	    (address >= 0xc0000000u && end <= 0xe0000000u);
++}
++
++/* Parse the downstream kgsl gmu_block_header stream without touching MMIO. */
++static boolean_t
++a725_validate_gmu(const uint8_t *image, unsigned length)
++{
++	unsigned offset = 0, loadable = 0;
++	while (offset < length) {
++		if (length - offset < 16) {
++			return FALSE;
++		}
++		uint32_t address = a725_le32(image + offset);
++		uint32_t size = a725_le32(image + offset + 4);
++		uint32_t type = a725_le32(image + offset + 8);
++		offset += 16;
++		if (size == 0) {
++			if (type > 7) {
++				return FALSE;
++			}
++			continue;
++		}
++		if (size > length - offset || !a725_gmu_range(address, size)) {
++			return FALSE;
++		}
++		offset += size;
++		loadable++;
++	}
++	return loadable != 0;
++}
++
++static boolean_t
++a725_validate_firmware_image(unsigned kind, const uint8_t *image, unsigned length)
++{
++	if (!image || !length) {
++		return FALSE;
++	}
++	if (kind == A725_FW_GMU) {
++		return a725_validate_gmu(image, length);
++	}
++	if (kind == A725_FW_SQE) {
++		return length >= 8 && !(length & 3) && a725_le32(image) != 0 &&
++		    a725_le32(image) != 0xffffffffu;
++	}
++	/* Qualcomm MDT is a little-endian ELF32 header plus program headers. */
++	if (length < 0x34 || image[0] != 0x7f || image[1] != 'E' ||
++	    image[2] != 'L' || image[3] != 'F' || image[4] != 1 || image[5] != 1) {
++		return FALSE;
++	}
++	uint32_t phoff = a725_le32(image + 0x1c);
++	uint32_t phentsize = image[0x2a] | (uint32_t)image[0x2b] << 8;
++	uint32_t phnum = image[0x2c] | (uint32_t)image[0x2d] << 8;
++	return phentsize >= 0x20 && phoff <= length &&
++	    (uint64_t)phentsize * phnum <= length - phoff;
++}
++
++static boolean_t
++a725_validate_firmware(void)
++{
++	DTEntry node;
++	const void *value;
++	unsigned size;
++	if (SecureDTLookupEntry(NULL, "/arm-io/a725-firmware", &node) != kSuccess ||
++	    SecureDTGetProperty(node, "chip-id", &value, &size) != kSuccess ||
++	    size != 4 || a725_le32(value) != 0x07030002u) {
++		printf("MARBLE A725: stop=FIRMWARE_MISSING (supply stock FD725 set in ADT)\n");
++		return FALSE;
++	}
++	for (unsigned i = 0; i < sizeof(a725_firmware) / sizeof(a725_firmware[0]); ++i) {
++		const void *image, *expected;
++		unsigned image_size, expected_size;
++		if (SecureDTGetProperty(node, a725_firmware[i].property, &image,
++		    &image_size) != kSuccess ||
++		    SecureDTGetProperty(node, a725_firmware[i].digest_property, &expected,
++		    &expected_size) != kSuccess || expected_size != SHA256_DIGEST_LENGTH ||
++		    !a725_validate_firmware_image(a725_firmware[i].kind, image, image_size)) {
++			printf("MARBLE A725: stop=FIRMWARE_INVALID file=%s\n",
++			    a725_firmware[i].property);
++			return FALSE;
++		}
++		uint8_t digest[SHA256_DIGEST_LENGTH];
++		SHA256_CTX context;
++		SHA256_Init(&context);
++		SHA256_Update(&context, image, image_size);
++		SHA256_Final(digest, &context);
++		if (memcmp(digest, expected, sizeof(digest)) != 0) {
++			printf("MARBLE A725: stop=FIRMWARE_HASH file=%s\n",
++			    a725_firmware[i].property);
++			return FALSE;
++		}
++		printf("MARBLE A725: stage=FIRMWARE file=%s bytes=%u sha256=%02x%02x%02x%02x... validated=1\n",
++		    a725_firmware[i].property, image_size, digest[0], digest[1], digest[2], digest[3]);
++	}
++	return TRUE;
++}
++
++static inline uint32_t
++a725_read32(vm_offset_t base, uint32_t offset)
++{
++	return *(volatile uint32_t *)(base + offset);
++}
++
++static boolean_t
++a725_valid_read(uint32_t value)
++{
++	return value != 0xffffffffu;
++}
++
++static boolean_t
++a725_probe_smmu(const struct marble_a725_resources *r)
++{
++	/* ARM SMMUv2 global capability/state registers; discovery is read-only. */
++	uint32_t scr0 = a725_read32(r->smmu, 0x000);
++	uint32_t id0 = a725_read32(r->smmu, 0x020);
++	uint32_t id1 = a725_read32(r->smmu, 0x024);
++	uint32_t id2 = a725_read32(r->smmu, 0x028);
++	printf("MARBLE A725: stage=SMMU CR0=%08x ID0=%08x ID1=%08x ID2=%08x\n",
++	    scr0, id0, id1, id2);
++	if (!a725_valid_read(scr0) || !a725_valid_read(id0) ||
++	    !a725_valid_read(id1) || !a725_valid_read(id2)) {
++		printf("MARBLE A725: stop=SMMU_UNREADABLE\n");
++		return FALSE;
++	}
++	return TRUE;
++}
++
++void
++marble_a725_probe(void)
++{
++	uint32_t enabled = 0;
++	PE_parse_boot_argn("marblegpu", &enabled, sizeof(enabled));
++	if (enabled < 1 || enabled > 3) {
++		return;
++	}
++	if (enabled >= 2 && !a725_validate_firmware()) {
++		return;
++	}
++
++	struct marble_a725_resources r = { 0 };
++	printf("MARBLE A725: stage=RESOURCES model=A725 gpu=%x/%x irq=%u gmu=%x/%x hfi=%u irq=%u gpucc=%x/%x smmu=%x/%x\n",
++	    A725_GPU_PA, A725_GPU_SIZE, A725_GPU_SPI,
++	    A725_GMU_PA, A725_GMU_SIZE, A725_GMU_HFI_SPI, A725_GMU_SPI,
++	    A725_GPUCC_PA, A725_GPUCC_SIZE, A725_SMMU_PA, A725_SMMU_SIZE);
++
++	r.gpucc = ml_io_map(A725_GPUCC_PA, A725_GPUCC_SIZE);
++	if (!r.gpucc) {
++		printf("MARBLE A725: stop=GPUCC_MAP\n");
++		return;
++	}
++	uint32_t cx = a725_read32(r.gpucc, A725_GPUCC_CX_GDSCR);
++	uint32_t gx = a725_read32(r.gpucc, A725_GPUCC_GX_GDSCR);
++	printf("MARBLE A725: stage=POWER CX_GDSCR=%08x on=%u GX_GDSCR=%08x on=%u\n",
++	    cx, !!(cx & A725_GDSC_PWR_ON), gx, !!(gx & A725_GDSC_PWR_ON));
++	if (!a725_valid_read(cx) || !a725_valid_read(gx)) {
++		printf("MARBLE A725: stop=GPUCC_UNREADABLE\n");
++		return;
++	}
++	if (!(cx & A725_GDSC_PWR_ON)) {
++		if (enabled == 1) {
++			printf("MARBLE A725: stop=CX_POWER_COLLAPSED (no SMMU/GMU/GPU access)\n");
++		} else {
++			printf("MARBLE A725: stop=CX_POWER_DEPENDENCY (RPMh/GDSC/clock/AOP sequence not yet owned)\n");
++		}
++		return;
++	}
++
++	r.smmu = ml_io_map(A725_SMMU_PA, A725_SMMU_SIZE);
++	if (!r.smmu) {
++		printf("MARBLE A725: stop=SMMU_MAP\n");
++		return;
++	}
++	if (!a725_probe_smmu(&r)) {
++		return;
++	}
++
++	r.gmu = ml_io_map(A725_GMU_PA, A725_GMU_SIZE);
++	if (!r.gmu) {
++		printf("MARBLE A725: stop=GMU_MAP\n");
++		return;
++	}
++	printf("MARBLE A725: stage=GMU mapped=1 (register reads deferred until firmware/power sequencing is derived)\n");
++	if (enabled >= 2) {
++		printf("MARBLE A725: stage=2 stop=POWER_CONTROLLER_MISSING (no MMIO writes issued)\n");
++		return;
++	}
++	if (!(gx & A725_GDSC_PWR_ON)) {
++		printf("MARBLE A725: stop=GX_POWER_COLLAPSED (no GPU access)\n");
++		return;
++	}
++	r.gpu = ml_io_map(A725_GPU_PA, A725_GPU_SIZE);
++	if (!r.gpu) {
++		printf("MARBLE A725: stop=GPU_MAP\n");
++		return;
++	}
++	printf("MARBLE A725: stage=GPU mapped=1; stop=DISCOVERY_COMPLETE (register IDs deferred: no pinned A725-safe list yet)\n");
++}
++#endif

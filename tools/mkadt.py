@@ -73,7 +73,34 @@ def node(name, props=(), children=()):
     return n
 
 
-def build(seed=None, qemu=False, highmem=False, marble=False, marble_cpus=1):
+MARBLE_GPU_FIRMWARE = ('gmu_gen70000.bin', 'a730_sqe.fw', 'a730_zap.mdt')
+
+
+def load_marble_gpu_firmware(directory):
+    """Return an ADT node containing an explicitly supplied stock firmware set.
+
+    The generated ADT is an ephemeral boot artifact.  Firmware is never copied
+    into the repository, and every blob carries its SHA-256 for kernel-side
+    identity verification before a future loader may consume it.
+    """
+    if directory is None:
+        return None
+    props = [('chip-id', u32(0x07030002))]
+    for filename in MARBLE_GPU_FIRMWARE:
+        path = os.path.join(directory, filename)
+        if not os.path.isfile(path):
+            raise ValueError(f'missing MARBLE GPU firmware: {path}')
+        with open(path, 'rb') as source:
+            image = source.read()
+        if not image:
+            raise ValueError(f'empty MARBLE GPU firmware: {path}')
+        key = filename.replace('.', '-')
+        props += [(key, image), (key + '-sha256', hashlib.sha256(image).digest())]
+    return node('a725-firmware', props)
+
+
+def build(seed=None, qemu=False, highmem=False, marble=False, marble_cpus=1,
+          marble_gpu_firmware=None):
     """qemu=True: same tree, but with QEMU virt's GIC addresses and CNTFRQ (tools/qemu-sweet.py)."""
     phys_base, mem_size = (HIGH_PHYS_BASE, HIGH_MEM_SIZE) if highmem else (PHYS_BASE, MEM_SIZE)
     gicd, gicr, timebase = (QEMU_GICD, QEMU_GICR, QEMU_TIMEBASE) if qemu else (GICD, GICR, TIMEBASE)
@@ -84,8 +111,13 @@ def build(seed=None, qemu=False, highmem=False, marble=False, marble_cpus=1):
         gicd, gicr = 0x17100000, 0x17180000
         if marble_cpus not in (1, 4, 8):
             raise ValueError('MARBLE ADT CPU count must be 1, 4, or 8')
+        gpu_firmware = load_marble_gpu_firmware(marble_gpu_firmware)
     elif marble_cpus != 1:
         raise ValueError('--marble-cpus requires --marble')
+    elif marble_gpu_firmware is not None:
+        raise ValueError('--marble-gpu-firmware requires --marble')
+    else:
+        gpu_firmware = None
     seed = seed if seed is not None else os.urandom(64)
     phandle = iter(range(1, 1000))
     ph = lambda: ('AAPL,phandle', u32(next(phandle)))
@@ -208,7 +240,7 @@ def build(seed=None, qemu=False, highmem=False, marble=False, marble_cpus=1):
     if marble:
         # Retain only the GIC and shared AppleCLCD display nub on MARBLE.
         # No SWEET watchdog, input, or other hardware children.
-        arm_io.children = [gic, arm_io.children[2]]
+        arm_io.children = [gic, arm_io.children[2]] + ([gpu_firmware] if gpu_firmware else [])
 
     fbcon = node('sweet-fbcon', [
         ph(),
@@ -288,9 +320,12 @@ if __name__ == '__main__':
     modes.add_argument('--highmem', action='store_true')
     modes.add_argument('--marble', action='store_true')
     parser.add_argument('--marble-cpus', type=int, choices=(1, 4, 8), default=1)
+    parser.add_argument('--marble-gpu-firmware', metavar='DIR',
+                        help='embed the three stock A725 firmware files from DIR')
     args = parser.parse_args()
     root = build(qemu=args.qemu, highmem=args.highmem, marble=args.marble,
-                 marble_cpus=args.marble_cpus)
+                 marble_cpus=args.marble_cpus,
+                 marble_gpu_firmware=args.marble_gpu_firmware)
     blob = adt.serialize(root)
     topology = cpu_topology(blob)
     expected = args.marble_cpus if args.marble else (1 if args.qemu else 8)

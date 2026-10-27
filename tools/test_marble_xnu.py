@@ -1,5 +1,8 @@
 """Offline MARBLE ADT/payload contract; no hardware or private fixtures."""
 import struct
+import hashlib
+import tempfile
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 import adt
@@ -86,6 +89,30 @@ class MarbleTreeTests(unittest.TestCase):
                                       if count == 8 else []))
         with self.assertRaises(ValueError):
             mkadt.build(marble=True, marble_cpus=3)
+
+    def test_explicit_marble_gpu_firmware_node(self):
+        product_props = [('artwork-device-idiom', mkadt.cstr('phone')),
+                         ('artwork-device-subtype', mkadt.u32(2436)),
+                         ('artwork-scale-factor', mkadt.u32(3))]
+        with tempfile.TemporaryDirectory() as directory:
+            root_path = Path(directory)
+            images = {}
+            for index, name in enumerate(mkadt.MARBLE_GPU_FIRMWARE, 1):
+                images[name] = bytes([index]) * (index + 3)
+                (root_path / name).write_bytes(images[name])
+            with patch.object(mkadt, 'd22ap_product', return_value=product_props):
+                root = mkadt.build(seed=bytes(64), marble=True, marble_cpus=8,
+                                   marble_gpu_firmware=directory)
+            arm_io = next(child for child in root.children if child.name == 'arm-io')
+            firmware = next(child for child in arm_io.children
+                            if child.name == 'a725-firmware')
+            self.assertEqual(struct.unpack('<I', firmware.prop('chip-id'))[0],
+                             0x07030002)
+            for name, image in images.items():
+                key = name.replace('.', '-')
+                self.assertEqual(firmware.prop(key), image)
+                self.assertEqual(firmware.prop(key + '-sha256'),
+                                 hashlib.sha256(image).digest())
 
 
 if __name__ == '__main__':
