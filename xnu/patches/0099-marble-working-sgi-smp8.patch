@@ -1,0 +1,258 @@
+--- a/pexpert/arm/pe_fiq.c
++++ b/pexpert/arm/pe_fiq.c
+@@ -51,8 +51,12 @@
+ static void
+ marble_gicd_wait(void)
+ {
++	uint64_t deadline;
++	nanoseconds_to_deadline(GICR_WAKE_TIMEOUT_NS, &deadline);
+ 	while (gicd_read32(GICD_CTLR) & GICD_CTLR_RWP) {
+-		;
++		if (mach_absolute_time() > deadline) {
++			panic("MARBLE GIC: timed out waiting for GICD_CTLR.RWP");
++		}
+ 	}
+ }
+ 
+@@ -441,7 +445,20 @@
+ 		gicr_write32(GICR_IPRIORITYR0 + i, 0xA0A0A0A0);
+ 	}
+ 	gicr_write32(GICR_ISENABLER0, (1U << sweet_vtimer_intid) | (1U << QUALCOMM_IPI_SGI));
+-#elif !defined(MARBLE)
++#elif defined(MARBLE)
++	/*
++	 * Jebbranch f3861a38 verified this non-secure Group-1 setup on the same
++	 * SM7475 hardware.  Do it here, after GICR discovery and WAKER completion,
++	 * never from the MMU-off reset path used by the superseded 0089 experiment.
++	 * Some implementations read this register as zero from NS state even when
++	 * delivery is correctly classified, so the write cannot be readback-gated.
++	 */
++	gicr_write32(GICR_IGROUPR0, 0xffffffffU);
++	for (unsigned int i = 0; i < 32; i += 4) {
++		gicr_write32(GICR_IPRIORITYR0 + i, 0xa0a0a0a0U);
++	}
++	__builtin_arm_dsb(DSB_SY);
++#else
+ 	// Configure timers and legacy FIQ to be group 0
+ 	gicr_write32(GICR_IGROUPR0, 0x81FFFFFF);
+ 
+@@ -495,18 +512,14 @@
+ 		uint32_t gicd_ctlr = gicd_read32(GICD_CTLR);
+ 		if (!(gicd_ctlr & GICD_CTLR_ARE_NS)) {
+ 			gicd_write32(GICD_CTLR, gicd_ctlr | GICD_CTLR_ARE_NS);
+-			while (gicd_read32(GICD_CTLR) & GICD_CTLR_RWP) {
+-				;
+-			}
++			marble_gicd_wait();
+ 			gicd_ctlr = gicd_read32(GICD_CTLR);
+ 		}
+ 		uint32_t wanted = gicd_ctlr | GICD_CTLR_ENABLEGRP1A |
+ 		    GICD_CTLR_ENABLEGRP1;
+ 		if (wanted != gicd_ctlr) {
+ 			gicd_write32(GICD_CTLR, wanted);
+-			while (gicd_read32(GICD_CTLR) & GICD_CTLR_RWP) {
+-				;
+-			}
++			marble_gicd_wait();
+ 		}
+ 		kprintf("MARBLE GIC: distributor initialized CTLR=0x%08x\n",
+ 		    gicd_read32(GICD_CTLR));
+@@ -530,15 +543,7 @@
+ 	__builtin_arm_wsr64("ICC_IGRPEN1_EL1", 1);
+ 	__builtin_arm_isb(ISB_SY);
+ 
+-	/*
+-	 * Keep MARBLE's protected group registers untouched.  Program only the
+-	 * two proven-safe priority bytes on CPU2, then enable the local SGI/PPI;
+-	 * this is deliberately after the final distributor write.
+-	 */
+-	if (ml_get_cpu_number_local() == 2) {
+-		*((volatile uint8_t *)(gicr_pe_base + GICR_IPRIORITYR0 + QUALCOMM_IPI_SGI)) = 0xA0;
+-		*((volatile uint8_t *)(gicr_pe_base + GICR_IPRIORITYR0 + sweet_vtimer_intid)) = 0xA0;
+-	}
++	/* Group and priority are already established before the CPU interface. */
+ 	gicr_write32(GICR_ISENABLER0,
+ 	    (1U << sweet_vtimer_intid) | (1U << QUALCOMM_IPI_SGI));
+ 	__builtin_arm_dsb(DSB_SY);
+--- a/pexpert/pexpert/arm64/MARBLE.h
++++ b/pexpert/pexpert/arm64/MARBLE.h
+@@ -1,5 +1,4 @@
+-/* MARBLE SM7475: generic ARMv8.2, Group-1 IRQs.
+- * First SMP stage exposes only CPUs 0-3 (four Cortex-A510s). */
++/* MARBLE SM7475: eight ARMv8.2 cores in one homogeneous SMP cluster. */
+ 
+ 
+ #ifndef _PEXPERT_ARM64_MARBLE_H
+@@ -10,7 +9,7 @@
+ 
+ #define MARBLE                     1
+ 
+-#define MARBLE_SMP_MAX_CPUS         4
++#define MARBLE_SMP_MAX_CPUS         8
+ 
+ #define ARM_ARCH_TIMER
+ #define __ARM_ARCH__              8
+--- a/iokit/Kernel/arm/MarbleCPU.cpp
++++ b/iokit/Kernel/arm/MarbleCPU.cpp
+@@ -1,8 +1,8 @@
+ /*
+  * A510 SMP bring-up for marble using XNU's legacy IOCPU interface and PSCI.
+  * The architected timer and SGI1 already enter through pe_fiq/sleh_irq.
+- * First-stage bring-up deliberately exposes only CPUs 0-3 (four A510s).
+- * CPU_OFF, suspend and the A710/X2 cores remain separate follow-up work.
++ * All eight physical cores are exposed as one homogeneous SMP cluster.
++ * CPU_OFF and suspend remain separate follow-up work.
+  */
+ #include <pexpert/arm64/board_config.h>
+ 
+@@ -26,6 +26,8 @@
+ extern "C" void marble_spi_ipi_send(unsigned int cpu);
+ extern "C" uint64_t marble_spi_ipi_sent_count(unsigned int cpu);
+ extern "C" uint64_t marble_spi_ipi_handled_count(unsigned int cpu);
++extern "C" int marble_cpu_busy(int cpu);
++extern "C" uint64_t marble_cpu_tid(int cpu);
+ 
+ class MarbleCPU;
+ static MarbleCPU *marble_cpus[MAX_CPUS];
+@@ -79,8 +81,8 @@
+ 	if (*(const uint32_t *)reg->getBytesNoCopy() != cpu->phys_id) {
+ 		return false;
+ 	}
+-	/* SM7475: first-stage SMP is the four A510s, MPIDR 0x000..0x300. */
+-	if (cpu->phys_id > 0x300 || (cpu->phys_id & 0xff) != 0 ||
++	/* SM7475 MPIDR Aff1 enumerates CPU0..CPU7 as 0x000..0x700. */
++	if (cpu->phys_id > 0x700 || (cpu->phys_id & 0xff) != 0 ||
+ 	    topology->num_cpus > MARBLE_SMP_MAX_CPUS) {
+ 		panic("MARBLE CPU: invalid topology cpu=%u mpidr=0x%x count=%u",
+ 		    cpu->cpu_id, cpu->phys_id, topology->num_cpus);
+@@ -88,7 +90,7 @@
+ 	if (!IOCPU::start(provider)) {
+ 		return false;
+ 	}
+-	cpuName = OSSymbol::withCStringNoCopy("SM7475 A510");
++	cpuName = OSSymbol::withCStringNoCopy("SM7475 CPU");
+ 	if (cpuName == NULL) {
+ 		return false;
+ 	}
+@@ -150,7 +152,7 @@
+ 		}
+ 		IOSleep(1);
+ 	}
+-	/* The supplied ADT has cpu0 as the boot CPU and ascending A510 nodes. */
++	/* The supplied ADT has cpu0 as the boot CPU and ascending physical nodes. */
+ 	if (topology->boot_cpu->cpu_id != 0 || topology->boot_cpu->phys_id != 0) {
+ 		panic("MARBLE CPU: expected boot MPIDR 0 and logical CPU 0");
+ 	}
+@@ -209,6 +211,34 @@
+ 	IOLog("MARBLE CPU: %u/%u CPUs initialized, %s IPI verified\n",
+ 	    topology->num_cpus, topology->num_cpus,
+ 	    marble_spi_ipi_enabled() ? "SPI" : "SGI1");
++
++	uint32_t sample = 0;
++	PE_parse_boot_argn("marblesmpsample", &sample, sizeof(sample));
++	if (sample) {
++		uint32_t busy[MAX_CPUS] = {};
++		uint64_t last_tid[MAX_CPUS] = {};
++		uint32_t tid_changes[MAX_CPUS] = {};
++		const uint32_t samples = 200;
++		for (uint32_t n = 0; n < samples; n++) {
++			for (unsigned int i = 0; i < topology->num_cpus; i++) {
++				if (marble_cpu_busy(i) > 0) {
++					busy[i]++;
++				}
++				uint64_t tid = marble_cpu_tid(i);
++				if (tid != 0 && last_tid[i] != 0 && tid != last_tid[i]) {
++					tid_changes[i]++;
++				}
++				if (tid != 0) {
++					last_tid[i] = tid;
++				}
++			}
++			IOSleep(10);
++		}
++		for (unsigned int i = 0; i < topology->num_cpus; i++) {
++			IOLog("MARBLE SMP SAMPLE: cpu=%u busy=%u/%u tid_changes=%u last_tid=%llu\n",
++			    i, busy[i], samples, tid_changes[i], last_tid[i]);
++		}
++	}
+ 	thread_terminate(current_thread());
+ }
+ 
+@@ -232,18 +262,12 @@
+ 	/* Secondary startup runs at splsched: queue the self-IPI and return.
+ 	 * startAll waits for its delivery after the startup thread unmasks IRQs.
+ 	 * Waiting here with DAIF.I set would deadlock every secondary. */
+-	marble_gic_debug_local("before-self-sgi");
+ 	signalCPU(this);
+-	marble_gic_debug_local("after-self-sgi");
+-	uint64_t hppir1 = __builtin_arm_rsr64("ICC_HPPIR1_EL1");
+-	kprintf("MARBLE SMPDBG: cpu=%u after self-SGI HPPIR1=%llu\n",
+-	    getCPUNumber(), hppir1 & 0xffffffULL);
+ 	setCPUState(kIOCPUStateRunning);
+ 	kprintf("MARBLE CPU: cpu=%u entered initCPU mpidr=0x%llx EL%llu IRQs=%u\n",
+ 	    getCPUNumber(), __builtin_arm_rsr64("MPIDR_EL1") & 0xffffULL,
+ 	    __builtin_arm_rsr64("CurrentEL") >> 2, ml_get_interrupts_enabled());
+ 	__atomic_store_n(&initialized, 1, __ATOMIC_RELEASE);
+-	kprintf("MARBLE SMPDBG: cpu=%u initialized published\n", getCPUNumber());
+ }
+ 
+ void
+@@ -268,8 +292,6 @@
+ 	    (((mpidr >> 16) & 0xff) << 32) |
+ 	    (((mpidr >> 8) & 0xff) << 16) |
+ 	    ((uint64_t)MARBLE_IPI_SGI << 24) | (1ULL << aff0);
+-	kprintf("MARBLE SMPDBG: SGI send sender=0x%llx target_cpu=%u target=0x%llx SGI1R=0x%llx\n",
+-	    __builtin_arm_rsr64("MPIDR_EL1") & 0xffffULL, logical, mpidr, sgi);
+ 	__builtin_arm_dsb(DSB_ISHST);
+ 	__builtin_arm_wsr64("ICC_SGI1R_EL1", sgi);
+ 	__builtin_arm_isb(ISB_SY);
+--- a/osfmk/arm64/machine_routines.c
++++ b/osfmk/arm64/machine_routines.c
+@@ -965,7 +965,7 @@
+ #endif
+ 
+ #if defined(MARBLE)
+-	/* First-stage SMP: cpus=N selects an initial prefix of the four A510s. */
++	/* cpus=N selects an initial prefix of the eight physical cores. */
+ 	if (!cpus_boot_arg_present || cpu_boot_arg == 0) {
+ 		cpu_boot_arg = 1;
+ 	}
+--- a/osfmk/kern/processor.c
++++ b/osfmk/kern/processor.c
+@@ -1728,3 +1728,36 @@
+ }
+ 
+ #endif /* defined(__arm64__) */
++
++#if defined(MARBLE)
++/* Kernel-private scheduling state used by the bounded opt-in SMP sampler. */
++int
++marble_cpu_busy(int cpu)
++{
++	processor_t p;
++
++	if (cpu < 0 || cpu >= MAX_SCHED_CPUS) {
++		return -1;
++	}
++	p = processor_array[cpu];
++	if (p == NULL) {
++		return -1;
++	}
++	return p->active_thread != NULL && p->active_thread != p->idle_thread;
++}
++
++uint64_t
++marble_cpu_tid(int cpu)
++{
++	processor_t p;
++
++	if (cpu < 0 || cpu >= MAX_SCHED_CPUS) {
++		return 0;
++	}
++	p = processor_array[cpu];
++	if (p == NULL || p->active_thread == NULL || p->active_thread == p->idle_thread) {
++		return 0;
++	}
++	return thread_tid(p->active_thread);
++}
++#endif /* MARBLE */

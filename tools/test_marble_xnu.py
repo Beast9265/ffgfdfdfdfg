@@ -68,6 +68,25 @@ class MarbleTreeTests(unittest.TestCase):
         self.assertIn(b'xiaomi,sweet\0', root.prop('compatible'))
         self.assertEqual(len(next(c for c in root.children if c.name == 'cpus').children), 8)
 
+    def test_explicit_marble_smp_topologies(self):
+        product_props = [('artwork-device-idiom', mkadt.cstr('phone')),
+                         ('artwork-device-subtype', mkadt.u32(2436)),
+                         ('artwork-scale-factor', mkadt.u32(3))]
+        with patch.object(mkadt, 'd22ap_product', return_value=product_props):
+            for count in (4, 8):
+                with self.subTest(count=count):
+                    blob = adt.serialize(mkadt.build(seed=bytes(64), marble=True,
+                                                     marble_cpus=count))
+                    topology = mkadt.cpu_topology(blob)
+                    self.assertEqual([mpidr for mpidr, _ in topology],
+                                     [cpu << 8 for cpu in range(count)])
+                    self.assertEqual([clock for _, clock in topology],
+                                     [1804800000] * min(count, 4) +
+                                     ([2496000000] * 3 + [2918400000]
+                                      if count == 8 else []))
+        with self.assertRaises(ValueError):
+            mkadt.build(marble=True, marble_cpus=3)
+
 
 if __name__ == '__main__':
     unittest.main()

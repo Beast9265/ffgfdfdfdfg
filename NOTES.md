@@ -1,5 +1,29 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## Active MARBLE Jebbranch SMP8 port (2026-10-27)
+
+Pinned and reconstructed Jebbranch `f3861a38d52f66cff35de15f2d5194ac2c364299`
+after all 187 patches. Effective-code comparison against exact run 40289056327
+buildtree identifies the material CPU2 difference: the verified same-device
+tree writes every local SGI/PPI to non-secure Group 1 with
+`GICR_IGROUPR0=0xffffffff` and initializes all 32 local priorities after GICR
+discovery/WAKER. MARBLE omitted that group classification, matching the observed
+SGI1 pending but ineligible (`active=0`, `HPPIR1=1023`). The earlier 0089 abort
+was an MMU-off reset-stub experiment; the new write is in normal MMU-on
+`pe_init_fiq`, matching the known-working reference.
+
+Prepared `0099-marble-working-sgi-smp8.patch`: safe Group-1/priority setup,
+bounded GICD RWP waits, eight-core limits/MPIDRs, no normal-SGI hot-path logging,
+and default-off `marblesmpsample=1` scheduler sampling through kernel-private
+processor helpers. SPI-IPI, GIC cleanup, cpufreq and GPU experiments remain
+default-off. `tools/mkadt.py --marble-cpus {1,4,8}` now emits and validates
+explicit topologies; CPU0-3 use 1.8048 GHz, CPU4-6 2.496 GHz, CPU7 2.9184 GHz
+descriptive maxima. The stock live DTB independently confirms MPIDRs
+`0x000..0x700`. Local PASS: strict 0099 application to the exact 0098 buildtree,
+full 99-patch reverse/replay, ADT unit tests, and generated four/eight-node ADT
+validation. CI, exact artifact download, and four-image packaging remain next;
+no device command has been run and physical SMP success is not claimed.
+
 ## Active MARBLE local GICR cleanup experiment (2026-10-26)
 
 Prepared `0098-marble-gic-local-clean.patch` on top of source commit

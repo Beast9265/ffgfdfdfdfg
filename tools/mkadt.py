@@ -4,7 +4,7 @@
 Only what the early boot path actually reads (see NOTES.md); every MMIO
 address comes from the sweet live FDT. Usage:  mkadt.py OUT.adt [--dump] [--qemu | --highmem | --marble]
 """
-import hashlib, os, struct, sys
+import argparse, hashlib, os, struct, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import adt  # noqa: E402
@@ -73,7 +73,7 @@ def node(name, props=(), children=()):
     return n
 
 
-def build(seed=None, qemu=False, highmem=False, marble=False):
+def build(seed=None, qemu=False, highmem=False, marble=False, marble_cpus=1):
     """qemu=True: same tree, but with QEMU virt's GIC addresses and CNTFRQ (tools/qemu-sweet.py)."""
     phys_base, mem_size = (HIGH_PHYS_BASE, HIGH_MEM_SIZE) if highmem else (PHYS_BASE, MEM_SIZE)
     gicd, gicr, timebase = (QEMU_GICD, QEMU_GICR, QEMU_TIMEBASE) if qemu else (GICD, GICR, TIMEBASE)
@@ -82,6 +82,10 @@ def build(seed=None, qemu=False, highmem=False, marble=False):
             raise ValueError('--marble cannot be combined with --qemu/--highmem')
         phys_base, mem_size = 0x840000000, 0x100000000
         gicd, gicr = 0x17100000, 0x17180000
+        if marble_cpus not in (1, 4, 8):
+            raise ValueError('MARBLE ADT CPU count must be 1, 4, or 8')
+    elif marble_cpus != 1:
+        raise ValueError('--marble-cpus requires --marble')
     seed = seed if seed is not None else os.urandom(64)
     phandle = iter(range(1, 1000))
     ph = lambda: ('AAPL,phandle', u32(next(phandle)))
@@ -129,17 +133,29 @@ def build(seed=None, qemu=False, highmem=False, marble=False):
         # with CSR_ALLOW_UNRESTRICTED_FS (vm_unix.c shared region checks).
         node('asmb', [ph(), ('lp-sip0', u64(0x6f)), ('lp-sip1', u32(1))])])
 
-    # SWEET SMP: all eight cores in physical-core order (0-5 Cortex-A55,
-    # 6-7 Cortex-A76), one homogeneous cluster. The kernel defaults to one
-    # and uses cpus=N to select an initial prefix (N <= 8).
+    # SWEET and MARBLE expose their physical cores in MPIDR order as one
+    # homogeneous cluster. MARBLE keeps a one-core default for baseline builds
+    # and requires an explicit four- or eight-node test topology.
     # QEMU retains its original single-CPU tree: its MPIDRs differ from sweet.
+    if marble:
+        cpu_table = [
+            (0x000, 1804800000), (0x100, 1804800000),
+            (0x200, 1804800000), (0x300, 1804800000),
+            (0x400, 2496000000), (0x500, 2496000000),
+            (0x600, 2496000000), (0x700, 2918400000),
+        ][:marble_cpus]
+    elif qemu:
+        cpu_table = [(0, 1804800000)]
+    else:
+        cpu_table = [(core << 8, 2304000000 if core >= 6 else 1804800000)
+                     for core in range(8)]
     cpu_nodes = []
-    for core in range(1 if (qemu or marble) else 8):
+    for core, (mpidr, clock) in enumerate(cpu_table):
         cpu_nodes.append(node(f'cpu{core}', [
             ph(),
             ('device_type', cstr('cpu')),
             ('compatible', cstr('qcom,marble-cpu' if marble else 'qcom,kryo470') + cstr('ARM,v8')),
-            ('reg', u32(core << 8)),  # actual MPIDR Aff1:Aff0, NOT logical ID
+            ('reg', u32(mpidr)),  # actual MPIDR Aff1:Aff0, NOT logical ID
             ('cpu-id', u32(core)),   # descriptive: XNU assigns IDs by DT order
             ('cluster-id', u32(0)),  # descriptive; see ml_parse_cpu_topology
             ('cluster-type', u32(0)),  # homogeneous CLUSTER_TYPE_SMP, not AMP
@@ -149,7 +165,7 @@ def build(seed=None, qemu=False, highmem=False, marble=False):
             ('l3-cache-id', u32(0)),     # shared L3
             ('state', cstr('running' if core == 0 else 'stopped')),
             ('timebase-frequency', u32(timebase)),
-            ('clock-frequency', u32(2304000000 if core >= 6 else 1804800000)),
+            ('clock-frequency', u32(clock)),
             ('bus-frequency', u32(100000000)),
             ('memory-frequency', u32(1866000000)),
             ('peripheral-frequency', u32(timebase)),
@@ -255,10 +271,36 @@ def build(seed=None, qemu=False, highmem=False, marble=False):
     ], [chosen, defaults, cpus, arm_io, fbcon, buttons] + product + ([] if qemu else [ufs]))
 
 
+def cpu_topology(blob):
+    root, _ = adt.parse(blob)
+    cpus = next(child for child in root.children if child.prop('name') == b'cpus\0')
+    return [(struct.unpack('<I', cpu.prop('reg'))[0],
+             struct.unpack('<I', cpu.prop('clock-frequency'))[0])
+            for cpu in cpus.children]
+
+
 if __name__ == '__main__':
-    root = build(qemu='--qemu' in sys.argv, highmem='--highmem' in sys.argv, marble='--marble' in sys.argv)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('output')
+    parser.add_argument('--dump', action='store_true')
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument('--qemu', action='store_true')
+    modes.add_argument('--highmem', action='store_true')
+    modes.add_argument('--marble', action='store_true')
+    parser.add_argument('--marble-cpus', type=int, choices=(1, 4, 8), default=1)
+    args = parser.parse_args()
+    root = build(qemu=args.qemu, highmem=args.highmem, marble=args.marble,
+                 marble_cpus=args.marble_cpus)
     blob = adt.serialize(root)
-    open(sys.argv[1], 'wb').write(blob)
-    if '--dump' in sys.argv:
+    topology = cpu_topology(blob)
+    expected = args.marble_cpus if args.marble else (1 if args.qemu else 8)
+    if len(topology) != expected or [mpidr for mpidr, _ in topology] != [i << 8 for i in range(expected)]:
+        raise SystemExit(f'invalid CPU topology: {topology!r}')
+    with open(args.output, 'wb') as output:
+        output.write(blob)
+    print('CPU topology: ' + ', '.join(
+        f'cpu{i}=MPIDR0x{mpidr:03x}@{clock}Hz'
+        for i, (mpidr, clock) in enumerate(topology)), file=sys.stderr)
+    if args.dump:
         adt.dump(adt.parse(blob)[0])
-    print(f'{sys.argv[1]}: {len(blob)} bytes', file=sys.stderr)
+    print(f'{args.output}: {len(blob)} bytes', file=sys.stderr)
