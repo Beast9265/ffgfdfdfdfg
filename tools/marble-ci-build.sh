@@ -24,7 +24,10 @@ if [[ -n "$RAMDISK" ]]; then
     [[ -s "$RAMDISK" ]] || { echo "ERROR: missing/empty RAMDisk: $RAMDISK"; exit 1; }
     RAMDISK="$(realpath "$RAMDISK")"
 fi
-CMDLINE="debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam"
+# Physically verified MARBLE SMP8/UFS/bitbang-touch baseline.  Keep this
+# explicit: mkadt.py and mkpayload.py intentionally have generic one-CPU
+# defaults which are not suitable for a normal MARBLE phone image.
+CMDLINE="debug=0xc serial=3 cpus=8 keepsyms=1 -enable_kprintf_spam rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1 ufsrw=1 rootrw=1 launchd_unsecure_cache=1 marbleguidiag=1 marblehwdiag=1 marbleusb=0 marbleusblog=0 marbletouch=1 marbletouchinit=1 marbletouchbb=1 sweetfb_noconsole=1 marblesmpsample=1"
 if [[ -n "$CMDLINE_EXTRA" ]]; then CMDLINE+=" $CMDLINE_EXTRA"; fi
 [[ ${#CMDLINE} -lt 608 ]] || { echo "ERROR: cmdline too long"; exit 1; }
 PAYLOAD_ARGS=()
@@ -201,6 +204,7 @@ mkdir -p shim/out/marble-xnu
 python3 tools/mkadt.py \
     shim/out/marble-xnu/marble.adt \
     --marble \
+    --marble-cpus 8 \
     --dump
 
 echo
@@ -231,6 +235,34 @@ python3 tools/mkpayload.py \
     shim/out/marble-xnu/marble.adt \
     shim/out/marble-xnu/marble-xnu.payload \
     --cmdline "$CMDLINE" "${PAYLOAD_ARGS[@]}"
+
+# Audit the bytes that will actually be wrapped into boot.img, not merely the
+# input ADT and shell variable.  This catches accidental one-CPU defaults or a
+# truncated/replaced command line before packaging.
+python3 - shim/out/marble-xnu/marble-xnu.payload "$CMDLINE" <<'PY'
+import pathlib
+import struct
+import sys
+
+sys.path.insert(0, 'tools')
+import adt
+import mkadt
+
+payload = pathlib.Path(sys.argv[1]).read_bytes()
+expected = sys.argv[2]
+if payload[:8] != b'SWEETXNU':
+    raise SystemExit('ERROR: generated payload has invalid magic')
+actual = payload[0x48:0x48 + 608].split(b'\0', 1)[0].decode()
+if actual != expected:
+    raise SystemExit(f'ERROR: generated payload command line mismatch: {actual!r}')
+adt_offset, adt_size = struct.unpack_from('<QQ', payload, 0x20)
+adt_blob = payload[adt_offset:adt_offset + adt_size]
+root, end = adt.parse(adt_blob)
+topology = mkadt.cpu_topology(adt_blob)
+if end != len(adt_blob) or [mpidr for mpidr, _ in topology] != [i << 8 for i in range(8)]:
+    raise SystemExit(f'ERROR: generated payload is not MARBLE SMP8: {topology!r}')
+print('Payload audit: exact command line and eight embedded ADT CPUs verified')
+PY
 
 if [[ -n "$RAMDISK" ]]; then
     python3 tools/marble-ramdisk-audit.py "$KERNEL" \
