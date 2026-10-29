@@ -194,3 +194,39 @@ result remains the safety boundary: no GPU SMMU context-bank page is accessed.
 The next implementation must add a bounded CX GDSC and seven-clock owner with
 rollback, plus AOP ACD and SCM dependencies, before any GMU register read or
 firmware load.
+
+## Opt-in CX ownership stage (0103)
+
+Patch 0103 resolves the previously missing CX owner without changing modes
+0--2.  It is entered only with `marblegpu=3`; the existing screen is additionally
+gated by `marblegpuvisual=1`.  The source contract is pinned Cape DT commit
+`2e649a7f3e762903eedad43d8256b91e28b512d8`, graphics commit
+`51cf4da5f05c82122a22413f0fe310023abb80ee`, and Qualcomm/Xiaomi core-kernel
+blob commit `992742f9cdcc5ba27e07464a5b2c6a8474ffd1f0` (`qcom_aoss.c`,
+`msm_qmp.c`, `qcom-ipcc.c`, and `gdsc-regulator.c`).
+
+The exact downstream first-boot order is MX/CX parent votes, AOP ACD message,
+CX regulator enable, then the seven GMU clocks.  This patch implements only
+through a temporary CX transition:
+
+| Resource | Cape address / value | Implemented mode-3 operation |
+|---|---:|---|
+| AOSS QMP message RAM | `0x0c300000 + 0x400` | Validate `MAIL`/v1 descriptor, negotiate link/channel with 1 s bounds, send `{class: gpu, res: acd, val: 1}`, require mailbox consumption |
+| APSS IPCC | `0x0ed18000`, SEND_ID `+0x0c` | Ring Cape's `(AOP=0, GLINK_QMP=0)` doorbell; no interrupt-controller reconfiguration |
+| CX GDSCR | GPUCC `+0x9108` | Refuse an already-on/HW-controlled domain; clear HW-control/override, program DT `CLK_DIS_WAIT=8`, clear `SW_COLLAPSE` |
+| CX status | GPUCC `+0x953c` | Require `PWR_ON[31]` within two bounded 500 us polls |
+| CX retention | GDSCR `RETAIN_FF[11]` | Set only after verified ON, as required by `qcom,retain-regs` |
+| Rollback | GDSCR `SW_COLLAPSE[0]` | Reassert once, wait the DT's no-status-check disable interval, make a bounded read-only OFF observation, restore the complete original GDSCR, then release CX and MX |
+
+The AOP acknowledgement proves only that AOP consumed the ACD configuration
+message.  CX success requires the independent hardware-control `PWR_ON` bit;
+register write/readback alone is not success.  A rollback timeout is reported
+even though Cape explicitly marks disable as `qcom,no-status-check-on-disable`.
+The original GDSCR and both ARC votes are still restored/released when their
+transactions are known to have completed.  An uncertain RPMh timeout is not
+retried.  A cold reboot is the recovery for an AOP timeout or any physically
+observed hang.
+
+Mode 3 does not map or access a GPU SMMU context bank, does not touch GX, does
+not enable a GMU clock, and does not invoke SCM or load/start GMU firmware.
+Those remain later milestones.

@@ -8,3 +8,4 @@ xnu/patches/0096-marble-spi-ipi-hotpath-fix.patch whitespace=-blank-at-eol,-blan
 xnu/patches/0097-marble-spi-ipi-canonical-affinity.patch whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
 xnu/patches/0101-marble-a725-rpmh-power.patch whitespace=-blank-at-eol,-space-before-tab
 xnu/patches/0102-marble-a725-rpmh-screen.patch whitespace=-blank-at-eol,-space-before-tab
+xnu/patches/0103-marble-a725-cx-gdsc.patch whitespace=-blank-at-eol,-space-before-tab

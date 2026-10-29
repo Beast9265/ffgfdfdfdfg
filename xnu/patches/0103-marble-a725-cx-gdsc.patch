@@ -1,0 +1,418 @@
+--- a/bsd/dev/marble_a725_probe.c
++++ b/bsd/dev/marble_a725_probe.c
+@@ -21,6 +21,7 @@
+ 
+ #define A725_BUILD_ID     "a725-rpmh-arc-v1"
+ #define A725_VISUAL_ID    "a725-rpmh-screen-v1"
++#define A725_CX_ID        "a725-cx-gdsc-v1"
+ 
+ #define A725_GPU_PA       0x03d00000u
+ #define A725_GPU_SIZE     0x00040000u
+@@ -33,17 +34,47 @@
+ #define A725_GPUCC_SIZE   0x0000a000u
+ #define A725_SMMU_PA      0x03da0000u
+ #define A725_SMMU_SIZE    0x00040000u
++#define A725_AOSS_PA      0x0c300000u
++#define A725_AOSS_SIZE    0x00000400u
++#define A725_IPCC_PA      0x0ed18000u
++#define A725_IPCC_SIZE    0x00001000u
+ 
+ /* waipio/cape GPUCC GDSCs; PWR_ON is the architectural Qualcomm bit 31. */
+ #define A725_GPUCC_GX_GDSCR 0x905cu
+ #define A725_GPUCC_CX_GDSCR 0x9108u
++#define A725_GPUCC_CX_HWCTRL 0x953cu
+ #define A725_GDSC_PWR_ON     (1u << 31)
++#define A725_GDSC_RETAIN_FF  (1u << 11)
++#define A725_GDSC_HW_CONTROL (1u << 1)
++#define A725_GDSC_SW_OVERRIDE (1u << 2)
++#define A725_GDSC_SW_COLLAPSE (1u << 0)
++#define A725_GDSC_CLK_DIS_WAIT_MASK (0xfu << 12)
++#define A725_GDSC_CLK_DIS_WAIT_CAPE (8u << 12)
++
++/* Cape AOSS QMP and APSS IPCC definitions from cape.dtsi/qcom_aoss.c. */
++#define A725_QMP_MAGIC        0x4d41494cu
++#define A725_QMP_VERSION      1u
++#define A725_QMP_STATE_UP     0x0000ffffu
++#define A725_QMP_STATE_DOWN   0xffff0000u
++#define A725_QMP_U_LINK       0x0cu
++#define A725_QMP_U_LINK_ACK   0x10u
++#define A725_QMP_U_CH         0x14u
++#define A725_QMP_U_CH_ACK     0x18u
++#define A725_QMP_M_LINK       0x24u
++#define A725_QMP_M_LINK_ACK   0x28u
++#define A725_QMP_M_CH         0x2cu
++#define A725_QMP_M_CH_ACK     0x30u
++#define A725_QMP_M_SIZE       0x34u
++#define A725_QMP_M_OFFSET     0x38u
++#define A725_IPCC_SEND_ID     0x0cu
+ 
+ struct marble_a725_resources {
+ 	vm_offset_t gpu;
+ 	vm_offset_t gmu;
+ 	vm_offset_t smmu;
+ 	vm_offset_t gpucc;
++	vm_offset_t aoss;
++	vm_offset_t ipcc;
+ };
+ 
+ enum a725_rpmh_result {
+@@ -58,6 +89,11 @@
+ 	int mx_vote_error, cx_vote_error, cx_release_error, mx_release_error;
+ 	uint32_t mx_hlvl, cx_hlvl;
+ 	uint16_t mx_vlvl, cx_vlvl;
++	enum a725_rpmh_result aop_acd, cx_enable, cx_rollback;
++	int aop_error, cx_enable_error, cx_rollback_error;
++	uint32_t cx_gdscr_before, cx_gdscr_on, cx_hwctrl_on;
++	uint32_t cx_gdscr_after, cx_hwctrl_after;
++	boolean_t cx_touched;
+ };
+ 
+ struct a725_firmware_spec {
+@@ -190,6 +226,26 @@
+ 	return *(volatile uint32_t *)(base + offset);
+ }
+ 
++static inline void
++a725_write32(vm_offset_t base, uint32_t offset, uint32_t value)
++{
++	*(volatile uint32_t *)(base + offset) = value;
++	__asm__ volatile("dsb sy" ::: "memory");
++}
++
++static boolean_t
++a725_poll32(vm_offset_t base, uint32_t offset, uint32_t mask,
++    uint32_t expected, unsigned timeout_us)
++{
++	for (unsigned elapsed = 0; elapsed < timeout_us; elapsed++) {
++		if ((a725_read32(base, offset) & mask) == expected) {
++			return TRUE;
++		}
++		delay(1);
++	}
++	return (a725_read32(base, offset) & mask) == expected;
++}
++
+ static boolean_t
+ a725_valid_read(uint32_t value)
+ {
+@@ -254,6 +310,163 @@
+ 	return TRUE;
+ }
+ 
++static void
++a725_qmp_kick(const struct marble_a725_resources *r)
++{
++	/* Cape assigns both IPCC_CLIENT_AOP and GLINK_QMP signal ID zero. */
++	a725_write32(r->ipcc, A725_IPCC_SEND_ID, 0);
++}
++
++static void
++a725_qmp_close(const struct marble_a725_resources *r)
++{
++	a725_write32(r->aoss, A725_QMP_M_CH, A725_QMP_STATE_DOWN);
++	a725_write32(r->aoss, A725_QMP_M_LINK, A725_QMP_STATE_DOWN);
++	a725_qmp_kick(r);
++}
++
++/*
++ * Send the exact Gen7 KGSL ACD request over Cape's AOSS QMP mailbox.  The
++ * Linux driver uses one-second bounds for each link/channel/message ACK; poll
++ * the same shared-memory state so this early diagnostic needs no IRQ handler.
++ */
++static int
++a725_aop_acd_enable(const struct marble_a725_resources *r)
++{
++	static const uint32_t message[] = {
++		0x616c637bu, 0x203a7373u, 0x2c757067u, 0x73657220u,
++		0x6361203au, 0x76202c64u, 0x203a6c61u, 0x00007d31u,
++	}; /* "{class: gpu, res: acd, val: 1}" plus NUL, 4-byte aligned */
++	uint32_t offset, size;
++
++	if (a725_read32(r->aoss, 0) != A725_QMP_MAGIC ||
++	    a725_read32(r->aoss, 4) != A725_QMP_VERSION) {
++		return ENXIO;
++	}
++	offset = a725_read32(r->aoss, A725_QMP_M_OFFSET);
++	size = a725_read32(r->aoss, A725_QMP_M_SIZE);
++	if (offset > A725_AOSS_SIZE || size < sizeof(message) + 4 ||
++	    size > A725_AOSS_SIZE - offset) {
++		return EINVAL;
++	}
++
++	/* Acknowledge AOP's link, then bring up the AP link and channel. */
++	a725_write32(r->aoss, A725_QMP_U_LINK_ACK,
++	    a725_read32(r->aoss, A725_QMP_U_LINK));
++	a725_write32(r->aoss, A725_QMP_M_LINK, A725_QMP_STATE_UP);
++	a725_qmp_kick(r);
++	if (!a725_poll32(r->aoss, A725_QMP_M_LINK_ACK, 0xffffffffu,
++	    A725_QMP_STATE_UP, 1000000)) {
++		a725_qmp_close(r);
++		return ETIMEDOUT;
++	}
++
++	a725_write32(r->aoss, A725_QMP_M_CH, A725_QMP_STATE_UP);
++	a725_qmp_kick(r);
++	if (!a725_poll32(r->aoss, A725_QMP_U_CH, 0xffffffffu,
++	    A725_QMP_STATE_UP, 1000000)) {
++		a725_qmp_close(r);
++		return ETIMEDOUT;
++	}
++	a725_write32(r->aoss, A725_QMP_U_CH_ACK, A725_QMP_STATE_UP);
++	a725_qmp_kick(r);
++	if (!a725_poll32(r->aoss, A725_QMP_M_CH_ACK, 0xffffffffu,
++	    A725_QMP_STATE_UP, 1000000)) {
++		a725_qmp_close(r);
++		return ETIMEDOUT;
++	}
++
++	for (unsigned i = 0; i < sizeof(message) / sizeof(message[0]); i++) {
++		a725_write32(r->aoss, offset + 4 + i * 4, message[i]);
++	}
++	a725_write32(r->aoss, offset, sizeof(message));
++	a725_qmp_kick(r);
++	if (!a725_poll32(r->aoss, offset, 0xffffffffu, 0, 1000000)) {
++		a725_write32(r->aoss, offset, 0);
++		a725_qmp_close(r);
++		return ETIMEDOUT;
++	}
++	a725_qmp_close(r);
++	return 0;
++}
++
++/*
++ * Mirror Cape's qcom,gdsc regulator contract: reject HW-control ownership,
++ * program only the DT-specified CLK_DIS_WAIT field, clear SW_COLLAPSE, and
++ * poll the separate hw-ctrl status register for at most 2 x 500 us.  Restore
++ * the original collapsed register before releasing CX/MX votes.
++ */
++static int
++a725_cx_enable_test(const struct marble_a725_resources *r,
++    struct a725_power_results *result)
++{
++	uint32_t value;
++
++	result->cx_gdscr_before = a725_read32(r->gpucc, A725_GPUCC_CX_GDSCR);
++	if (!a725_valid_read(result->cx_gdscr_before) ||
++	    !(result->cx_gdscr_before & A725_GDSC_SW_COLLAPSE) ||
++	    (result->cx_gdscr_before & A725_GDSC_HW_CONTROL)) {
++		return EBUSY;
++	}
++	value = result->cx_gdscr_before;
++	value &= ~(A725_GDSC_HW_CONTROL | A725_GDSC_SW_OVERRIDE |
++	    A725_GDSC_CLK_DIS_WAIT_MASK);
++	value |= A725_GDSC_CLK_DIS_WAIT_CAPE;
++	result->cx_touched = TRUE;
++	a725_write32(r->gpucc, A725_GPUCC_CX_GDSCR, value);
++	if ((a725_read32(r->gpucc, A725_GPUCC_CX_GDSCR) &
++	    (A725_GDSC_HW_CONTROL | A725_GDSC_SW_OVERRIDE |
++	    A725_GDSC_CLK_DIS_WAIT_MASK)) != (value &
++	    (A725_GDSC_HW_CONTROL | A725_GDSC_SW_OVERRIDE |
++	    A725_GDSC_CLK_DIS_WAIT_MASK))) {
++		return EIO;
++	}
++
++	value &= ~A725_GDSC_SW_COLLAPSE;
++	a725_write32(r->gpucc, A725_GPUCC_CX_GDSCR, value);
++	(void)a725_read32(r->gpucc, A725_GPUCC_CX_GDSCR);
++	delay(1); /* downstream requires eight XO cycles before status polling */
++	if (!a725_poll32(r->gpucc, A725_GPUCC_CX_HWCTRL,
++	    A725_GDSC_PWR_ON, A725_GDSC_PWR_ON, 500) &&
++	    !a725_poll32(r->gpucc, A725_GPUCC_CX_HWCTRL,
++	    A725_GDSC_PWR_ON, A725_GDSC_PWR_ON, 500)) {
++		result->cx_gdscr_on = a725_read32(r->gpucc, A725_GPUCC_CX_GDSCR);
++		result->cx_hwctrl_on = a725_read32(r->gpucc, A725_GPUCC_CX_HWCTRL);
++		return ETIMEDOUT;
++	}
++	value = a725_read32(r->gpucc, A725_GPUCC_CX_GDSCR);
++	if (!(value & A725_GDSC_RETAIN_FF)) {
++		a725_write32(r->gpucc, A725_GPUCC_CX_GDSCR,
++		    value | A725_GDSC_RETAIN_FF);
++	}
++	result->cx_gdscr_on = a725_read32(r->gpucc, A725_GPUCC_CX_GDSCR);
++	result->cx_hwctrl_on = a725_read32(r->gpucc, A725_GPUCC_CX_HWCTRL);
++	return 0;
++}
++
++static void
++a725_cx_rollback(const struct marble_a725_resources *r,
++    struct a725_power_results *result)
++{
++	uint32_t value = a725_read32(r->gpucc, A725_GPUCC_CX_GDSCR);
++	boolean_t off;
++	a725_write32(r->gpucc, A725_GPUCC_CX_GDSCR,
++	    value | A725_GDSC_SW_COLLAPSE);
++	(void)a725_read32(r->gpucc, A725_GPUCC_CX_GDSCR);
++	delay(101); /* Cape explicitly disables status checking on collapse. */
++	/* Read-only evidence beyond the downstream minimum; never retry collapse. */
++	off = a725_poll32(r->gpucc, A725_GPUCC_CX_HWCTRL,
++	    A725_GDSC_PWR_ON, 0, 500);
++	a725_write32(r->gpucc, A725_GPUCC_CX_GDSCR, result->cx_gdscr_before);
++	result->cx_gdscr_after = a725_read32(r->gpucc, A725_GPUCC_CX_GDSCR);
++	result->cx_hwctrl_after = a725_read32(r->gpucc, A725_GPUCC_CX_HWCTRL);
++	result->cx_rollback_error = result->cx_gdscr_after !=
++	    result->cx_gdscr_before ? EIO : off ? 0 : ETIMEDOUT;
++	result->cx_rollback = result->cx_rollback_error == ETIMEDOUT ?
++	    A725_TIMEOUT : result->cx_rollback_error ? A725_FAILED :
++	    A725_ACKNOWLEDGED;
++}
++
+ static const char *
+ a725_result_name(enum a725_rpmh_result result)
+ {
+@@ -265,6 +478,89 @@
+ 	}
+ }
+ 
++static boolean_t
++a725_cx_stage_test(const struct marble_a725_resources *r,
++    struct a725_power_results *result)
++{
++	uint32_t release_hlvl = 0;
++	uint16_t release_vlvl = 0;
++	boolean_t cx_voted = FALSE;
++
++	printf("MARBLE GPU: stage=CX begin build=%s\n", A725_CX_ID);
++	result->mx_vote = A725_FAILED;
++	result->mx_vote_error = marble_rpmh_arc_vote("mx.lvl", TRUE,
++	    &result->mx_hlvl, &result->mx_vlvl);
++	result->mx_vote = result->mx_vote_error == ETIMEDOUT ? A725_TIMEOUT :
++	    result->mx_vote_error ? A725_FAILED : A725_ACKNOWLEDGED;
++	if (result->mx_vote_error) {
++		goto out;
++	}
++	result->cx_vote = A725_FAILED;
++	result->cx_vote_error = marble_rpmh_arc_vote("cx.lvl", TRUE,
++	    &result->cx_hlvl, &result->cx_vlvl);
++	result->cx_vote = result->cx_vote_error == ETIMEDOUT ? A725_TIMEOUT :
++	    result->cx_vote_error ? A725_FAILED : A725_ACKNOWLEDGED;
++	if (result->cx_vote_error) {
++		goto out;
++	}
++	cx_voted = TRUE;
++
++	result->aop_acd = A725_FAILED;
++	result->aop_error = a725_aop_acd_enable(r);
++	result->aop_acd = result->aop_error == ETIMEDOUT ? A725_TIMEOUT :
++	    result->aop_error ? A725_FAILED : A725_ACKNOWLEDGED;
++	printf("MARBLE GPU: AOP ACD result=%s errno=%d\n",
++	    a725_result_name(result->aop_acd), result->aop_error);
++	if (result->aop_error) {
++		goto out;
++	}
++
++	result->cx_enable = A725_FAILED;
++	result->cx_enable_error = a725_cx_enable_test(r, result);
++	result->cx_enable = result->cx_enable_error == ETIMEDOUT ? A725_TIMEOUT :
++	    result->cx_enable_error ? A725_FAILED : A725_ACKNOWLEDGED;
++	printf("MARBLE GPU: CX enable result=%s errno=%d GDSCR=%08x HWCTRL=%08x on=%u\n",
++	    a725_result_name(result->cx_enable), result->cx_enable_error,
++	    result->cx_gdscr_on, result->cx_hwctrl_on,
++	    !!(result->cx_hwctrl_on & A725_GDSC_PWR_ON));
++	if (result->cx_touched) {
++		a725_cx_rollback(r, result);
++		printf("MARBLE GPU: CX rollback result=%s GDSCR=%08x HWCTRL=%08x\n",
++		    a725_result_name(result->cx_rollback), result->cx_gdscr_after,
++		    result->cx_hwctrl_after);
++	}
++
++out:
++	if (cx_voted) {
++		result->cx_release = A725_FAILED;
++		result->cx_release_error = marble_rpmh_arc_vote("cx.lvl", FALSE,
++		    &release_hlvl, &release_vlvl);
++		result->cx_release = result->cx_release_error == ETIMEDOUT ?
++		    A725_TIMEOUT : result->cx_release_error ? A725_FAILED :
++		    A725_ACKNOWLEDGED;
++	}
++	if (result->mx_vote == A725_ACKNOWLEDGED) {
++		result->mx_release = A725_FAILED;
++		result->mx_release_error = marble_rpmh_arc_vote("mx.lvl", FALSE,
++		    &release_hlvl, &release_vlvl);
++		result->mx_release = result->mx_release_error == ETIMEDOUT ?
++		    A725_TIMEOUT : result->mx_release_error ? A725_FAILED :
++		    A725_ACKNOWLEDGED;
++	}
++	printf("MARBLE GPU: stage=CX result=%s votes_released=%u\n",
++	    result->cx_enable == A725_ACKNOWLEDGED &&
++	    result->cx_rollback == A725_ACKNOWLEDGED &&
++	    result->cx_release == A725_ACKNOWLEDGED &&
++	    result->mx_release == A725_ACKNOWLEDGED ?
++	    "CX_ON_VERIFIED_AND_ROLLED_BACK" : "FAILED_OR_INCOMPLETE",
++	    result->cx_release == A725_ACKNOWLEDGED &&
++	    result->mx_release == A725_ACKNOWLEDGED);
++	return result->cx_enable == A725_ACKNOWLEDGED &&
++	    result->cx_rollback == A725_ACKNOWLEDGED &&
++	    result->cx_release == A725_ACKNOWLEDGED &&
++	    result->mx_release == A725_ACKNOWLEDGED;
++}
++
+ /*
+  * Use the already initialized 2x sweet-fbcon console.  This deliberately
+  * creates no framebuffer mapping or display state of its own.  All release
+@@ -276,7 +572,8 @@
+ {
+ 	printf("\n\n============================================================\n");
+ 	printf("          MARBLE ADRENO 725 RPMh DIAGNOSTIC\n");
+-	printf("          build: %s\n", A725_VISUAL_ID);
++	printf("          build: %s\n",
++	    r->aop_acd != A725_NOT_ATTEMPTED ? A725_CX_ID : A725_VISUAL_ID);
+ 	printf("------------------------------------------------------------\n");
+ 	printf(" MX VOTE     : %-13s error=%d HLVL=%u VLVL=%u\n",
+ 	    a725_result_name(r->mx_vote), r->mx_vote_error, r->mx_hlvl, r->mx_vlvl);
+@@ -286,9 +583,19 @@
+ 	    a725_result_name(r->cx_release), r->cx_release_error);
+ 	printf(" MX RELEASE  : %-13s error=%d\n",
+ 	    a725_result_name(r->mx_release), r->mx_release_error);
++	if (r->aop_acd != A725_NOT_ATTEMPTED ||
++	    r->cx_enable != A725_NOT_ATTEMPTED) {
++		printf(" AOP ACD     : %-13s error=%d\n",
++		    a725_result_name(r->aop_acd), r->aop_error);
++		printf(" CX ENABLE   : %-13s error=%d HWCTRL=%08x ON=%u\n",
++		    a725_result_name(r->cx_enable), r->cx_enable_error,
++		    r->cx_hwctrl_on, !!(r->cx_hwctrl_on & A725_GDSC_PWR_ON));
++		printf(" CX ROLLBACK : %-13s error=%d HWCTRL=%08x\n",
++		    a725_result_name(r->cx_rollback), r->cx_rollback_error,
++		    r->cx_hwctrl_after);
++	}
+ 	printf("------------------------------------------------------------\n");
+-	printf(" ACK means RPMh command acknowledgement only.\n");
+-	printf(" GPU POWER / GMU EXECUTION: NOT ATTEMPTED\n");
++	printf(" ACK is per-stage only; GX / GMU / GPU: NOT ATTEMPTED\n");
+ 	printf(" Continuing normal iOS startup in about 10 seconds.\n");
+ 	printf("============================================================\n");
+ 	delay(10000000);
+@@ -336,10 +643,10 @@
+ 		printf("MARBLE A725: stop=GPUCC_MAP\n");
+ 		return;
+ 	}
+-	if (enabled >= 2) {
++	if (enabled == 2) {
+ 		struct a725_power_results result = { 0 };
+ 		boolean_t complete = a725_power_prerequisite_test(&r, &result);
+-		if (enabled == 2 && visual == 1) {
++		if (visual == 1) {
+ 			a725_show_power_results(&result);
+ 		}
+ 		if (complete) {
+@@ -347,6 +654,21 @@
+ 		}
+ 		return;
+ 	}
++	if (enabled == 3) {
++		struct a725_power_results result = { 0 };
++		r.aoss = ml_io_map(A725_AOSS_PA, A725_AOSS_SIZE);
++		r.ipcc = ml_io_map(A725_IPCC_PA, A725_IPCC_SIZE);
++		if (!r.aoss || !r.ipcc) {
++			printf("MARBLE A725: stage=3 stop=AOP_MAP_FAILED\n");
++			return;
++		}
++		(void)a725_cx_stage_test(&r, &result);
++		if (visual == 1) {
++			a725_show_power_results(&result);
++		}
++		printf("MARBLE A725: stage=3 stop=CX_TEST_COMPLETE (GX/GMU/GPU not attempted)\n");
++		return;
++	}
+ 	uint32_t cx = a725_read32(r.gpucc, A725_GPUCC_CX_GDSCR);
+ 	uint32_t gx = a725_read32(r.gpucc, A725_GPUCC_GX_GDSCR);
+ 	printf("MARBLE A725: stage=POWER CX_GDSCR=%08x on=%u GX_GDSCR=%08x on=%u\n",
