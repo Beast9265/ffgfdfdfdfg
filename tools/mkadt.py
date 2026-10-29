@@ -73,7 +73,10 @@ def node(name, props=(), children=()):
     return n
 
 
-MARBLE_GPU_FIRMWARE = ('gmu_gen70000.bin', 'a730_sqe.fw', 'a730_zap.mdt')
+MARBLE_GPU_FIRMWARE = (
+    'gmu_gen70000.bin', 'a730_sqe.fw', 'a730_zap.mdt',
+    'a730_zap.b00', 'a730_zap.b01', 'a730_zap.b02',
+)
 
 
 def load_marble_gpu_firmware(directory):
@@ -81,7 +84,9 @@ def load_marble_gpu_firmware(directory):
 
     The generated ADT is an ephemeral boot artifact.  Firmware is never copied
     into the repository, and every blob carries its SHA-256 for kernel-side
-    identity verification before a future loader may consume it.
+    identity verification before a future loader may consume it.  The complete
+    split ZAP payload is transported; the current kernel preflight consumes
+    only the MDT and leaves all secure loading for a later stage.
     """
     if directory is None:
         return None
@@ -321,7 +326,7 @@ if __name__ == '__main__':
     modes.add_argument('--marble', action='store_true')
     parser.add_argument('--marble-cpus', type=int, choices=(1, 4, 8), default=1)
     parser.add_argument('--marble-gpu-firmware', metavar='DIR',
-                        help='embed the three stock A725 firmware files from DIR')
+                        help='embed stock A725 firmware and the complete split ZAP payload from DIR')
     args = parser.parse_args()
     root = build(qemu=args.qemu, highmem=args.highmem, marble=args.marble,
                  marble_cpus=args.marble_cpus,

@@ -83,9 +83,15 @@ SQE must be an aligned nonempty dword stream with a valid version word; zap MDT
 must be little-endian ELF32 with bounded program headers.
 
 `tools/marble-a725-firmware.py` recursively inventories an extracted stock
-firmware directory and performs the same structural checks.  Supplying
-`--marble-gpu-firmware DIR` to `mkadt.py` embeds the blobs and hashes only in
-the generated ADT.  Proprietary blobs remain outside git.
+firmware directory and performs the same structural checks.  It also requires
+every nonempty ZAP program segment (`a730_zap.bXX`), checks each size against
+its ELF program header, and verifies that the MDT is exactly the standard
+`b00` metadata plus embedded Qualcomm hash segments.  Supplying
+`--marble-gpu-firmware DIR` to `mkadt.py` embeds the three primary blobs, all
+three split ZAP segments, and a SHA-256 for each only in the generated ADT.
+Proprietary blobs remain outside git.  The current kernel preflight validates
+the MDT but does not attempt secure loading or claim that the device
+authenticated the transported segments.
 
 After firmware validation, patch 0101 lets modes 2/3 perform a bounded RPMh
 ARC transport test, then releases its votes and stops before GPUCC writes.

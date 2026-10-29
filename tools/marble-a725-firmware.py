@@ -3,8 +3,9 @@
 
 This tool never modifies its input and never copies proprietary firmware into
 the repository.  Point it at an extracted Android vendor firmware directory;
-it recursively locates the three filenames required by the stock Gen7.4 KGSL
-configuration and prints identities suitable for a bring-up handoff.
+it recursively locates the stock Gen7.4 KGSL firmware and the complete split
+PIL payload, validates their relationship, and prints identities suitable for
+a bring-up handoff.
 """
 import argparse
 import hashlib
@@ -13,7 +14,8 @@ import pathlib
 import struct
 
 
-NAMES = ('gmu_gen70000.bin', 'a730_sqe.fw', 'a730_zap.mdt')
+PRIMARY_NAMES = ('gmu_gen70000.bin', 'a730_sqe.fw', 'a730_zap.mdt')
+ZAP_SEGMENT_PREFIX = 'a730_zap.b'
 GMU_RANGES = (
     (0x00000000, 0x00004000, 'ITCM'),
     (0x00004000, 0x01000000, 'CACHE'),
@@ -69,14 +71,63 @@ def validate_sqe(image):
     return dict(format='a7xx-sqe-dwords', version=hex(version), dwords=len(image) // 4)
 
 
-def validate_mdt(image):
+def parse_mdt(image):
     if len(image) < 0x34 or image[:4] != b'\x7fELF' or image[4] != 1 or image[5] != 1:
         raise ValueError('zap MDT is not a little-endian ELF32 metadata image')
+    machine, = struct.unpack_from('<H', image, 0x12)
+    if machine != 164:
+        raise ValueError(f'zap MDT has unexpected ELF machine {machine}')
     phoff, = struct.unpack_from('<I', image, 0x1c)
     phentsize, phnum = struct.unpack_from('<HH', image, 0x2a)
     if phentsize < 0x20 or phoff + phentsize * phnum > len(image):
         raise ValueError('zap MDT program headers exceed the metadata image')
-    return dict(format='elf32-mdt', program_headers=phnum)
+    headers = []
+    for index in range(phnum):
+        fields = struct.unpack_from('<8I', image, phoff + index * phentsize)
+        headers.append(dict(index=index, type=fields[0], offset=fields[1],
+                            filesz=fields[4], memsz=fields[5], flags=fields[6]))
+    return headers
+
+
+def validate_mdt(image):
+    headers = parse_mdt(image)
+    return dict(format='elf32-mdt', program_headers=len(headers))
+
+
+def validate_zap_segments(root, mdt_path, mdt):
+    """Require every nonempty PIL program segment and verify MDT composition.
+
+    pil-splitter emits one bXX file for each nonempty program header.  The MDT
+    is the b00 ELF metadata followed by Qualcomm hash segments (PIL type 2).
+    This check ensures future secure loading can reconstruct the supplied MBN;
+    it does not claim that device authentication has occurred.
+    """
+    headers = parse_mdt(mdt)
+    segments = {}
+    embedded = bytearray()
+    for phdr in headers:
+        if not phdr['filesz']:
+            continue
+        name = f"{ZAP_SEGMENT_PREFIX}{phdr['index']:02d}"
+        path = unique_file(root, name)
+        image = path.read_bytes()
+        if len(image) != phdr['filesz']:
+            raise ValueError(
+                f"{name}: size {len(image)} does not match program header "
+                f"{phdr['filesz']}")
+        pil_type = (phdr['flags'] >> 24) & 7
+        if phdr['index'] == 0 or pil_type == 2:
+            embedded += image
+        segments[name] = {
+            'path': str(path.resolve()),
+            'size': len(image),
+            'sha256': hashlib.sha256(image).hexdigest(),
+            'program_header': phdr['index'],
+            'pil_type': pil_type,
+        }
+    if bytes(embedded) != mdt:
+        raise ValueError(f'{mdt_path.name}: content does not match b00/hash segments')
+    return segments
 
 
 VALIDATORS = {
@@ -87,10 +138,14 @@ VALIDATORS = {
 
 
 def inventory(root):
-    result = {'root': str(root.resolve()), 'firmware': {}}
-    for name in NAMES:
+    result = {'root': str(root.resolve()), 'firmware': {}, 'zap_segments': {}}
+    images = {}
+    paths = {}
+    for name in PRIMARY_NAMES:
         path = unique_file(root, name)
         image = path.read_bytes()
+        paths[name] = path
+        images[name] = image
         details = VALIDATORS[name](image)
         result['firmware'][name] = {
             'path': str(path.resolve()),
@@ -98,6 +153,8 @@ def inventory(root):
             'sha256': hashlib.sha256(image).hexdigest(),
             **details,
         }
+    result['zap_segments'] = validate_zap_segments(
+        root, paths['a730_zap.mdt'], images['a730_zap.mdt'])
     return result
 
 
@@ -115,7 +172,9 @@ def main():
     else:
         for name, info in result['firmware'].items():
             print(f"{name}: {info['size']} bytes SHA256={info['sha256']} path={info['path']}")
-        print('PASS: exact A725 firmware set found and structurally validated')
+        for name, info in result['zap_segments'].items():
+            print(f"{name}: {info['size']} bytes SHA256={info['sha256']} path={info['path']}")
+        print('PASS: complete A725 firmware set found and structurally validated')
 
 
 if __name__ == '__main__':
