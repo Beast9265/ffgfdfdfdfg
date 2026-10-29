@@ -230,3 +230,48 @@ observed hang.
 Mode 3 does not map or access a GPU SMMU context bank, does not touch GX, does
 not enable a GMU clock, and does not invoke SCM or load/start GMU firmware.
 Those remain later milestones.
+
+## GMU clock ownership stage (0104)
+
+Patch 0104 adds only `marblegpu=4`.  Modes 0--3 retain their existing paths.
+The clock definitions are from core-kernel commit
+`992742f9cdcc5ba27e07464a5b2c6a8474ffd1f0`, specifically
+`drivers/clk/qcom/gpucc-waipio.c`, `gcc-waipio.c`, `clk-branch.c`,
+`clk-rcg2.c`, and `drivers/soc/qcom/qcom_aoss.c`; the consumer order is Cape
+DT commit `2e649a7f...` `cape-gpu.dtsi` and KGSL commit `51cf4da5...`
+`adreno_gen7_gmu.c`.
+
+| DT clock name | Controller / CBCR | Downstream operation | Mode-4 ownership |
+|---|---:|---|---|
+| `gmu_clk` | GPUCC `0x03d90000 + 0x913c` | `BRANCH_HALT`, `clk_branch2_aon_ops`; parent GMU RCG `+0x9318` | Must already be enabled; AON ops have no disable callback |
+| `cxo_clk` | GPUCC `+0x9144` | `BRANCH_HALT`, reversible `clk_branch2_ops`; XO RCG `+0x9010` | Enable if off; restore bit 0 in cleanup |
+| `axi_clk` | GCC `0x00100000 + 0x81154` | `BRANCH_HALT_SKIP`, `clk_branch2_aon_ops` | Must already be enabled; status polling is explicitly unsupported |
+| `memnoc_clk` | GCC `+0x81010` | `BRANCH_HALT_VOTED`, reversible `clk_branch2_ops` | Enable if off; restore bit 0 in cleanup |
+| `ahb_clk` | GPUCC `+0x911c` | `BRANCH_HALT_DELAY`, reversible `clk_branch2_ops` | Enable if off; use downstream 10 us settle and restore bit 0 |
+| `hub_clk` | GPUCC `+0x9148` | `BRANCH_HALT`, `clk_branch2_aon_ops`; parent HUB RCG `+0x93ec` | Must already be enabled; AON ops have no disable callback |
+| `apb_pclk` | AOSS QMP QDSS clock | `{class: clock, res: qdss, val: 1/0}` | Deliberately skipped: KGSL removes it unless `CONFIG_QCOM_KGSL_QDSS_STM` |
+
+The DT contains seven entries, but the matching KGSL driver normally enables
+six: `gen7_gmu_clk_probe()` nulls `apb_pclk` when QDSS-STM is not built.  Mode
+4 therefore reports it as `SKIPPED (QDSS-STM not enabled)` rather than issuing
+an unnecessary AOP vote.
+
+The diagnostic validates the existing source roots instead of guessing an
+RCG programming/refcount state.  It accepts only Cape's published GMU table
+(19.2/200/500 MHz), HUB table (150/240/300 MHz), and XO 19.2 MHz encodings,
+with no pending `CMD_UPDATE`.  AON branches must be inherited ON because their
+registered operations intentionally provide no disable function.  If any is
+off, mode 4 reports `AON_NOT_INHERITED` before writing it.  Reversible branches
+record whether bit 0 was originally owned, use the Qualcomm 200 us branch
+bound (or its explicit 10 us delay/skip rule), and restore only bit 0 in exact
+reverse order.  Inherited branches are never disabled.
+
+ACD has no per-power-cycle release in the Gen7 downstream sequence.  KGSL
+sends a new ACD value only when the configured ACD setting changes and power
+cycles the GPU around that change.  Consequently mode 4 retains mode 3's
+source-backed `val: 1` request and does not invent a rollback message.
+
+After clock cleanup, mode 4 reuses the physically verified CX rollback and
+RPMh reverse release.  The visual screen is gated by `marblegpuvisual=1` and
+delays only after all cleanup.  No GMU register, CM3 firmware, GX, GPU core,
+SCM, interconnect, or SMMU context-bank access is performed.

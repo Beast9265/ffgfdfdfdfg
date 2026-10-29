@@ -1,0 +1,409 @@
+--- a/bsd/dev/marble_a725_probe.c
++++ b/bsd/dev/marble_a725_probe.c
+@@ -22,6 +22,7 @@
+ #define A725_BUILD_ID     "a725-rpmh-arc-v1"
+ #define A725_VISUAL_ID    "a725-rpmh-screen-v1"
+ #define A725_CX_ID        "a725-cx-gdsc-v1"
++#define A725_CLOCK_ID     "a725-gmu-clocks-v1"
+ 
+ #define A725_GPU_PA       0x03d00000u
+ #define A725_GPU_SIZE     0x00040000u
+@@ -38,6 +39,8 @@
+ #define A725_AOSS_SIZE    0x00000400u
+ #define A725_IPCC_PA      0x0ed18000u
+ #define A725_IPCC_SIZE    0x00001000u
++#define A725_GCC_PA       0x00100000u
++#define A725_GCC_SIZE     0x001f4200u
+ 
+ /* waipio/cape GPUCC GDSCs; PWR_ON is the architectural Qualcomm bit 31. */
+ #define A725_GPUCC_GX_GDSCR 0x905cu
+@@ -67,6 +70,10 @@
+ #define A725_QMP_M_SIZE       0x34u
+ #define A725_QMP_M_OFFSET     0x38u
+ #define A725_IPCC_SEND_ID     0x0cu
++#define A725_CLOCK_COUNT      7u
++#define A725_BRANCH_CLK_OFF   (1u << 31)
++#define A725_BRANCH_NOC_MASK  (7u << 28)
++#define A725_BRANCH_NOC_ON    (2u << 28)
+ 
+ struct marble_a725_resources {
+ 	vm_offset_t gpu;
+@@ -75,6 +82,7 @@
+ 	vm_offset_t gpucc;
+ 	vm_offset_t aoss;
+ 	vm_offset_t ipcc;
++	vm_offset_t gcc;
+ };
+ 
+ enum a725_rpmh_result {
+@@ -94,6 +102,43 @@
+ 	uint32_t cx_gdscr_before, cx_gdscr_on, cx_hwctrl_on;
+ 	uint32_t cx_gdscr_after, cx_hwctrl_after;
+ 	boolean_t cx_touched;
++	enum a725_rpmh_result clocks[A725_CLOCK_COUNT];
++	uint32_t clock_before[A725_CLOCK_COUNT];
++	uint32_t clock_after[A725_CLOCK_COUNT];
++	boolean_t clock_touched[A725_CLOCK_COUNT];
++	enum a725_rpmh_result clock_cleanup;
++	int clock_error, clock_cleanup_error;
++};
++
++enum a725_clock_owner {
++	A725_CLOCK_REVERSIBLE,
++	A725_CLOCK_AON_INHERITED,
++	A725_CLOCK_QDSS_OPTIONAL,
++};
++
++enum a725_clock_halt {
++	A725_CLOCK_HALT,
++	A725_CLOCK_HALT_VOTED,
++	A725_CLOCK_HALT_DELAY,
++	A725_CLOCK_HALT_SKIP,
++};
++
++struct a725_clock_spec {
++	const char *name;
++	boolean_t gpucc;
++	uint32_t offset;
++	enum a725_clock_owner owner;
++	enum a725_clock_halt halt;
++};
++
++static const struct a725_clock_spec a725_clocks[A725_CLOCK_COUNT] = {
++	{ "gmu_clk", TRUE,  0x913c, A725_CLOCK_AON_INHERITED, A725_CLOCK_HALT },
++	{ "cxo_clk", TRUE,  0x9144, A725_CLOCK_REVERSIBLE,    A725_CLOCK_HALT },
++	{ "axi_clk", FALSE, 0x81154, A725_CLOCK_AON_INHERITED, A725_CLOCK_HALT_SKIP },
++	{ "memnoc_clk", FALSE, 0x81010, A725_CLOCK_REVERSIBLE, A725_CLOCK_HALT_VOTED },
++	{ "ahb_clk", TRUE,  0x911c, A725_CLOCK_REVERSIBLE,    A725_CLOCK_HALT_DELAY },
++	{ "hub_clk", TRUE,  0x9148, A725_CLOCK_AON_INHERITED, A725_CLOCK_HALT },
++	{ "apb_pclk", FALSE, 0, A725_CLOCK_QDSS_OPTIONAL,     A725_CLOCK_HALT_SKIP },
+ };
+ 
+ struct a725_firmware_spec {
+@@ -467,6 +512,166 @@
+ 	    A725_ACKNOWLEDGED;
+ }
+ 
++static vm_offset_t
++a725_clock_base(const struct marble_a725_resources *r,
++    const struct a725_clock_spec *clock)
++{
++	return clock->gpucc ? r->gpucc : r->gcc;
++}
++
++static boolean_t
++a725_clock_on(uint32_t value, enum a725_clock_halt halt)
++{
++	if (!(value & 1u)) {
++		return FALSE;
++	}
++	if (halt == A725_CLOCK_HALT) {
++		return !(value & A725_BRANCH_CLK_OFF);
++	}
++	if (halt == A725_CLOCK_HALT_VOTED) {
++		return !(value & A725_BRANCH_CLK_OFF) ||
++		    (value & (A725_BRANCH_CLK_OFF | A725_BRANCH_NOC_MASK)) ==
++		    A725_BRANCH_NOC_ON;
++	}
++	/* Qualcomm uses a fixed 10 us delay or deliberately skips status. */
++	return TRUE;
++}
++
++static boolean_t
++a725_clock_poll_on(vm_offset_t base, const struct a725_clock_spec *clock)
++{
++	if (clock->halt == A725_CLOCK_HALT_DELAY) {
++		delay(10);
++		return a725_clock_on(a725_read32(base, clock->offset), clock->halt);
++	}
++	if (clock->halt == A725_CLOCK_HALT_SKIP) {
++		return a725_clock_on(a725_read32(base, clock->offset), clock->halt);
++	}
++	for (unsigned elapsed = 0; elapsed < 200; elapsed++) {
++		if (a725_clock_on(a725_read32(base, clock->offset), clock->halt)) {
++			return TRUE;
++		}
++		delay(1);
++	}
++	return a725_clock_on(a725_read32(base, clock->offset), clock->halt);
++}
++
++static boolean_t
++a725_rcg_value(uint32_t value, const uint32_t *allowed, unsigned count)
++{
++	const uint32_t mask = (1u << 20) | (7u << 8) | 0x1fu;
++	for (unsigned i = 0; i < count; i++) {
++		if ((value & mask) == allowed[i]) {
++			return TRUE;
++		}
++	}
++	return FALSE;
++}
++
++/*
++ * Validate the three source roots which feed the six normal Gen7 GMU clocks.
++ * This diagnostic does not reprogram an RCG: clock framework rate changes
++ * require parent/refcount state which XNU does not own yet.
++ */
++static boolean_t
++a725_validate_clock_roots(const struct marble_a725_resources *r)
++{
++	static const uint32_t gmu[] = { 0x100001, 0x100602, 0x100303 };
++	static const uint32_t hub[] = { 0x100603, 0x100504, 0x100503 };
++	static const uint32_t xo[] = { 0x100001 };
++	uint32_t gmu_cmd = a725_read32(r->gpucc, 0x9318);
++	uint32_t hub_cmd = a725_read32(r->gpucc, 0x93ec);
++	uint32_t xo_cmd = a725_read32(r->gpucc, 0x9010);
++	uint32_t gmu_cfg = a725_read32(r->gpucc, 0x931c);
++	uint32_t hub_cfg = a725_read32(r->gpucc, 0x93f0);
++	uint32_t xo_cfg = a725_read32(r->gpucc, 0x9014);
++	boolean_t valid = !(gmu_cmd & 1u) && !(hub_cmd & 1u) && !(xo_cmd & 1u) &&
++	    a725_rcg_value(gmu_cfg, gmu, sizeof(gmu) / sizeof(gmu[0])) &&
++	    a725_rcg_value(hub_cfg, hub, sizeof(hub) / sizeof(hub[0])) &&
++	    a725_rcg_value(xo_cfg, xo, sizeof(xo) / sizeof(xo[0]));
++	printf("MARBLE GPU: clock roots gmu=%08x/%08x hub=%08x/%08x xo=%08x/%08x valid=%u\n",
++	    gmu_cmd, gmu_cfg, hub_cmd, hub_cfg, xo_cmd, xo_cfg, valid);
++	return valid;
++}
++
++static boolean_t
++a725_enable_gmu_clocks(const struct marble_a725_resources *r,
++    struct a725_power_results *result)
++{
++	if (!a725_validate_clock_roots(r)) {
++		result->clock_error = EINVAL;
++		return FALSE;
++	}
++	for (unsigned i = 0; i < A725_CLOCK_COUNT; i++) {
++		const struct a725_clock_spec *clock = &a725_clocks[i];
++		vm_offset_t base;
++		uint32_t value;
++
++		if (clock->owner == A725_CLOCK_QDSS_OPTIONAL) {
++			/* KGSL removes apb_pclk unless CONFIG_QCOM_KGSL_QDSS_STM. */
++			result->clocks[i] = A725_NOT_ATTEMPTED;
++			continue;
++		}
++		base = a725_clock_base(r, clock);
++		value = a725_read32(base, clock->offset);
++		result->clock_before[i] = value;
++		if (clock->owner == A725_CLOCK_AON_INHERITED) {
++			if (!a725_clock_poll_on(base, clock)) {
++				result->clocks[i] = A725_FAILED;
++				result->clock_error = EBUSY;
++				printf("MARBLE GPU: clock=%s result=FAILED reason=AON_NOT_INHERITED cbcr=%08x\n",
++				    clock->name, value);
++				return FALSE;
++			}
++			result->clocks[i] = A725_ACKNOWLEDGED;
++			result->clock_after[i] = a725_read32(base, clock->offset);
++			continue;
++		}
++		if (!a725_clock_on(value, clock->halt)) {
++			result->clock_touched[i] = TRUE;
++			a725_write32(base, clock->offset, value | 1u);
++			if (!a725_clock_poll_on(base, clock)) {
++				result->clocks[i] = A725_TIMEOUT;
++				result->clock_error = ETIMEDOUT;
++				result->clock_after[i] = a725_read32(base, clock->offset);
++				return FALSE;
++			}
++		}
++		result->clock_after[i] = a725_read32(base, clock->offset);
++		result->clocks[i] = A725_ACKNOWLEDGED;
++		printf("MARBLE GPU: clock=%s result=ACKNOWLEDGED inherited=%u cbcr=%08x\n",
++		    clock->name, !result->clock_touched[i], result->clock_after[i]);
++	}
++	return TRUE;
++}
++
++static void
++a725_cleanup_gmu_clocks(const struct marble_a725_resources *r,
++    struct a725_power_results *result)
++{
++	result->clock_cleanup = A725_ACKNOWLEDGED;
++	for (int i = A725_CLOCK_COUNT - 1; i >= 0; i--) {
++		const struct a725_clock_spec *clock = &a725_clocks[i];
++		vm_offset_t base;
++		if (!result->clock_touched[i]) {
++			continue;
++		}
++		base = a725_clock_base(r, clock);
++		uint32_t value = a725_read32(base, clock->offset);
++		value = (value & ~1u) | (result->clock_before[i] & 1u);
++		a725_write32(base, clock->offset, value);
++		if ((a725_read32(base, clock->offset) & 1u) !=
++		    (result->clock_before[i] & 1u)) {
++			result->clock_cleanup = A725_FAILED;
++			result->clock_cleanup_error = EIO;
++		}
++		if (clock->halt == A725_CLOCK_HALT_DELAY ||
++		    clock->halt == A725_CLOCK_HALT_VOTED) {
++			delay(10);
++		}
++	}
++}
++
+ static const char *
+ a725_result_name(enum a725_rpmh_result result)
+ {
+@@ -561,6 +766,127 @@
+ 	    result->mx_release == A725_ACKNOWLEDGED;
+ }
+ 
++static boolean_t
++a725_clock_stage_test(const struct marble_a725_resources *r,
++    struct a725_power_results *result)
++{
++	uint32_t release_hlvl = 0;
++	uint16_t release_vlvl = 0;
++	boolean_t cx_voted = FALSE;
++
++	printf("MARBLE GPU: stage=GMU_CLOCKS begin build=%s\n", A725_CLOCK_ID);
++	result->mx_vote = A725_FAILED;
++	result->mx_vote_error = marble_rpmh_arc_vote("mx.lvl", TRUE,
++	    &result->mx_hlvl, &result->mx_vlvl);
++	result->mx_vote = result->mx_vote_error == ETIMEDOUT ? A725_TIMEOUT :
++	    result->mx_vote_error ? A725_FAILED : A725_ACKNOWLEDGED;
++	if (result->mx_vote_error) {
++		goto out;
++	}
++	result->cx_vote = A725_FAILED;
++	result->cx_vote_error = marble_rpmh_arc_vote("cx.lvl", TRUE,
++	    &result->cx_hlvl, &result->cx_vlvl);
++	result->cx_vote = result->cx_vote_error == ETIMEDOUT ? A725_TIMEOUT :
++	    result->cx_vote_error ? A725_FAILED : A725_ACKNOWLEDGED;
++	if (result->cx_vote_error) {
++		goto out;
++	}
++	cx_voted = TRUE;
++
++	result->aop_acd = A725_FAILED;
++	result->aop_error = a725_aop_acd_enable(r);
++	result->aop_acd = result->aop_error == ETIMEDOUT ? A725_TIMEOUT :
++	    result->aop_error ? A725_FAILED : A725_ACKNOWLEDGED;
++	if (result->aop_error) {
++		goto out;
++	}
++	result->cx_enable = A725_FAILED;
++	result->cx_enable_error = a725_cx_enable_test(r, result);
++	result->cx_enable = result->cx_enable_error == ETIMEDOUT ? A725_TIMEOUT :
++	    result->cx_enable_error ? A725_FAILED : A725_ACKNOWLEDGED;
++	if (result->cx_enable_error) {
++		goto cleanup;
++	}
++
++	(void)a725_enable_gmu_clocks(r, result);
++	for (unsigned i = 0; i < A725_CLOCK_COUNT; i++) {
++		printf("MARBLE GPU: GMU clock=%s result=%s before=%08x after=%08x\n",
++		    a725_clocks[i].name, a725_result_name(result->clocks[i]),
++		    result->clock_before[i], result->clock_after[i]);
++	}
++
++cleanup:
++	a725_cleanup_gmu_clocks(r, result);
++	if (result->cx_touched) {
++		a725_cx_rollback(r, result);
++	}
++out:
++	if (cx_voted) {
++		result->cx_release = A725_FAILED;
++		result->cx_release_error = marble_rpmh_arc_vote("cx.lvl", FALSE,
++		    &release_hlvl, &release_vlvl);
++		result->cx_release = result->cx_release_error == ETIMEDOUT ?
++		    A725_TIMEOUT : result->cx_release_error ? A725_FAILED :
++		    A725_ACKNOWLEDGED;
++	}
++	if (result->mx_vote == A725_ACKNOWLEDGED) {
++		result->mx_release = A725_FAILED;
++		result->mx_release_error = marble_rpmh_arc_vote("mx.lvl", FALSE,
++		    &release_hlvl, &release_vlvl);
++		result->mx_release = result->mx_release_error == ETIMEDOUT ?
++		    A725_TIMEOUT : result->mx_release_error ? A725_FAILED :
++		    A725_ACKNOWLEDGED;
++	}
++	return result->clock_error == 0 &&
++	    result->clock_cleanup == A725_ACKNOWLEDGED &&
++	    result->cx_rollback == A725_ACKNOWLEDGED &&
++	    result->cx_release == A725_ACKNOWLEDGED &&
++	    result->mx_release == A725_ACKNOWLEDGED;
++}
++
++static const char *
++a725_pass_name(enum a725_rpmh_result result)
++{
++	return result == A725_ACKNOWLEDGED ? "PASS" : "FAIL";
++}
++
++static void
++a725_show_clock_results(const struct a725_power_results *r)
++{
++	printf("\n\n============================================================\n");
++	printf("     MARBLE ADRENO 725 GMU CLOCK DIAGNOSTIC\n");
++	printf("     build: %s\n", A725_CLOCK_ID);
++	printf("------------------------------------------------------------\n");
++	printf(" MX VOTE       : %s\n", a725_pass_name(r->mx_vote));
++	printf(" CX VOTE       : %s\n", a725_pass_name(r->cx_vote));
++	printf(" AOP ACD       : %s\n", a725_pass_name(r->aop_acd));
++	printf(" CX ENABLE     : %s HWCTRL=%08x ON=%u\n",
++	    a725_pass_name(r->cx_enable), r->cx_hwctrl_on,
++	    !!(r->cx_hwctrl_on & A725_GDSC_PWR_ON));
++	for (unsigned i = 0; i < A725_CLOCK_COUNT; i++) {
++		if (a725_clocks[i].owner == A725_CLOCK_QDSS_OPTIONAL) {
++			printf(" %-13s : SKIPPED (QDSS-STM not enabled)\n",
++			    a725_clocks[i].name);
++		} else {
++			printf(" %-13s : %s CBCR=%08x%s\n", a725_clocks[i].name,
++			    a725_pass_name(r->clocks[i]), r->clock_after[i],
++			    a725_clocks[i].owner == A725_CLOCK_AON_INHERITED ?
++			    " inherited-AON" : "");
++		}
++	}
++	printf(" CLOCK CLEANUP : %s error=%d\n",
++	    a725_pass_name(r->clock_cleanup), r->clock_cleanup_error);
++	printf(" CX ROLLBACK   : %s HWCTRL=%08x\n",
++	    a725_pass_name(r->cx_rollback), r->cx_hwctrl_after);
++	printf(" RPMh RELEASE  : CX=%s MX=%s\n",
++	    a725_pass_name(r->cx_release), a725_pass_name(r->mx_release));
++	printf("------------------------------------------------------------\n");
++	printf(" CLOCK TRANSITIONS ONLY; GMU/GX/GPU EXECUTION NOT ATTEMPTED\n");
++	printf(" Continuing normal iOS startup in about 10 seconds.\n");
++	printf("============================================================\n");
++	delay(10000000);
++}
++
+ /*
+  * Use the already initialized 2x sweet-fbcon console.  This deliberately
+  * creates no framebuffer mapping or display state of its own.  All release
+@@ -625,7 +951,7 @@
+ 	uint32_t enabled = 0, visual = 0;
+ 	PE_parse_boot_argn("marblegpu", &enabled, sizeof(enabled));
+ 	PE_parse_boot_argn("marblegpuvisual", &visual, sizeof(visual));
+-	if (enabled < 1 || enabled > 3) {
++	if (enabled < 1 || enabled > 4) {
+ 		return;
+ 	}
+ 	if (enabled >= 2 && !a725_validate_firmware()) {
+@@ -669,6 +995,22 @@
+ 		printf("MARBLE A725: stage=3 stop=CX_TEST_COMPLETE (GX/GMU/GPU not attempted)\n");
+ 		return;
+ 	}
++	if (enabled == 4) {
++		struct a725_power_results result = { 0 };
++		r.aoss = ml_io_map(A725_AOSS_PA, A725_AOSS_SIZE);
++		r.ipcc = ml_io_map(A725_IPCC_PA, A725_IPCC_SIZE);
++		r.gcc = ml_io_map(A725_GCC_PA, A725_GCC_SIZE);
++		if (!r.aoss || !r.ipcc || !r.gcc) {
++			printf("MARBLE A725: stage=4 stop=CLOCK_RESOURCE_MAP_FAILED\n");
++			return;
++		}
++		(void)a725_clock_stage_test(&r, &result);
++		if (visual == 1) {
++			a725_show_clock_results(&result);
++		}
++		printf("MARBLE A725: stage=4 stop=GMU_CLOCK_TEST_COMPLETE (GMU/GX/GPU not attempted)\n");
++		return;
++	}
+ 	uint32_t cx = a725_read32(r.gpucc, A725_GPUCC_CX_GDSCR);
+ 	uint32_t gx = a725_read32(r.gpucc, A725_GPUCC_GX_GDSCR);
+ 	printf("MARBLE A725: stage=POWER CX_GDSCR=%08x on=%u GX_GDSCR=%08x on=%u\n",
