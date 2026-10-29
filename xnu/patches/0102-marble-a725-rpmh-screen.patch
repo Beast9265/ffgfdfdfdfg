@@ -1,0 +1,168 @@
+--- a/bsd/dev/marble_a725_probe.c
++++ b/bsd/dev/marble_a725_probe.c
+@@ -8,6 +8,8 @@
+ #include <pexpert/arm64/board_config.h>
+ 
+ #if defined(ARM64_BOARD_CONFIG_MARBLE)
++#include <sys/errno.h>
+ #include <sys/systm.h>
++#include <kern/clock.h>
+ #include <machine/machine_routines.h>
+ #include <pexpert/pexpert.h>
+@@ -18,6 +19,7 @@
+ extern int marble_rpmh_arc_vote(const char *, bool, uint32_t *, uint16_t *);
+ 
+ #define A725_BUILD_ID     "a725-rpmh-arc-v1"
++#define A725_VISUAL_ID    "a725-rpmh-screen-v1"
+ 
+ #define A725_GPU_PA       0x03d00000u
+ #define A725_GPU_SIZE     0x00040000u
+@@ -43,6 +45,20 @@
+ 	vm_offset_t gpucc;
+ };
+ 
++enum a725_rpmh_result {
++	A725_NOT_ATTEMPTED,
++	A725_ACKNOWLEDGED,
++	A725_FAILED,
++	A725_TIMEOUT,
++};
++
++struct a725_power_results {
++	enum a725_rpmh_result mx_vote, cx_vote, cx_release, mx_release;
++	int mx_vote_error, cx_vote_error, cx_release_error, mx_release_error;
++	uint32_t mx_hlvl, cx_hlvl;
++	uint16_t mx_vlvl, cx_vlvl;
++};
++
+ struct a725_firmware_spec {
+ 	const char *property;
+ 	const char *digest_property;
+@@ -185,30 +201,49 @@
+  * this test deliberately does not claim or touch CX/GX GDSCR ownership.
+  */
+ static boolean_t
+-a725_power_prerequisite_test(const struct marble_a725_resources *r)
++a725_power_prerequisite_test(const struct marble_a725_resources *r,
++    struct a725_power_results *result)
+ {
+-	uint32_t mx_hlvl = 0, cx_hlvl = 0, release_hlvl = 0;
+-	uint16_t mx_vlvl = 0, cx_vlvl = 0, release_vlvl = 0;
++	uint32_t release_hlvl = 0;
++	uint16_t release_vlvl = 0;
+ 	int mx_error, cx_error, cx_release = 0, mx_release;
+ 
+ 	printf("MARBLE GPU: stage=POWER begin build=%s\n", A725_BUILD_ID);
+-	mx_error = marble_rpmh_arc_vote("mx.lvl", TRUE, &mx_hlvl, &mx_vlvl);
++	result->mx_vote = A725_FAILED;
++	mx_error = marble_rpmh_arc_vote("mx.lvl", TRUE, &result->mx_hlvl,
++	    &result->mx_vlvl);
++	result->mx_vote_error = mx_error;
++	result->mx_vote = mx_error == ETIMEDOUT ? A725_TIMEOUT :
++	    mx_error ? A725_FAILED : A725_ACKNOWLEDGED;
+ 	if (mx_error) {
+ 		printf("MARBLE GPU: stage=POWER result=RPMH_MX_FAILED errno=%d\n", mx_error);
+ 		return FALSE;
+ 	}
+-	cx_error = marble_rpmh_arc_vote("cx.lvl", TRUE, &cx_hlvl, &cx_vlvl);
++	result->cx_vote = A725_FAILED;
++	cx_error = marble_rpmh_arc_vote("cx.lvl", TRUE, &result->cx_hlvl,
++	    &result->cx_vlvl);
++	result->cx_vote_error = cx_error;
++	result->cx_vote = cx_error == ETIMEDOUT ? A725_TIMEOUT :
++	    cx_error ? A725_FAILED : A725_ACKNOWLEDGED;
+ 	if (!cx_error) {
+ 		uint32_t cx = a725_read32(r->gpucc, A725_GPUCC_CX_GDSCR);
+ 		printf("MARBLE GPU: RPMh resources mx.lvl hlvl=%u vlvl=%u cx.lvl hlvl=%u vlvl=%u\n",
+-		    mx_hlvl, mx_vlvl, cx_hlvl, cx_vlvl);
++		    result->mx_hlvl, result->mx_vlvl, result->cx_hlvl, result->cx_vlvl);
+ 		printf("MARBLE GPU: CX state GDSCR=%08x on=%u owner=UNCLAIMED\n",
+ 		    cx, !!(cx & A725_GDSC_PWR_ON));
++		result->cx_release = A725_FAILED;
+ 		cx_release = marble_rpmh_arc_vote("cx.lvl", FALSE,
+ 		    &release_hlvl, &release_vlvl);
++		result->cx_release_error = cx_release;
++		result->cx_release = cx_release == ETIMEDOUT ? A725_TIMEOUT :
++		    cx_release ? A725_FAILED : A725_ACKNOWLEDGED;
+ 	}
++	result->mx_release = A725_FAILED;
+ 	mx_release = marble_rpmh_arc_vote("mx.lvl", FALSE,
+ 	    &release_hlvl, &release_vlvl);
++	result->mx_release_error = mx_release;
++	result->mx_release = mx_release == ETIMEDOUT ? A725_TIMEOUT :
++	    mx_release ? A725_FAILED : A725_ACKNOWLEDGED;
+ 	if (cx_error || cx_release || mx_release) {
+ 		printf("MARBLE GPU: stage=POWER result=RPMH_FAILED cx=%d release=%d/%d\n",
+ 		    cx_error, cx_release, mx_release);
+@@ -218,6 +253,46 @@
+ 	return TRUE;
+ }
+ 
++static const char *
++a725_result_name(enum a725_rpmh_result result)
++{
++	switch (result) {
++	case A725_ACKNOWLEDGED: return "ACKNOWLEDGED";
++	case A725_FAILED: return "FAILED";
++	case A725_TIMEOUT: return "TIMEOUT";
++	default: return "NOT ATTEMPTED";
++	}
++}
++
++/*
++ * Use the already initialized 2x sweet-fbcon console.  This deliberately
++ * creates no framebuffer mapping or display state of its own.  All release
++ * operations which are safe after acknowledged votes have completed before
++ * this function is entered.
++ */
++static void
++a725_show_power_results(const struct a725_power_results *r)
++{
++	printf("\n\n============================================================\n");
++	printf("          MARBLE ADRENO 725 RPMh DIAGNOSTIC\n");
++	printf("          build: %s\n", A725_VISUAL_ID);
++	printf("------------------------------------------------------------\n");
++	printf(" MX VOTE     : %-13s error=%d HLVL=%u VLVL=%u\n",
++	    a725_result_name(r->mx_vote), r->mx_vote_error, r->mx_hlvl, r->mx_vlvl);
++	printf(" CX VOTE     : %-13s error=%d HLVL=%u VLVL=%u\n",
++	    a725_result_name(r->cx_vote), r->cx_vote_error, r->cx_hlvl, r->cx_vlvl);
++	printf(" CX RELEASE  : %-13s error=%d\n",
++	    a725_result_name(r->cx_release), r->cx_release_error);
++	printf(" MX RELEASE  : %-13s error=%d\n",
++	    a725_result_name(r->mx_release), r->mx_release_error);
++	printf("------------------------------------------------------------\n");
++	printf(" ACK means RPMh command acknowledgement only.\n");
++	printf(" GPU POWER / GMU EXECUTION: NOT ATTEMPTED\n");
++	printf(" Continuing normal iOS startup in about 10 seconds.\n");
++	printf("============================================================\n");
++	delay(10000000);
++}
++
+ static boolean_t
+ a725_probe_smmu(const struct marble_a725_resources *r)
+ {
+@@ -239,8 +314,9 @@
+ void
+ marble_a725_probe(void)
+ {
+-	uint32_t enabled = 0;
++	uint32_t enabled = 0, visual = 0;
+ 	PE_parse_boot_argn("marblegpu", &enabled, sizeof(enabled));
++	PE_parse_boot_argn("marblegpuvisual", &visual, sizeof(visual));
+ 	if (enabled < 1 || enabled > 3) {
+ 		return;
+ 	}
+@@ -260,7 +336,12 @@
+ 		return;
+ 	}
+ 	if (enabled >= 2) {
+-		if (a725_power_prerequisite_test(&r)) {
++		struct a725_power_results result = { 0 };
++		boolean_t complete = a725_power_prerequisite_test(&r, &result);
++		if (enabled == 2 && visual == 1) {
++			a725_show_power_results(&result);
++		}
++		if (complete) {
+ 			printf("MARBLE A725: stage=2 stop=CX_GDSC_OWNER_MISSING (RPMh votes released; no GPUCC writes)\n");
+ 		}
+ 		return;

@@ -98,6 +98,17 @@ ARC transport test, then releases its votes and stops before GPUCC writes.
 It does not advertise a ring, fence, SMMU context, command execution, or
 userspace service.
 
+Patch 0102 adds an independently gated photographic result screen.  It runs
+only with both `marblegpu=2` and `marblegpuvisual=1`, records the actual MX/CX
+vote and reverse-order release return codes, and labels each operation
+`ACKNOWLEDGED`, `FAILED`, `TIMEOUT`, or `NOT ATTEMPTED`.  The summary uses the
+already initialized 2x `sweet-fbcon` console; it creates no framebuffer map and
+does not change the framebuffer address, memory attributes, or display setup.
+The approximately ten-second delay occurs only after all safe release
+operations have completed.  An acknowledgement means only RPMh transport
+completion, never GPU power or execution.  All boots lacking both exact
+arguments retain their prior timing and behavior.
+
 This is more than the original resource probe: it establishes the firmware
 transport and rejects corrupt, wrong-chip, malformed, or partial inputs before
 a loader can act.  It is not yet GMU power-up.
