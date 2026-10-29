@@ -1,0 +1,224 @@
+xnu 0101: add bounded SM7475 RPMh ARC prerequisite test
+
+Add command-DB ARC parsing and a payload-preserving, timeout-bounded ACTIVE-TCS
+single-command path.  marblegpu=2/3, after the existing firmware validation,
+votes MX then CX at each resource's highest valid hardware level, observes CX
+state without claiming it, releases CX then MX, and stops before all GPUCC
+writes.  Modes 0/1 are unchanged.
+diff --git a/bsd/dev/marble_touch_power.c b/bsd/dev/marble_touch_power.c
+index 828ea99..71e6182 100644
+--- a/bsd/dev/marble_touch_power.c
++++ b/bsd/dev/marble_touch_power.c
+@@ -16,0 +17,2 @@ int marble_touch_power_prepare(void);
++int marble_rpmh_arc_vote(const char *res, bool enable, uint32_t *hlvl,
++    uint16_t *vlvl);
+@@ -60,0 +63,3 @@ static bool rh_poisoned;
++/* Qualcomm command DB accelerator IDs (cmd-db.h). */
++#define RH_ARC          3u
++
+@@ -212,0 +218,148 @@ rh_lookup(const char *res, uint32_t *address)
++/* Resolve an ARC resource and its zero-padded little-endian u16 VLVL table. */
++static int
++rh_lookup_arc(const char *res, uint32_t *address, uint32_t *aux,
++    uint16_t *aux_len)
++{
++	uint32_t key[2] = {0, 0};
++	unsigned matches = 0;
++	for (unsigned i = 0; i < 8 && res[i]; ++i) {
++		key[i / 4] |= (uint32_t)(uint8_t)res[i] << (8u * (i % 4));
++	}
++	for (unsigned i = 0; i < 8; ++i) {
++		uint32_t h = 8u + 16u * i;
++		unsigned slave = rh_db16(h);
++		if (!slave) break;
++		uint32_t entries = RH_DB_HEADER + rh_db16(h + 2);
++		uint32_t data = RH_DB_HEADER + rh_db16(h + 4);
++		unsigned count = rh_db16(h + 6);
++		if (slave < 3 || slave > 5 || (entries & 3u) ||
++		    !rh_range(entries, count * RH_DB_ENTRY) || !rh_range(data, 0)) {
++			return EINVAL;
++		}
++		for (unsigned j = 0; j < count; ++j) {
++			uint32_t e = entries + RH_DB_ENTRY * j;
++			if (rh_read(rh_db, e) != key[0] ||
++			    rh_read(rh_db, e + 4) != key[1]) continue;
++			uint32_t addr = rh_read(rh_db, e + 16);
++			uint16_t len = rh_db16(e + 20), off = rh_db16(e + 22);
++			if (slave != RH_ARC || ((addr >> 16) & 7u) != RH_ARC ||
++			    (addr & 3u) || len < 4 || (len & 1u) || len > 32 ||
++			    !rh_range(data + off, len)) return EINVAL;
++			*address = addr; *aux = data + off; *aux_len = len; ++matches;
++		}
++	}
++	return matches == 1 ? 0 : ENODEV;
++}
++
++/* One acknowledged ACTIVE command, preserving the inherited TCS payload. */
++static bool
++rh_one_free(unsigned t)
++{
++	uint32_t b = t * RH_TCS_STRIDE;
++	return rh_read(rh_tcs, b + RH_STATUS) != 0 &&
++	    rh_read(rh_tcs, b + RH_STATUS) != 0xffffffffu &&
++	    (rh_read(rh_tcs, b + RH_CONTROL) & ~RH_AMC_EN) == 0 &&
++	    rh_read(rh_tcs, b + RH_ENABLE) == 0 &&
++	    rh_read(rh_tcs, b + RH_WAIT) == 0 &&
++	    !(rh_read(rh_tcs, RH_IRQ_STATUS) & (1u << t));
++}
++
++static int
++rh_send_one(uint32_t address, uint32_t value)
++{
++	int chosen = -1;
++	for (unsigned t = 0; t < RH_ACTIVE_N; ++t) {
++		uint32_t b = t * RH_TCS_STRIDE;
++		uint32_t enabled = rh_read(rh_tcs, b + RH_ENABLE);
++		if (enabled & ~((1u << rh_ncpt) - 1u)) return EIO;
++		for (unsigned c = 0; c < rh_ncpt; ++c)
++			if ((enabled & (1u << c)) &&
++			    (rh_read(rh_tcs, b + RH_ADDR + c * RH_CMD_STRIDE) & ~3u) == address)
++				return EBUSY;
++		if (chosen < 0 && rh_one_free(t)) chosen = (int)t;
++	}
++	if (chosen < 0) return EBUSY;
++	unsigned t = (unsigned)chosen;
++	uint32_t b = t * RH_TCS_STRIDE, bit = 1u << t;
++	uint32_t irq_en = rh_read(rh_tcs, RH_IRQ_EN);
++	if (irq_en == 0xffffffffu || !rh_one_free(t)) return EBUSY;
++	if (!rh_sync(RH_IRQ_EN, irq_en & ~bit)) {
++		rh_poisoned = true;
++		return EIO;
++	}
++	if (!rh_one_free(t)) {
++		if (!rh_sync(RH_IRQ_EN,
++		    (rh_read(rh_tcs, RH_IRQ_EN) & ~bit) | (irq_en & bit)))
++			rh_poisoned = true;
++		return EBUSY;
++	}
++	uint32_t saved_control = rh_read(rh_tcs, b + RH_CONTROL);
++	uint32_t saved_msgid = rh_read(rh_tcs, b + RH_MSGID);
++	uint32_t saved_addr = rh_read(rh_tcs, b + RH_ADDR);
++	uint32_t saved_data = rh_read(rh_tcs, b + RH_DATA);
++	rh_poisoned = true;
++	if (!rh_sync(b + RH_MSGID, RH_WRITE_ACK) ||
++	    !rh_sync(b + RH_ADDR, address) || !rh_sync(b + RH_DATA, value) ||
++	    !rh_sync(b + RH_WAIT, 1) || !rh_sync(b + RH_ENABLE, 1) ||
++	    !rh_sync(b + RH_CONTROL, 0) ||
++	    !rh_sync(b + RH_CONTROL, RH_AMC_EN)) return EIO;
++	rh_write(rh_tcs, b + RH_CONTROL, RH_AMC_EN | RH_TRIGGER);
++	bool done = false, progress = false;
++	uint32_t status = 0, irq = 0, idle = 0;
++	for (unsigned us = 0; us < RH_TIMEOUT_US; ++us) {
++		irq = rh_read(rh_tcs, RH_IRQ_STATUS);
++		idle = rh_read(rh_tcs, b + RH_STATUS);
++		status = rh_read(rh_tcs, b + RH_CMD_STATUS);
++		bool complete = status != 0xffffffffu &&
++		    (status & (RH_ISSUED | RH_COMPLETE)) == (RH_ISSUED | RH_COMPLETE);
++		progress |= idle == 0 || !complete;
++		if (idle && idle != 0xffffffffu && irq != 0xffffffffu &&
++		    ((irq & bit) || progress) && complete) { done = true; break; }
++		delay(1);
++	}
++	printf("MARBLE RPMH: ARC TCS%u addr=%#x data=%#x done=%d status=%#x\n",
++	    t, address, value, done, status);
++	if (!done) return ETIMEDOUT;
++	if (!rh_sync(b + RH_CONTROL, RH_AMC_EN) || !rh_sync(b + RH_CONTROL, 0) ||
++	    !rh_sync(b + RH_ENABLE, 0) || !rh_sync(b + RH_WAIT, 0) ||
++	    !rh_sync(b + RH_MSGID, saved_msgid) ||
++	    !rh_sync(b + RH_ADDR, saved_addr) ||
++	    !rh_sync(b + RH_DATA, saved_data) ||
++	    !rh_sync(b + RH_CONTROL, saved_control)) return EIO;
++	rh_write(rh_tcs, RH_IRQ_CLEAR, bit);
++	if ((rh_read(rh_tcs, RH_IRQ_STATUS) & bit) ||
++	    !rh_sync(RH_IRQ_EN, (rh_read(rh_tcs, RH_IRQ_EN) & ~bit) |
++	    (irq_en & bit))) return EIO;
++	rh_poisoned = false;
++	return 0;
++}
++
++int
++marble_rpmh_arc_vote(const char *res, bool enable, uint32_t *hlvl, uint16_t *vlvl)
++{
++	if (!res || (strcmp(res, "mx.lvl") && strcmp(res, "cx.lvl")) ||
++	    !hlvl || !vlvl)
++		return EINVAL;
++	if (__atomic_exchange_n(&rh_lock, 1, __ATOMIC_ACQUIRE)) return EBUSY;
++	int error = rh_poisoned ? EIO : rh_map();
++	uint32_t address = 0, aux = 0; uint16_t len = 0;
++	if (!error) error = rh_lookup_arc(res, &address, &aux, &len);
++	uint32_t count = 0;
++	if (!error) {
++		/* Qualcomm KGSL stops at the first zero after a nonzero ARC entry. */
++		for (count = 1; count < len / 2; ++count)
++			if (rh_db16(aux + 2 * (count - 1)) && !rh_db16(aux + 2 * count)) break;
++		if (count < 2 || count > 16 || !rh_db16(aux + 2 * (count - 1))) error = EINVAL;
++	}
++	*hlvl = enable && !error ? count - 1 : 0;
++	*vlvl = enable && !error ? rh_db16(aux + 2 * *hlvl) : 0;
++	if (!error) {
++		printf("MARBLE RPMH: ARC resource=%s addr=%#x hlvl=%u vlvl=%u action=%s\n",
++		    res, address, *hlvl, *vlvl, enable ? "vote" : "release");
++		error = rh_send_one(address, *hlvl);
++	}
++	if (error) printf("MARBLE RPMH: ARC %s refused/failed errno=%d\n", res, error);
++	__atomic_store_n(&rh_lock, 0, __ATOMIC_RELEASE);
++	return error;
++}
++
+diff --git a/bsd/dev/marble_a725_probe.c b/bsd/dev/marble_a725_probe.c
+index 67ba4bc..15cf6bd 100644
+--- a/bsd/dev/marble_a725_probe.c
++++ b/bsd/dev/marble_a725_probe.c
+@@ -17,0 +18,3 @@ extern vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
++extern int marble_rpmh_arc_vote(const char *, bool, uint32_t *, uint16_t *);
++
++#define A725_BUILD_ID     "a725-rpmh-arc-v1"
+@@ -178,0 +182,39 @@ a725_valid_read(uint32_t value)
++/*
++ * Validate MARBLE's RPMh ARC transport independently of GDSC/clock writes.
++ * SM7475 clock dependencies require MX before CX.  Release in reverse order;
++ * this test deliberately does not claim or touch CX/GX GDSCR ownership.
++ */
++static boolean_t
++a725_power_prerequisite_test(const struct marble_a725_resources *r)
++{
++	uint32_t mx_hlvl = 0, cx_hlvl = 0, release_hlvl = 0;
++	uint16_t mx_vlvl = 0, cx_vlvl = 0, release_vlvl = 0;
++	int mx_error, cx_error, cx_release = 0, mx_release;
++
++	printf("MARBLE GPU: stage=POWER begin build=%s\n", A725_BUILD_ID);
++	mx_error = marble_rpmh_arc_vote("mx.lvl", TRUE, &mx_hlvl, &mx_vlvl);
++	if (mx_error) {
++		printf("MARBLE GPU: stage=POWER result=RPMH_MX_FAILED errno=%d\n", mx_error);
++		return FALSE;
++	}
++	cx_error = marble_rpmh_arc_vote("cx.lvl", TRUE, &cx_hlvl, &cx_vlvl);
++	if (!cx_error) {
++		uint32_t cx = a725_read32(r->gpucc, A725_GPUCC_CX_GDSCR);
++		printf("MARBLE GPU: RPMh resources mx.lvl hlvl=%u vlvl=%u cx.lvl hlvl=%u vlvl=%u\n",
++		    mx_hlvl, mx_vlvl, cx_hlvl, cx_vlvl);
++		printf("MARBLE GPU: CX state GDSCR=%08x on=%u owner=UNCLAIMED\n",
++		    cx, !!(cx & A725_GDSC_PWR_ON));
++		cx_release = marble_rpmh_arc_vote("cx.lvl", FALSE,
++		    &release_hlvl, &release_vlvl);
++	}
++	mx_release = marble_rpmh_arc_vote("mx.lvl", FALSE,
++	    &release_hlvl, &release_vlvl);
++	if (cx_error || cx_release || mx_release) {
++		printf("MARBLE GPU: stage=POWER result=RPMH_FAILED cx=%d release=%d/%d\n",
++		    cx_error, cx_release, mx_release);
++		return FALSE;
++	}
++	printf("MARBLE GPU: stage=POWER result=RPMH_ARC_TRANSACTION_COMPLETE next=CX_GDSC_OWNER\n");
++	return TRUE;
++}
++
+@@ -219,0 +262,6 @@ marble_a725_probe(void)
++	if (enabled >= 2) {
++		if (a725_power_prerequisite_test(&r)) {
++			printf("MARBLE A725: stage=2 stop=CX_GDSC_OWNER_MISSING (RPMh votes released; no GPUCC writes)\n");
++		}
++		return;
++	}
+@@ -251,0 +300 @@ marble_a725_probe(void)
++	/* Superseded by the mode-2/3 return above; retained for patch-series stability. */

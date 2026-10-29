@@ -87,10 +87,10 @@ firmware directory and performs the same structural checks.  Supplying
 `--marble-gpu-firmware DIR` to `mkadt.py` embeds the blobs and hashes only in
 the generated ADT.  Proprietary blobs remain outside git.
 
-After firmware validation, mode 2 reads the already-established GPUCC state.
-It deliberately stops at `POWER_CONTROLLER_MISSING` without issuing a write.
-Mode 3 currently reaches the same refusal; it does not advertise a ring,
-fence, SMMU context, command execution, or userspace service.
+After firmware validation, patch 0101 lets modes 2/3 perform a bounded RPMh
+ARC transport test, then releases its votes and stops before GPUCC writes.
+It does not advertise a ring, fence, SMMU context, command execution, or
+userspace service.
 
 This is more than the original resource probe: it establishes the firmware
 transport and rejects corrupt, wrong-chip, malformed, or partial inputs before
@@ -124,8 +124,56 @@ python3 tools/mkadt.py /tmp/marble-a725.adt --marble --marble-cpus 8 \
   --marble-gpu-firmware /directory/containing/the/three/files
 ```
 
-The next implementation patch must add and independently test the RPMh/AOP/SCM
-and clock/GDSC ownership layer with rollback.  Only after logs prove CX and the
+The next implementation patch must add and independently test the AOP/SCM and
+clock/GDSC ownership layer with rollback.  Only after logs prove CX and the
 GMU register aperture are live may it load CM3, negotiate HFI, and approach the
 GPU SMMU context banks.  A command self-test remains blocked on that result and
 must not report PASS before a fence and guarded result-buffer mutation agree.
+
+## RPMh ARC prerequisite stage (0101)
+
+Patch `0101-marble-a725-rpmh-power.patch` supplies the first missing power
+controller primitive without pretending to own GPUCC. After the unchanged
+mode-2/3 firmware validation, it resolves `mx.lvl` and `cx.lvl` from MARBLE's
+captured command DB, validates that both are ARC resources, parses their
+zero-padded little-endian VLVL tables, and sends the corresponding highest
+valid **HLVL index** through the existing DRV2 ACTIVE-TCS owner. It votes MX
+then CX and releases CX then MX. Each transaction requires an unused ACTIVE
+TCS, preserves its payload and IRQ mask, waits at most 100 ms for issued and
+complete status, and quarantines uncertain state rather than resetting or
+retrying it.
+
+The HLVL/VLVL distinction is important. Qualcomm
+`drivers/regulator/rpmh-regulator.c` defines ARC request data as the
+resource-specific hardware-level index; the command-DB auxiliary table maps
+that index to a common voltage level. Qualcomm KGSL
+`adreno_rpmh_arc_cmds()` independently treats the auxiliary data as a u16
+VLVL table. Mondrian's current experiment sends the maximum VLVL value
+directly, so its numeric vote was not copied.
+
+The stage reads `CX_GDSCR` only after acknowledged rail votes, labels its owner
+as unclaimed, releases both votes, and stops at `CX_GDSC_OWNER_MISSING`.
+It performs no GDSC, GPUCC, GMU, GPU-core, AOP-mailbox, SCM, interconnect, or
+SMMU write. Consequently `RPMH_ARC_TRANSACTION_COMPLETE` means only that the
+RSC accepted and completed the two votes and releases; it is not GPU-power
+PASS. Modes 0 and 1 retain their previous paths.
+
+### SM7475 dependency table
+
+| Dependency | SM7475/Cape authority | Ownership in 0101 |
+|---|---|---|
+| `mx.lvl`, `cx.lvl`, `gfx.lvl` ARC resources | `waipio-regulators.dtsi`; KGSL `adreno_gen7_rpmh.c` | MX/CX temporary ACTIVE votes only; no GFX vote |
+| CX GDSC `0x9108`, HW control `0x953c` | `waipio-clock.dtsi` | Read status only; no claim/write |
+| GX GDSC `0x905c`, domain `0x9504` | `waipio-clock.dtsi` | Read only in mode 1; never written |
+| GMU bulk clocks | `cape-gpu.dtsi`: CX_GMU, CXO, DDRSS_GPU_AXI, GPU_MEMNOC_GFX, AHB, HUB_CX_INT, APB | Not enabled |
+| AOP ACD mailbox | `cape-gpu.dtsi`; KGSL `gen7_gmu_aop_send_acd_state()` | Missing |
+| CX secure initialization | KGSL `gen7_scm_gpu_init_cx_regs()` | Missing SCM transport |
+| First-boot order | KGSL `gen7_gmu_first_boot()` | Stops before CX GDSC; later steps remain theoretical |
+
+G313's RBBM/CP/performance-counter offsets are standard generated Adreno
+register indices and are useful only after clocks and GX are proven. Their
+unconditional accelerator-service call is not imported. Jebbranch's physical
+result remains the safety boundary: no GPU SMMU context-bank page is accessed.
+The next implementation must add a bounded CX GDSC and seven-clock owner with
+rollback, plus AOP ACD and SCM dependencies, before any GMU register read or
+firmware load.

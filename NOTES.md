@@ -1,5 +1,30 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## Active MARBLE A725 RPMh ARC prerequisite (2026-10-29)
+
+Starting head is `b980479867ea0da068d47296ca164adb8fd7a43e`. Source audit
+used Xiaomi/Qualcomm DT commit `2e649a7f...`, graphics modules
+`51cf4da5...`, G313 commits `88fb753...`/`d07093a...`, Mondrian commits
+`d8b1042...`/`06d0999...`/`fc416dd...`, and Jebbranch `7ec00040...`.
+Observed source fact: RPMh ARC request data is the HLVL table index, not the
+VLVL table value used by Mondrian's experimental vote.
+
+Prepared `0101-marble-a725-rpmh-power.patch`. Modes 0/1 are unchanged. After
+the existing complete firmware preflight, modes 2/3 resolve and validate
+`mx.lvl`/`cx.lvl`, issue acknowledged bounded DRV2 ACTIVE-TCS votes MX then
+CX, read CX GDSCR with owner explicitly unclaimed, release CX then MX, and stop
+at `CX_GDSC_OWNER_MISSING`. No GDSC/GPUCC/GMU/GPU/SMMU/AOP/SCM/interconnect
+write is made. Timeout or uncertain completion quarantines the slot; no retry.
+Build ID is `a725-rpmh-arc-v1`.
+
+Local observations: exact prior CI buildtree single-file compile is clean for
+`marble_touch_power.c` and `marble_a725_probe.c`; strict 0101 application to
+the exact 0100 tree passes. Synthetic RPMh tests cover ARC lookup, correct
+HLVL data, completion, restoration, refusal, and timeout quarantine while
+retaining the prior VRM tests. Firmware validator and default eight-CPU ADT
+checks pass. Physical RPMh/GPU power success is not claimed. Pending before
+stop: final repository checks, commit/push, one exact-head CI run and package.
+
 ## MARBLE SMP8 read-only CPU performance diagnostic (2026-10-27)
 
 User physical observation: `marble-smp8-test.img` from source
