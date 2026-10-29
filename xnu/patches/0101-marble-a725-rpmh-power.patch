@@ -9,14 +9,29 @@ diff --git a/bsd/dev/marble_touch_power.c b/bsd/dev/marble_touch_power.c
 index 828ea99..71e6182 100644
 --- a/bsd/dev/marble_touch_power.c
 +++ b/bsd/dev/marble_touch_power.c
-@@ -16,0 +17,2 @@ int marble_touch_power_prepare(void);
+@@ -14,6 +14,8 @@
+ extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
+ int marble_touch_power_vote(const char *res, unsigned mv);
+ int marble_touch_power_prepare(void);
 +int marble_rpmh_arc_vote(const char *res, bool enable, uint32_t *hlvl,
 +    uint16_t *vlvl);
-@@ -60,0 +63,3 @@ static bool rh_poisoned;
+ static unsigned rh_diag_usb;
+ static uint32_t rh_vddio, rh_avdd;
+ static bool rh_ready;
+@@ -58,6 +60,9 @@ static unsigned rh_ncpt;
+ static unsigned rh_lock;
+ static bool rh_poisoned;
+ 
 +/* Qualcomm command DB accelerator IDs (cmd-db.h). */
 +#define RH_ARC          3u
 +
-@@ -212,0 +218,148 @@ rh_lookup(const char *res, uint32_t *address)
+ static uint32_t
+ rh_read(vm_offset_t base, uint32_t off)
+ {
+@@ -210,6 +215,154 @@ rh_lookup(const char *res, uint32_t *address)
+ 	return 0;
+ }
+ 
 +/* Resolve an ARC resource and its zero-padded little-endian u16 VLVL table. */
 +static int
 +rh_lookup_arc(const char *res, uint32_t *address, uint32_t *aux,
@@ -165,15 +180,27 @@ index 828ea99..71e6182 100644
 +	return error;
 +}
 +
+ static bool
+ rh_free(unsigned t)
+ {
 diff --git a/bsd/dev/marble_a725_probe.c b/bsd/dev/marble_a725_probe.c
-index 67ba4bc..15cf6bd 100644
+index 67ba4bc..f93e9e2 100644
 --- a/bsd/dev/marble_a725_probe.c
 +++ b/bsd/dev/marble_a725_probe.c
-@@ -17,0 +18,3 @@ extern vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
+@@ -15,6 +15,9 @@
+ #include <libkern/crypto/sha2.h>
+ 
+ extern vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
 +extern int marble_rpmh_arc_vote(const char *, bool, uint32_t *, uint16_t *);
 +
 +#define A725_BUILD_ID     "a725-rpmh-arc-v1"
-@@ -178,0 +182,39 @@ a725_valid_read(uint32_t value)
+ 
+ #define A725_GPU_PA       0x03d00000u
+ #define A725_GPU_SIZE     0x00040000u
+@@ -176,6 +179,45 @@ a725_valid_read(uint32_t value)
+ 	return value != 0xffffffffu;
+ }
+ 
 +/*
 + * Validate MARBLE's RPMh ARC transport independently of GDSC/clock writes.
 + * SM7475 clock dependencies require MX before CX.  Release in reverse order;
@@ -213,12 +240,30 @@ index 67ba4bc..15cf6bd 100644
 +	return TRUE;
 +}
 +
-@@ -219,0 +262,6 @@ marble_a725_probe(void)
+ static boolean_t
+ a725_probe_smmu(const struct marble_a725_resources *r)
+ {
+@@ -217,6 +259,12 @@ marble_a725_probe(void)
+ 		printf("MARBLE A725: stop=GPUCC_MAP\n");
+ 		return;
+ 	}
 +	if (enabled >= 2) {
 +		if (a725_power_prerequisite_test(&r)) {
 +			printf("MARBLE A725: stage=2 stop=CX_GDSC_OWNER_MISSING (RPMh votes released; no GPUCC writes)\n");
 +		}
 +		return;
 +	}
-@@ -251,0 +300 @@ marble_a725_probe(void)
-+	/* Superseded by the mode-2/3 return above; retained for patch-series stability. */
+ 	uint32_t cx = a725_read32(r.gpucc, A725_GPUCC_CX_GDSCR);
+ 	uint32_t gx = a725_read32(r.gpucc, A725_GPUCC_GX_GDSCR);
+ 	printf("MARBLE A725: stage=POWER CX_GDSCR=%08x on=%u GX_GDSCR=%08x on=%u\n",
+@@ -249,10 +297,6 @@ marble_a725_probe(void)
+ 		return;
+ 	}
+ 	printf("MARBLE A725: stage=GMU mapped=1 (register reads deferred until firmware/power sequencing is derived)\n");
+-	if (enabled >= 2) {
+-		printf("MARBLE A725: stage=2 stop=POWER_CONTROLLER_MISSING (no MMIO writes issued)\n");
+-		return;
+-	}
+ 	if (!(gx & A725_GDSC_PWR_ON)) {
+ 		printf("MARBLE A725: stop=GX_POWER_COLLAPSED (no GPU access)\n");
+ 		return;

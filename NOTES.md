@@ -22,8 +22,13 @@ Local observations: exact prior CI buildtree single-file compile is clean for
 the exact 0100 tree passes. Synthetic RPMh tests cover ARC lookup, correct
 HLVL data, completion, restoration, refusal, and timeout quarantine while
 retaining the prior VRM tests. Firmware validator and default eight-CPU ADT
-checks pass. Physical RPMh/GPU power success is not claimed. Pending before
-stop: final repository checks, commit/push, one exact-head CI run and package.
+checks pass. Physical RPMh/GPU power success is not claimed. Commit `ee2f165`
+was pushed; run `40823681660` failed because zero-context 0101 hunks landed
+after `#endif` in the replayed source (`marble_a725_probe.c:310`). The direct
+source compile had therefore not validated patch placement. Corrected 0101
+uses normal context; replay now byte-matches the compile-checked source.
+Pending: corrective commit, the one permitted diagnosed-failure CI rerun, and
+package.
 
 ## MARBLE SMP8 read-only CPU performance diagnostic (2026-10-27)
 
