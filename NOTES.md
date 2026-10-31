@@ -1,5 +1,32 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## Active 0105 clock-root test milestone (2026-10-31)
+
+User confirms mode3 CX sequence and mode4 RPMh/CX sequence boot SpringBoard
+with working touch; GMU clock initialization remains incomplete. CPU/SMP work
+is finished and untouched. No GMU/GPU execution or acceleration is proven.
+
+Recovered interrupted 0105 and preserved original local changes under
+`/tmp/a725-work-preserved/`. Repaired source is
+`/tmp/a725-validation/xnu/bsd/dev/marble_a725_probe.c`; exact 0104 baseline,
+headers and log came from CI 40872190871. Full strict 0001–0105 reverse/replay
+and byte-match pass. Mode5 alone verifies inherited GPLL0 lock/RUN and
+600MHz /2, acquires GPU divider bit16, force-enables and updates GMU/HUB/XO
+roots (200/150/19.2MHz), restores roots/vote, then CX/RPMh. Unknown owners,
+ignored force writes and uncertain update/cleanup retain resources; no retry.
+Modes0–4 unchanged. No branch/CM3/GX/SCM/SMMU/context/client/userland change.
+
+Local checks: MARBLE arm64 TU compilation, SWEET exclusion, actual-C synthetic
+root failure/cleanup tests, strict replay, firmware inventory, firmware/ADT/
+boot-v4 unit tests, SMP8 ADT and existing RPMh tests. Source pins and detailed
+test boundary are in docs/MARBLE_A725_BRINGUP.md. Next: one deliberate CI build
+of this validated milestone and exact-artifact packaging, then USER manual
+physical root diagnostic. No phone command is authorized for automation.
+Known physically tested diagnostics-off SMP8 fallback:
+`shim/out/marble-xnu/marble-smp8-test.img`, SHA256
+`2d08c2be1ca1c7841cac85081a6c6b725713980cec16b97bf85cfe8695c402d5`.
+
+
 ## Active MARBLE A725 RPMh ARC prerequisite (2026-10-29)
 
 Starting head is `b980479867ea0da068d47296ca164adb8fd7a43e`. Source audit

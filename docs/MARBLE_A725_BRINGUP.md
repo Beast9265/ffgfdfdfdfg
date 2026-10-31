@@ -275,3 +275,99 @@ After clock cleanup, mode 4 reuses the physically verified CX rollback and
 RPMh reverse release.  The visual screen is gated by `marblegpuvisual=1` and
 delays only after all cleanup.  No GMU register, CM3 firmware, GX, GPU core,
 SCM, interconnect, or SMMU context-bank access is performed.
+
+## Cape RCG root stage (0105)
+
+The user reports mode 4 completed RPMh/CX sequencing but clock setup was
+incomplete and several CBCRs read zero. Zero CBCRs alone do not prove a bad
+GPUCC mapping or a stopped delayed AHB clock. The same `0x03d90000` window
+provided the physically verified CX GDSCR/HWCTRL transition. Mode 5 measures
+root programming directly; a reset/unconfigured root is a hypothesis until
+the physical CMD/CFG results are collected.
+
+The mode-5 sequence is derived from the pinned
+`gpucc-waipio.c`, `gcc-waipio.c`, `clk-rcg2.c`, and `clk-alpha-pll.c` at
+core-kernel commit `992742f9cdcc5ba27e07464a5b2c6a8474ffd1f0`, checked
+against Cape DT commit `2e649a7f...`.  The independently supplied
+`UniXNU-pong` reference at commit `64ddf288ab6f7fa38eab36a31a599dbaf051534a` confirms the same offsets and
+RCG encodings, but its GPU PLL setup, extra future clocks, and deliberate
+resource retention are not imported.
+
+| Root | CMD/CFG | Temporary rate | Parent |
+|---|---:|---:|---|
+| `gmu_clk_src` | GPUCC `+0x9318/+0x931c` | 200 MHz, CFG `0x00100602` | `gpll0_out_main_div` |
+| `hub_clk_src` | GPUCC `+0x93ec/+0x93f0` | 150 MHz, CFG `0x00100603` | `gpll0_out_main_div` |
+| `xo_clk_src` | GPUCC `+0x9010/+0x9014` | 19.2 MHz, CFG `0x00100001` | `bi_tcxo` |
+
+Mode 5 first requires GCC GPLL0 to be inherited RUN, output-enabled and
+locked. Cape changes GPLL0 to the Lucid-OLE layout (OPMODE +0x04, L +0x10,
+ALPHA +0x14, USER_CTL +0x18). The diagnostic requires L=31, ALPHA=0x4000
+and the post-divider field at USER_CTL[13:10]=1: 600 MHz / 2 from 19.2 MHz
+XO. It refuses an unknown inherited rate instead of assuming 300 MHz.  It does not configure or vote the global PLL.  It temporarily
+acquires only Cape's `gcc_gpu_gpll0_div_clk_src` vote at GCC `+0x62000` bit
+16.  Each RCG follows downstream `clk-rcg2.c`: reject a pending update, inherited force owner or unowned source, save
+CMD/CFG, set `CMD_ROOT_EN`, poll `CMD_ROOT_OFF` clear for at most 500 us,
+replace only SRC/DIV/MODE/HW fields, assert `CMD_UPDATE`, and poll its
+self-clear for at most 500 us.  Cleanup restores the same fields with another
+bounded update, restores the original ROOT_EN bit in reverse order, then
+restores the parent vote before CX/RPMh rollback.
+
+An update timeout is an uncertain hardware completion, not a normal failure.
+Mode 5 issues no second RCG transaction, parent removal, CX collapse, or RPMh
+release after that condition; it reports `RESOURCE RETAINED` and requires a
+cold reboot.  This avoids cutting power beneath a transaction that may finish
+late.  Mode 5 does not configure GPU PLL0/PLL1, write `+0x9534`, enable any
+branch clock, or access GMU/GX/GPU/SMMU registers.  In particular it does not
+clear an AON branch: matching downstream AON operations still provide no
+disable callback.
+
+
+### Recovery audit and physical test boundary (2026-10-31)
+
+Interrupted work was preserved in `/tmp/a725-work-preserved/`; no worktree
+reset was used. The exact 0104 source/headers and compiler commands were
+recovered from CI 40872190871. Full-tree reverse/replay of 0001–0105 passed;
+0105 strictly applies to the exact CI probe and byte-matches the compiled
+source. The MARBLE TU compiles to arm64 Mach-O. The SWEET configuration
+excludes the entire TU; no SWEET implementation or CPU/touch/storage/display
+source changes are introduced. Firmware, ADT, boot-v4, topology and synthetic
+RPMh checks pass. `tools/test-marble-a725-roots.py REPLAYED_XNU` runs actual
+root C with an MMIO allowlist and tests inherited-vote restoration, unrelated
+bit preservation, PLL rate/lock failures, ignored writes, ownership refusal,
+and every forward/cleanup update timeout. Host results cannot prove clocks.
+
+Mode 5 is deliberately the next independently testable prerequisite: it does
+not enable branches or start CM3. A PASS needs all three root transitions,
+root cleanup, CX rollback and both vote releases, followed by normal
+SpringBoard/touch/UFS operation. An inherited owner or pending update also
+retains resources. On uncertain completion do not repeat the experiment in
+that power session; cold reboot before returning to the tested fallback.
+The fixed-delay AHB readback issue belongs to the subsequent branch stage;
+mode 4 is unchanged and its strict bit0 check is not proof of clock failure.
+
+The source audit is pinned for the next agent, avoiding repeated discovery:
+
+- [Mondrian GPU notes](https://github.com/xNekom/ios-mondrian/blob/7fad03b8e7b3f7831a4a8d178008360a4cf5c2ea/docs/MONDIAN_GPU.md)
+  and patches 0164/0166/0168/0169/0171/0172/0182: hold root force until
+  branches run; delayed AHB may read zero. Submission cache maintenance must
+  cover **every submitted BO/page**, including VBO/constant/draw-state data,
+  not only the top-level IB. Preserve this requirement in the future ABI.
+- [Pong clock implementation](https://github.com/Chengdong-Yu/UniXNU-pong/blob/64ddf288ab6f7fa38eab36a31a599dbaf051534a/drivers/PongAdreno/PongAdrenoClocks.c):
+  confirms encodings, force/update and branch delay; its irreversible AON
+  acquisition, PLL configuration and retention policy are not imported.
+  This patch is authored locally from hardware facts, not a driver transplant.
+- Jebbranch `c03d18a34c9103e3ad1be27bc7a15038d607d69d`, actual
+  `0215-sweet-gpu-probe-v9.patch` and GPU notes through October 31: the
+  `fcae6a91...` correction confirms SLEEP=0/WAKE=1/ACTIVE=2. CM3 execution
+  experiments affected subsequent XNU startup; no CM3/WAKE experiment copied.
+- Lietxia `6f88f7e95c96b9344d41c6c8b2073e7197ab5071`: reported GPU SMMU
+  ID1=0x40000016 decodes CB0=+0x20000, within the factory +0x40000 window.
+  Our phone's ID1 must still be read/verified before context programming.
+- Mondrian `docs/COREANIMATION_GLES.md` at the pin above explicitly says its
+  backboardd hooks create a context but **the UI is still CPU-rendered**;
+  IOSurface request 0x7e and Mesa no-copy hooks are missing there. Do not
+  treat context creation as accelerated SpringBoard. Apollo
+  `467b48084c2939c36c093f017634c0e468f3a657` and Sailfish
+  `6f27e41ff249f2680540ebe8ee5ab982c5e641c9` EAGL/libdrm sources were
+  retrieved for the later bridge; offsets must be verified against local
+  20H392 binaries before use. No rootfs library installation was attempted.
