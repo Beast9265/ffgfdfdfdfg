@@ -2,6 +2,43 @@
 
 ## Active 0105 clock-root test milestone (2026-10-31)
 
+Source commit `c47c046f1b57cffa693dcac55274ccb7b8d88a45` is pushed to
+origin/marble. Its single CI run `41198566945` **PASSED** (13.5 /
+DEVELOPMENT / MARBLE / keep_going=true). No retry or old artifact substitution.
+Exact artifact was downloaded into `xnu/out-marble-ci-41198566945` and its
+provided SHA256SUMS passed. Packaged distinct image:
+`shim/out/marble-xnu/marble-a725-roots-test-41198566945.img`.
+Final verified copy: `shim/out/marble-xnu/latest-marble-xnu.img`.
+
+SHA256 kernel: `906f20b9e50aa06784190cd22d608af43e2661df3ead078ec357ec39763292d7`
+SHA256 payload: `899e632d214769baa59bce5056411417de5005fe8185dda1407d9e225fff7714`
+SHA256 boot: `b2305191e787d2cddc99c022f90f58c2858f9b850d0ae6ddb119e64d0bc5587b`
+
+Boot-v4 inspection and independent final-image audit PASS: exact locator and
+payload bytes, eight MPIDRs, all six firmware bytes/digests, working UFS/touch
+arguments with exactly `marblegpu=5 marblegpuvisual=1`. Shim was rebuilt with
+BOARD=marble-xnu, wrapped with the untouched stock boot_a.img. Previous latest
+is preserved under `a725-roots-41198566945/previous-latest.img`; the tested
+SMP8 fallback below is unchanged. No phone or rootfs operation was run.
+
+Manual test: `fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img`
+Photograph the 10-second `a725-gmu-roots-v1` screen. Require GPLL0 PARENT,
+gmu_clk_src (CFG masked 00100602), hub_clk_src (00100603), xo_clk_src
+(00100001), ROOT CLEANUP, CX ROLLBACK, CX/MX RELEASE all PASS, followed by
+normal SpringBoard and touch. Serial terminal line must say
+`stage=5 stop=ROOT_TEST_COMPLETE result=PASS`. Any FAIL/TIMEOUT/hang or
+RESOURCE_RETAINED is failure; cold reboot before another GPU experiment.
+Manual fallback: `fastboot boot ~/ios-marble/shim/out/marble-xnu/marble-smp8-test.img`
+Physical result is pending: do not implement/start CM3 assuming roots worked.
+This supersedes the earlier interrupted-checkpoint warnings below.
+
+Persistent ignored cache: `research/a725-0105/{references,validation,interrupted-work}`,
+CI log `research/a725-0105/ci-41198566945.log`, packaging script/log and all
+packaging hashes under `shim/out/marble-xnu/a725-roots-41198566945/`.
+Explicit gh/package sequence was used because marble-ci-build.sh still
+hardcodes the old repo and lacks a firmware-directory argument; do not use
+that unchanged helper for this firmware-gated mode.
+
 User confirms mode3 CX sequence and mode4 RPMh/CX sequence boot SpringBoard
 with working touch; GMU clock initialization remains incomplete. CPU/SMP work
 is finished and untouched. No GMU/GPU execution or acceleration is proven.
