@@ -2,6 +2,38 @@
 
 ## Active0107 vote-controlled parent/root test (2026-10-31)
 
+Source `acd8db9d1ea366e62a631c59055015b9d8143ed4` pushed; single CI
+`41202082682` PASSED (13.5/DEVELOPMENT/MARBLE/keep_going=true), no retry.
+Exact artifact checksum verified; distinct boot-v4 test image:
+`shim/out/marble-xnu/marble-a725-voted-roots-test-41202082682.img`.
+Final verified copy: `shim/out/marble-xnu/latest-marble-xnu.img`.
+Kernel SHA256 `3624dcfb4cd9e6237acb7bdceca5320dba5d2f5e07156d88ea8fadf977ada618`
+Payload SHA256 `1fcea03fa46c74d64eda9e0a47a1631abd8e08f82104d96aef0ef9ee3f2fc077`
+Boot SHA256 `b2bd3b09f027437c4bd8c19a51643f77b0b62e969fa25ff6f7af9d2d1cab02e7`
+
+Rebuilt BOARD=marble-xnu shim; stock boot_a.img repack. Final-image independent
+boot-v4/locator/payload/SMP8/firmware/cmdline verification PASS, exactly
+marblegpu=7 marblegpuvisual=1 with existing working UFS/touch arguments.
+Prior0105 b2305191...,0106 fc79613f... and tested SMP8 fallback2d08c2be...
+are unchanged. Previous latest0106 saved under a725-voted-roots-41202082682/previous-latest.img.
+No phone or rootfs operation. Physical mode7 result PENDING: do not advance
+CM3/GX/SMMU/command processing on assumed root success.
+
+Manual: `fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img`
+Photograph a725-voted-roots-v1 screen (10seconds): PRE MODE/OP/L,
+GPLL0 PARENT, all three root configs and cleanup/release. Expected parent can
+PASS with OP=0 only in qualified VOTE-RUN policy. Success needs MX/CX/ACD/CX,
+parent, GMU/HUB/XO roots00100602/00100603/00100001 (masked), ROOT CLEANUP,
+CX ROLLBACK, CX/MX releases all PASS; stage7 result=PASS; normal SpringBoard
+and touch. Any fail/timeout/hang/resource retention: capture and cold reboot;
+manual fallback `fastboot boot ~/ios-marble/shim/out/marble-xnu/marble-smp8-test.img`.
+Earlier mode5 post-CX Lff is still rejected; compare PRE vs parent if it recurs.
+
+Caches: research/a725-0107/{clk.c,probe-0106.c,probe-0107.c,implement.py,
+package.py,package.log,ci-41202082682.log,preexisting.patch}; packaging hashes
+and inspect report: shim/out/marble-xnu/a725-voted-roots-41202082682/.
+This result supersedes the pending-CI sentence below.
+
 New USER physical0106 evidence: identical S0/S1 MODE=80000005 OP=0
 L=4444001f ALPHA=4000 USER=02000403 APSS_VOTE=1. Raw rate600MHz;
 only REFUSAL04 (manual OPMODE RUN). Vendor FSM enable returns after LOCK
