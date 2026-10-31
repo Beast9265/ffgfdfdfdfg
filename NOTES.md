@@ -1,5 +1,32 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## Active0107 vote-controlled parent/root test (2026-10-31)
+
+New USER physical0106 evidence: identical S0/S1 MODE=80000005 OP=0
+L=4444001f ALPHA=4000 USER=02000403 APSS_VOTE=1. Raw rate600MHz;
+only REFUSAL04 (manual OPMODE RUN). Vendor FSM enable returns after LOCK
+without OPMODE; is_enabled is a separate manual-RUN observational helper.
+CCF enable trusts callback success, no is_enabled recheck. This justifies an
+isolated opt-in mode7 using the vendor voted readiness contract, not a general
+claim that OPMODE0 proves output. Source audit: docs/MARBLE_A725_VOTED_PARENT.md.
+
+0107 preserves all mode0–6 source byte-for-byte. Mode7 requires inherited
+vote-run/vote, lock/reset/outputs, exact600MHz /2 and two qualified reads.
+Checks before/after CX, after DIV gate acquire and around root operations.
+No global PLL/config/+62018 write. Only reversible GPU divider bit16 and
+three0105 root transactions; original bounded rollback/retention reused.
+No GMU/GX/SMMU/branch/storage/touch/SMP/graphics change. Post-CX Lff or lost
+lock still blocks; uncertain resources retained, no retry. Physical result
+pending; no GPU execution/acceleration claim.
+
+Local PASS: MARBLE compile; SWEET exclusion; strict full107-patch replay;
+mode0–6 source equivalence; existing0105/0106 host tests; new actual-C mode7
+qualification/restoration/lock-loss/update-timeout tests;14 firmware/ADT/boot
+unit tests; factory firmware validator and SMP8 firmware ADT. Ready for one
+CI run, exact-artifact packaging and USER manual temporary boot. Existing
+changes preserved in research/a725-0107/preexisting.patch; prior images kept.
+
+
 ## Active GPLL0 refusal / 0106 audit (2026-10-31)
 
 Source commit `5c3cfdd6e1ef228a8209025ab180024125d554a3` pushed; single

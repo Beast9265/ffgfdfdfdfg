@@ -1,0 +1,275 @@
+diff --git a/bsd/dev/marble_a725_probe.c b/bsd/dev/marble_a725_probe.c
+--- a/bsd/dev/marble_a725_probe.c
++++ b/bsd/dev/marble_a725_probe.c
+@@ -1129,6 +1129,191 @@
+ 	    result->mx_release == A725_ACKNOWLEDGED;
+ }
+ 
++/* Cape fixed Lucid-OLE's vote-run enable callback uses LOCK_DET, not
++ * software OPMODE. Accept only a qualified inherited vote; never vote or
++ * configure the shared PLL. Mode5's stricter manual-RUN policy is unchanged. */
++static boolean_t
++a725_voted_pll_ready(const struct a725_pll_sample *s)
++{
++	return (s->user & ((1u << 25) | 3u)) == ((1u << 25) | 3u) &&
++	    (s->vote & 1u) &&
++	    (s->mode & ((1u << 31) | 5u)) == ((1u << 31) | 5u) &&
++	    (s->opmode == 0u || s->opmode == 1u) &&
++	    (s->l & 0xffffu) == 31u &&
++	    (s->alpha & 0xffffu) == 0x4000u &&
++	    ((s->user >> 10) & 0xfu) == 1u;
++}
++
++static boolean_t
++a725_voted_pll_check(vm_offset_t gcc, struct a725_pll_sample *last)
++{
++	struct a725_pll_sample first;
++	/* Vendor's wait_for_pll_enable_lock bound is 100us. No vote write. */
++	if (!a725_poll32(gcc, A725_GPLL0_MODE, 1u << 31, 1u << 31, 100)) {
++		a725_pll_sample(gcc, 0, last);
++		return FALSE;
++	}
++	a725_pll_sample(gcc, 0, &first);
++	delay(10);
++	a725_pll_sample(gcc, 0, last);
++	return a725_voted_pll_ready(&first) && a725_voted_pll_ready(last);
++}
++
++static boolean_t
++a725_voted_parent_acquire(const struct marble_a725_resources *r,
++    struct a725_power_results *result)
++{
++	struct a725_pll_sample s;
++	boolean_t ready = a725_voted_pll_check(r->gcc, &s);
++	result->gpll0_mode = s.mode;
++	result->gpll0_opmode = s.opmode;
++	result->gpll0_l = s.l;
++	result->gpll0_alpha = s.alpha;
++	result->gpll0_user = s.user;
++	result->gpll0_vote = s.vote;
++	result->parent_before = s.gpu_vote;
++	if (!ready) {
++		result->parent_source = A725_FAILED;
++		result->root_error = ENXIO;
++		return FALSE;
++	}
++	if (!(s.gpu_vote & A725_GPU_GPLL0_DIV)) {
++		result->parent_touched = TRUE;
++		a725_write32(r->gcc, A725_GPU_GPLL0_VOTES,
++		    s.gpu_vote | A725_GPU_GPLL0_DIV);
++		delay(10);
++	}
++	result->parent_after = a725_read32(r->gcc, A725_GPU_GPLL0_VOTES);
++	if (!a725_voted_pll_check(r->gcc, &s)) {
++		/* A consumer gate may be live: retain it and its power parents. */
++		result->root_uncertain = TRUE;
++		result->parent_source = A725_FAILED;
++		result->root_error = EIO;
++		return FALSE;
++	}
++	result->parent_source = result->parent_after & A725_GPU_GPLL0_DIV ?
++	    A725_ACKNOWLEDGED : A725_FAILED;
++	if (result->parent_source != A725_ACKNOWLEDGED) {
++		result->root_error = EIO;
++		return FALSE;
++	}
++	return TRUE;
++}
++
++static boolean_t
++a725_voted_root_stage_test(const struct marble_a725_resources *r,
++    struct a725_power_results *result, struct a725_pll_sample *pre)
++{
++	uint32_t release_hlvl = 0;
++	uint16_t release_vlvl = 0;
++	boolean_t cx_voted = FALSE;
++
++	printf("MARBLE GPU: stage=GMU_ROOTS begin build=%s\n", "a725-voted-roots-v1");
++	if (!a725_voted_pll_check(r->gcc, pre)) {
++		result->root_error = ENXIO;
++		printf("MARBLE GPU: voted-parent stop=PRECHECK_FAILED (no power writes)\n");
++		return FALSE;
++	}
++	result->mx_vote = A725_FAILED;
++	result->mx_vote_error = marble_rpmh_arc_vote("mx.lvl", TRUE,
++	    &result->mx_hlvl, &result->mx_vlvl);
++	result->mx_vote = result->mx_vote_error == ETIMEDOUT ? A725_TIMEOUT :
++	    result->mx_vote_error ? A725_FAILED : A725_ACKNOWLEDGED;
++	if (result->mx_vote_error) {
++		goto out;
++	}
++	result->cx_vote = A725_FAILED;
++	result->cx_vote_error = marble_rpmh_arc_vote("cx.lvl", TRUE,
++	    &result->cx_hlvl, &result->cx_vlvl);
++	result->cx_vote = result->cx_vote_error == ETIMEDOUT ? A725_TIMEOUT :
++	    result->cx_vote_error ? A725_FAILED : A725_ACKNOWLEDGED;
++	if (result->cx_vote_error) {
++		goto out;
++	}
++	cx_voted = TRUE;
++	result->aop_acd = A725_FAILED;
++	result->aop_error = a725_aop_acd_enable(r);
++	result->aop_acd = result->aop_error == ETIMEDOUT ? A725_TIMEOUT :
++	    result->aop_error ? A725_FAILED : A725_ACKNOWLEDGED;
++	if (result->aop_error) {
++		goto out;
++	}
++	result->cx_enable = A725_FAILED;
++	result->cx_enable_error = a725_cx_enable_test(r, result);
++	result->cx_enable = result->cx_enable_error == ETIMEDOUT ? A725_TIMEOUT :
++	    result->cx_enable_error ? A725_FAILED : A725_ACKNOWLEDGED;
++	if (result->cx_enable_error) {
++		goto cleanup_cx;
++	}
++
++	if (a725_voted_parent_acquire(r, result)) {
++		for (unsigned i = 0; i < A725_ROOT_COUNT; i++) {
++			struct a725_pll_sample live;
++			if (!a725_voted_pll_check(r->gcc, &live)) {
++				result->root_uncertain = TRUE;
++				result->root_error = EIO;
++				break;
++			}
++			if (!a725_root_program_one(r, result, i)) {
++				break;
++			}
++		}
++	}
++	for (unsigned i = 0; i < A725_ROOT_COUNT; i++) {
++		printf("MARBLE GPU: root=%s result=%s cmd=%08x cfg=%08x\n",
++		    a725_roots[i].name, a725_result_name(result->roots[i]),
++		    result->root_cmd_live[i], result->root_cfg_live[i]);
++	}
++	struct a725_pll_sample live;
++	if (result->parent_source == A725_ACKNOWLEDGED &&
++	    !a725_voted_pll_check(r->gcc, &live)) {
++		result->root_uncertain = TRUE;
++		result->root_error = EIO;
++	}
++	a725_root_cleanup(r, result);
++	if (result->parent_source == A725_ACKNOWLEDGED &&
++	    !a725_voted_pll_check(r->gcc, &live)) {
++		result->root_uncertain = TRUE;
++		result->root_error = EIO;
++	}
++	if (result->root_uncertain ||
++	    result->root_cleanup != A725_ACKNOWLEDGED) {
++		/* Do not cut a parent or CX under an uncertain active RCG. */
++		printf("MARBLE GPU: stage=GMU_ROOTS result=RESOURCE_RETAINED reason=UNCERTAIN_CLEANUP cold_reboot_required=1\n");
++		return FALSE;
++	}
++
++cleanup_cx:
++	if (result->cx_touched) {
++		a725_cx_rollback(r, result);
++	}
++out:
++	if (cx_voted) {
++		result->cx_release = A725_FAILED;
++		result->cx_release_error = marble_rpmh_arc_vote("cx.lvl", FALSE,
++		    &release_hlvl, &release_vlvl);
++		result->cx_release = result->cx_release_error == ETIMEDOUT ?
++		    A725_TIMEOUT : result->cx_release_error ? A725_FAILED :
++		    A725_ACKNOWLEDGED;
++	}
++	if (result->mx_vote == A725_ACKNOWLEDGED) {
++		result->mx_release = A725_FAILED;
++		result->mx_release_error = marble_rpmh_arc_vote("mx.lvl", FALSE,
++		    &release_hlvl, &release_vlvl);
++		result->mx_release = result->mx_release_error == ETIMEDOUT ?
++		    A725_TIMEOUT : result->mx_release_error ? A725_FAILED :
++		    A725_ACKNOWLEDGED;
++	}
++	return result->parent_source == A725_ACKNOWLEDGED &&
++	    result->roots[0] == A725_ACKNOWLEDGED &&
++	    result->roots[1] == A725_ACKNOWLEDGED &&
++	    result->roots[2] == A725_ACKNOWLEDGED &&
++	    result->root_cleanup == A725_ACKNOWLEDGED &&
++	    result->cx_rollback == A725_ACKNOWLEDGED &&
++	    result->cx_release == A725_ACKNOWLEDGED &&
++	    result->mx_release == A725_ACKNOWLEDGED;
++}
++
+ static boolean_t
+ a725_root_stage_test(const struct marble_a725_resources *r,
+     struct a725_power_results *result)
+@@ -1271,6 +1456,45 @@
+ 	printf("     MARBLE ADRENO 725 CLOCK ROOT DIAGNOSTIC\n");
+ 	printf("     build: %s\n", A725_ROOT_ID);
+ 	printf("------------------------------------------------------------\n");
++	printf(" MX VOTE       : %s\n", a725_pass_name(r->mx_vote));
++	printf(" CX VOTE       : %s\n", a725_pass_name(r->cx_vote));
++	printf(" AOP ACD       : %s\n", a725_pass_name(r->aop_acd));
++	printf(" CX ENABLE     : %s\n", a725_pass_name(r->cx_enable));
++	printf(" GPLL0 PARENT  : %s mode=%08x op=%08x vote=%08x\n",
++	    a725_pass_name(r->parent_source), r->gpll0_mode,
++	    r->gpll0_opmode, r->gpll0_vote);
++	for (unsigned i = 0; i < A725_ROOT_COUNT; i++) {
++		printf(" %-13s : %s CMD=%08x CFG=%08x\n", a725_roots[i].name,
++		    a725_pass_name(r->roots[i]), r->root_cmd_live[i],
++		    r->root_cfg_live[i]);
++	}
++	printf(" GPLL0 RATE    : L=%08x ALPHA=%08x USER=%08x\n",
++	    r->gpll0_l, r->gpll0_alpha, r->gpll0_user);
++	printf(" ROOT ERROR    : %d\n", r->root_error);
++	printf(" ROOT CLEANUP  : %s error=%d%s\n",
++	    a725_pass_name(r->root_cleanup), r->root_cleanup_error,
++	    r->root_uncertain ? " RESOURCE RETAINED" : "");
++	printf(" CX ROLLBACK   : %s\n", a725_pass_name(r->cx_rollback));
++	printf(" RPMh RELEASE  : CX=%s MX=%s\n",
++	    a725_pass_name(r->cx_release), a725_pass_name(r->mx_release));
++	printf("------------------------------------------------------------\n");
++	printf(" ROOT TRANSITIONS ONLY; BRANCHES/GMU/GX/GPU NOT STARTED\n");
++	printf(" Continuing normal iOS startup in about 10 seconds.\n");
++	printf("============================================================\n");
++	delay(10000000);
++}
++
++static void
++a725_show_voted_root_results(const struct a725_power_results *r,
++    const struct a725_pll_sample *pre)
++{
++	printf("\n\n============================================================\n");
++	printf("     MARBLE ADRENO 725 CLOCK ROOT DIAGNOSTIC\n");
++	printf("     build: %s\n", "a725-voted-roots-v1");
++	printf("------------------------------------------------------------\n");
++	printf(" VOTE-RUN POLICY; GLOBAL PLL/VOTE READ-ONLY\n");
++	printf(" PRE MODE=%08x OP=%08x L=%08x\n",
++	    pre->mode, pre->opmode, pre->l);
+ 	printf(" MX VOTE       : %s\n", a725_pass_name(r->mx_vote));
+ 	printf(" CX VOTE       : %s\n", a725_pass_name(r->cx_vote));
+ 	printf(" AOP ACD       : %s\n", a725_pass_name(r->aop_acd));
+@@ -1363,7 +1587,7 @@
+ 	uint32_t enabled = 0, visual = 0;
+ 	PE_parse_boot_argn("marblegpu", &enabled, sizeof(enabled));
+ 	PE_parse_boot_argn("marblegpuvisual", &visual, sizeof(visual));
+-	if (enabled < 1 || enabled > 6) {
++	if (enabled < 1 || enabled > 7) {
+ 		return;
+ 	}
+ 	if (enabled >= 2 && !a725_validate_firmware()) {
+@@ -1433,6 +1657,24 @@
+ 		printf("MARBLE A725: stage=4 stop=GMU_CLOCK_TEST_COMPLETE (GMU/GX/GPU not attempted)\n");
+ 		return;
+ 	}
++	if (enabled == 7) {
++		struct a725_power_results result = { 0 };
++		struct a725_pll_sample pre = { 0 };
++		r.aoss = ml_io_map(A725_AOSS_PA, A725_AOSS_SIZE);
++		r.ipcc = ml_io_map(A725_IPCC_PA, A725_IPCC_SIZE);
++		r.gcc = ml_io_map(A725_GCC_PA, A725_GCC_SIZE);
++		if (!r.aoss || !r.ipcc || !r.gcc) {
++			printf("MARBLE A725: stage=7 stop=ROOT_RESOURCE_MAP_FAILED\n");
++			return;
++		}
++		boolean_t complete = a725_voted_root_stage_test(&r, &result, &pre);
++		if (visual == 1) {
++			a725_show_voted_root_results(&result, &pre);
++		}
++		printf("MARBLE A725: stage=7 stop=ROOT_TEST_COMPLETE result=%s (branches/GMU/GX/GPU not attempted)\n",
++		    complete ? "PASS" : "FAIL");
++		return;
++	}
+ 	if (enabled == 5) {
+ 		struct a725_power_results result = { 0 };
+ 		r.aoss = ml_io_map(A725_AOSS_PA, A725_AOSS_SIZE);
