@@ -1,5 +1,29 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## Active GPLL0 refusal / 0106 audit (2026-10-31)
+
+User physically tested c47c046 / 0105: MX/CX/ACD/CX and cleanup PASS, but
+MODE=5 OP=0 VOTE=1 L=444400ff ALPHA=4000 USER=02000403; parent refused.
+Offsets are correct for Cape OLE. USER25 selects vote-run and APSS_VOTE0
+is already inherited set; vendor enable only votes and polls lock. L[15:0]
+ff decodes 4.9008GHz, not 600MHz. Why that view exists remains UNRESOLVED;
+no safe global-PLL write established. Zero roots on 0105 failure are unfilled
+result fields, not MMIO observations. GMU TCXO19.2 is supported, but HUB has
+no published TCXO rate. Do not bypass 0105, change L, toggle inherited vote,
+or claim firmware/GPU execution.
+
+New 0106 adds read-only mode6 before any GPUCC map/power operation: two
+GPLL0/GPLL4 register snapshots 1000us apart, decoded refusal bits, no MMIO
+write/rail/SCM/root access. Existing modes0–5 unchanged. Detailed source
+analysis, expected screen and evidence needed: docs/MARBLE_A725_PLL_AUDIT.md.
+Local PASS: strict 0001–0106 reverse/replay byte-match, MARBLE TU compile,
+SWEET exclusion, new real-C read allowlist/refusal/delay tests, 0105 root
+fault tests, 14 firmware/ADT/boot unit tests, factory firmware validator,
+SMP8 firmware ADT. Ready for one CI run and manual read-only hardware test.
+Existing changes preserved under research/a725-0106/preexisting.patch.
+0105 and SMP8 fallback images retain their previously recorded hashes.
+
+
 ## Active 0105 clock-root test milestone (2026-10-31)
 
 Source commit `c47c046f1b57cffa693dcac55274ccb7b8d88a45` is pushed to

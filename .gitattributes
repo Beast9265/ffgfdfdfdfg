@@ -11,3 +11,4 @@ xnu/patches/0102-marble-a725-rpmh-screen.patch whitespace=-blank-at-eol,-space-b
 xnu/patches/0103-marble-a725-cx-gdsc.patch whitespace=-blank-at-eol,-space-before-tab
 xnu/patches/0104-marble-a725-gmu-clocks.patch whitespace=-blank-at-eol,-space-before-tab
 xnu/patches/0105-marble-a725-clock-roots.patch whitespace=-blank-at-eol,-space-before-tab
+xnu/patches/0106-marble-a725-pll-audit.patch whitespace=-blank-at-eol,-space-before-tab

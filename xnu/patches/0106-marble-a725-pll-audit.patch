@@ -1,0 +1,107 @@
+diff --git a/bsd/dev/marble_a725_probe.c b/bsd/dev/marble_a725_probe.c
+--- a/bsd/dev/marble_a725_probe.c
++++ b/bsd/dev/marble_a725_probe.c
+@@ -635,6 +635,77 @@
+ 	return valid;
+ }
+ 
++/* Read-only Cape Lucid-OLE register audit; never acquire a PLL or rail. */
++struct a725_pll_sample {
++	uint32_t mode, opmode, status, l, alpha, user, vote, gpu_vote;
++};
++
++static void
++a725_pll_sample(vm_offset_t gcc, uint32_t base, struct a725_pll_sample *s)
++{
++	s->mode = a725_read32(gcc, base + A725_GPLL0_MODE);
++	s->opmode = a725_read32(gcc, base + A725_GPLL0_OPMODE);
++	s->status = a725_read32(gcc, base + 0x0c); /* PLL_OFF_STATUS */
++	s->l = a725_read32(gcc, base + A725_GPLL0_L);
++	s->alpha = a725_read32(gcc, base + A725_GPLL0_ALPHA);
++	s->user = a725_read32(gcc, base + A725_GPLL0_USER);
++	s->vote = a725_read32(gcc, A725_GPLL0_VOTE);
++	s->gpu_vote = a725_read32(gcc, A725_GPU_GPLL0_VOTES);
++}
++
++/* Same strict prerequisites as 0105, expressed separately for diagnosis.
++ * This function only explains refusal; it cannot authorize clock writes. */
++static uint32_t
++a725_pll_refusal(const struct a725_pll_sample *s)
++{
++	uint32_t reason = 0;
++	if (!(s->mode & (1u << 31))) reason |= 1u;
++	if (!(s->mode & 1u)) reason |= 2u;
++	if (s->opmode != 1u) reason |= 4u;
++	if ((s->l & 0xffffu) != 31u ||
++	    (s->alpha & 0xffffu) != 0x4000u) reason |= 8u;
++	if (((s->user >> 10) & 0xfu) != 1u) reason |= 16u;
++	return reason;
++}
++
++static void
++a725_pll_readonly_test(vm_offset_t gcc, boolean_t visual)
++{
++	struct a725_pll_sample samples[2][2];
++	for (unsigned pass = 0; pass < 2; pass++) {
++		a725_pll_sample(gcc, 0, &samples[pass][0]);
++		a725_pll_sample(gcc, 0x4000, &samples[pass][1]);
++		if (pass == 0) delay(1000);
++	}
++	printf("\n============================================================\n");
++	printf(" MARBLE GPLL READ-ONLY AUDIT a725-pll-audit-v1\n");
++	printf(" GCC PA=%08x; 2 samples, 1000us apart\n", A725_GCC_PA);
++	for (unsigned pass = 0; pass < 2; pass++) {
++		for (unsigned pll = 0; pll < 2; pll++) {
++			const struct a725_pll_sample *s = &samples[pass][pll];
++			printf(" S%u GPLL%u MODE=%08x OP=%08x STATUS=%08x\n",
++			    pass, pll * 4, s->mode, s->opmode, s->status);
++			printf("  L=%08x ALPHA=%08x USER=%08x\n",
++			    s->l, s->alpha, s->user);
++			printf("  LOCK=%u OUT=%u RESET_N=%u VOTE_RUN=%u\n",
++			    !!(s->mode & (1u << 31)), !!(s->mode & 1u),
++			    !!(s->mode & 4u), !!(s->user & (1u << 25)));
++			printf("  APSS_VOTE=%08x GPU_GATES=%08x\n", s->vote, s->gpu_vote);
++		}
++	}
++	uint32_t reason = a725_pll_refusal(&samples[1][0]);
++	printf(" GPLL0 REFUSAL=%02x (01 lock 02 output 04 run)\n", reason);
++	printf("                       (08 rate 10 divider)\n");
++	printf(" GPLL0 REGISTER-DECODE Hz=%llu; expected 600000000\n",
++	    (unsigned long long)((uint64_t)(samples[1][0].l & 0xffffu) * 19200000u +
++	    (((uint64_t)(samples[1][0].alpha & 0xffffu) * 19200000u) >> 16)));
++	printf(" Register decode is NOT a measured clock frequency.\n");
++	printf(" CAPTURE COMPLETE; PLL/GPU EXECUTION NOT TESTED\n");
++	printf(" NO MMIO WRITES / NO RAIL VOTES / NO ROOT ACCESS\n");
++	printf("============================================================\n");
++	if (visual) delay(10000000);
++}
++
+ /*
+  * The matching GCC driver exposes GPLL0 as a fixed Lucid-OLE PLL (Cape fixup) and the
+  * GPU's divided parent as vote bit 16.  Do not configure or vote the global
+@@ -1292,7 +1363,7 @@
+ 	uint32_t enabled = 0, visual = 0;
+ 	PE_parse_boot_argn("marblegpu", &enabled, sizeof(enabled));
+ 	PE_parse_boot_argn("marblegpuvisual", &visual, sizeof(visual));
+-	if (enabled < 1 || enabled > 5) {
++	if (enabled < 1 || enabled > 6) {
+ 		return;
+ 	}
+ 	if (enabled >= 2 && !a725_validate_firmware()) {
+@@ -1305,6 +1376,16 @@
+ 	    A725_GMU_PA, A725_GMU_SIZE, A725_GMU_HFI_SPI, A725_GMU_SPI,
+ 	    A725_GPUCC_PA, A725_GPUCC_SIZE, A725_SMMU_PA, A725_SMMU_SIZE);
+ 
++	if (enabled == 6) {
++		r.gcc = ml_io_map(A725_GCC_PA, A725_GCC_SIZE);
++		if (!r.gcc) {
++			printf("MARBLE A725: stage=6 stop=GCC_MAP_FAILED\n");
++			return;
++		}
++		a725_pll_readonly_test(r.gcc, visual == 1);
++		printf("MARBLE A725: stage=6 stop=PLL_READONLY_COMPLETE\n");
++		return;
++	}
+ 	r.gpucc = ml_io_map(A725_GPUCC_PA, A725_GPUCC_SIZE);
+ 	if (!r.gpucc) {
+ 		printf("MARBLE A725: stop=GPUCC_MAP\n");
