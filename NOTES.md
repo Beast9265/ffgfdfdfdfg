@@ -2,6 +2,37 @@
 
 ## Active GPLL0 refusal / 0106 audit (2026-10-31)
 
+Source commit `5c3cfdd6e1ef228a8209025ab180024125d554a3` pushed; single
+CI run `41200611688` PASSED (13.5/DEVELOPMENT/MARBLE/keep_going=true).
+No retry. Exact kernel artifact and its SHA256SUMS verified. Distinct image:
+`shim/out/marble-xnu/marble-a725-pll-audit-test-41200611688.img`;
+verified final copy: `shim/out/marble-xnu/latest-marble-xnu.img`.
+Kernel SHA256 `a508ae717fc2e35dfafb8280c6f375ecbf79ebcf99a40f224d442f0a111400d5`
+Payload SHA256 `cfde8898762dffee94d7d12b6d5a916faa5568059617d328e3a639d8c83324d8`
+Boot SHA256 `fc79613f08725d84b9f487c48e1237cd796e3b129b1942f75e103362b05e5427`
+
+Final boot-v4/locator/payload/firmware/SMP8/cmdline audit PASS. The working
+UFS/bitbang-touch arguments are unchanged, with `marblegpu=6 marblegpuvisual=1`.
+Rebuilt shim BOARD=marble-xnu, packaged with stock boot_a.img. Existing
+0105 image SHA256 b2305191... and SMP8 fallback 2d08c2be... unchanged.
+Previous latest (0105) also saved under a725-pll-audit-41200611688/previous-latest.img.
+No phone interaction or root filesystem operation. Physical mode6 result pending.
+
+Manual: `fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img`
+Photograph full a725-pll-audit-v1 screen: S0/S1 GPLL0/GPLL4, including
+STATUS, APSS_VOTE/GPU_GATES and REFUSAL. Same observed values give 0d and
+REGISTER-DECODE Hz=4900800000. Diagnostic success means CAPTURE COMPLETE
+and normal SpringBoard/touch afterward, not a usable PLL or GPU. Compare
+mode6 pre-power reads with user's mode5 post-CX evidence before any write.
+For a hang, cold reboot; manual fallback:
+`fastboot boot ~/ios-marble/shim/out/marble-xnu/marble-smp8-test.img`.
+Do not rerun a GPU power experiment after uncertain state.
+
+Persistent ignored records: research/a725-0106/{package.py,package.log,
+ci-41200611688.log,probe-0105.c,probe-0106.c,preexisting.patch,unit-tests.log};
+all packaging hashes/inspect report in shim/out/marble-xnu/a725-pll-audit-41200611688/.
+The build/image result here supersedes the pending-CI sentence below.
+
 User physically tested c47c046 / 0105: MX/CX/ACD/CX and cleanup PASS, but
 MODE=5 OP=0 VOTE=1 L=444400ff ALPHA=4000 USER=02000403; parent refused.
 Offsets are correct for Cape OLE. USER25 selects vote-run and APSS_VOTE0
