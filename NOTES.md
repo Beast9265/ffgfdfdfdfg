@@ -1,5 +1,33 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## Active 0109 AHB investigation — local validation (2026-11-06)
+
+USER physical0108 result for669acd653a5babca624c514dfa5fafc530bec440,
+CI42033150162: MX/CX/AOP/CX/parent/roots and GMU/CXO/AXI/MEMNOC ACK;
+AHB TIMEOUT CBCR00000000 inherited0 errno60; HUB/APB unattempted;
+root cleanup/CX rollback/releases unattempted; RESOURCE RETAINED1.
+iOS subsequently booted normal SpringBoard with touch/gestures working.
+Baseline preserved; GPU initialization FAILED/unverified. This supersedes
+all0108-pending statements below. Cold reboot before another GPU experiment.
+
+Pinned Cape audit confirms AHB911c bit0, BRANCH_HALT_DELAY10us, RO parent
+divider9430 -> HUB root93ec.0108 failed additional bit0 readback, not vendor
+halt polling. No verified root cause/extra ownership override found.
+GCC CFG_AHB81004 inherited enable guard was missing versus yukoimi reference.
+New isolated mode9 captures config/dividers/CX/GX/HUB state and at most one
+AHB write with0/1/10/100/200us raw readbacks. Retains10us requirement; no
+late-latch promotion, reset/extra vote/PLL/firmware/SMMU/GX operation.
+On uncertain AHB state retain branches and upstream leases. Correct DT
+hub_clk is HUB_CX_INT9148, not sibling HUB_AON93e8; both observed only.
+Details: docs/MARBLE_A725_AHB_AUDIT.md. Primary reference remains
+8e50e532f09b3042165048c3c72e04b5a8e68898. No physical0109 result yet.
+
+Local real-C fault tests and existing0105–0108 tests PASS; full109 strict
+reverse/replay exact source match PASS; modes0–8 byte-equivalence PASS.
+MARBLE ARM64 Mach-O object and SWEET exclusion compile PASS;12 firmware/ADT/
+boot unit tests PASS. Source ready for one CI build and exact-artifact package. No phone/rootfs/partition operation.
+Preexisting changes preserved in research/a725-0109/preexisting.patch.
+
 ## Active 0108 GMU dependencies (2026-11-06) — packaged, physical test pending
 
 USER reports PHYSICAL 0107 PASS on POCO F5, a725-voted-roots-v1:
