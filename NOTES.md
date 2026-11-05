@@ -1,6 +1,6 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
-## Active 0110 read-only AHB mapping audit (2026-11-06)
+## Active 0110 read-only AHB mapping audit — packaged, physical pending (2026-11-06)
 
 USER physical0109 ea712baa8d0e42cfcb981350c8c25982b0d160da:
 CFG_AHB1 REFUSAL0 WRITE1; dividers0; HUB_AON/HUB_CX_INT1;
@@ -9,29 +9,68 @@ Normal SpringBoard and touchscreen afterward. Baseline preserved;
 AHB/GPU operation unresolved. Supersedes0109-pending statements below.
 Cold reboot before next experiment, even when SpringBoard works.
 
+Source `97796d814f88055a930c5bbf06b1379c5658fcdf` pushed to origin/marble;
+single exact CI `42040333616` PASSED,13.5/DEVELOPMENT/MARBLE/keep_going=true.
+No retry or older artifact substitution. Exact artifact SHA256SUMS verified.
+Distinct image: `shim/out/marble-xnu/marble-a725-ahb-readonly-test-42040333616.img`
+Final verified copy: `shim/out/marble-xnu/latest-marble-xnu.img`
+Kernel SHA256 `420fbfc163bb36ded5fc7118091606b341cbc7d5ef1381917a83bf14800afb38`
+Payload SHA256 `702e1ae03ddf715d765842b591c9ebd9a51978b3374ae1dc53f86f90b526194e`
+Boot SHA256 `6e19def8477a249ae6688046c1eb31ddde94a71d26641e2d8125ea84b696eb24`
+
 Exact pinned Cape driver re-fetch byte-matches earlier source. Physical
-GPUCC base/size matches live DT. ml_io_map uses Device IO mapping; AHB and
+GPUCC base/size matches live DT. ml_io_map requests Device IO; AHB and
 previously successful roots share4KiB address page, not proof of AHB write
 acceptance.0108/0109 bit0 test is stricter than vendor DELAY10us callback;
 zero readback alone proves neither off nor on. No secure readback contract
-or hidden reset/vote prerequisite established. Actual write is STR32+DSB SY.
+or hidden reset/vote prerequisite established. Existing store is STR32+DSB SY.
+Linux writel uses STR32 with dma_wmb before it; no verified extra AHB-specific
+barrier/handshake found. Ownership/controller acceptance remain UNKNOWN.
 
 Smallest justified0110: isolated opt-in mode10, no device stores/rail/power/
 clock writes. CPU AT read/write preflight/PAR audits actual AHB/HUB_CFG/GCC_CFG
 PA and Device-nGnRnE attributes; only then two inherited read-only snapshots,
-GCC CFG gate first each pass. No mapping compensation or unsafe peripheral
-probe. CAPTURE COMPLETE is not clock PASS; AHB_STATE always UNRESOLVED.
+GCC CFG gate first each pass. AT write check is not a device store. No mapping
+compensation or unsafe peripheral probe. CAPTURE COMPLETE is not clock PASS;
+AHB_STATE always UNRESOLVED. Mode acquires no hardware lease to unwind.
 Pinned debugcc has independent AHB measurement selector16 (GMU1e/HUB20);
 shared measurement engine is NOT touched. Future measurement requires own
 ownership/control/scaling/two-window/rollback audit before device writes.
 Audit: docs/MARBLE_A725_AHB_READONLY.md. No GMU/HFI/GX/CP startup.
 
-Local actual-C translation/refusal/read allowlist tests, existing0105–0109
-regression tests, ARM64 object compile/disassembly and full110 strict replay
-with source equality PASS. Modes0–9 byte-equivalence PASS;12 firmware/ADT/boot
-unit tests and SWEET exclusion compile PASS. Commit/CI/package pending.
-No phone/rootfs/partition operation; preexisting changes saved under
-research/a725-0110/preexisting.patch and remain excluded.
+Local PASS: actual-C PAR fault/wrong-PA/attribute/refusal/read allowlist tests,
+zero AHB capture, every all-ones snapshot read, gate loss and visual-only delay;
+existing0105–0109 regression tests; ARM64 Mach-O object compile/disassembly
+(AT/ISB/DAIF/PAR preserve); full110 strict reverse/replay exact source equality;
+modes0–9 byte equivalence except accepted range;12 firmware/ADT/boot unit tests;
+SWEET exclusion. Final boot-v4/locator/exact payload/cmdline/SMP8/all six
+firmware checks PASS. Rebuilt BOARD=marble-xnu shim and stock boot_a repack.
+Working UFS/bitbang touch/SMP8 args preserved; marblegpu=10 marblegpuvisual=1.
+0105–0109 image hashes and known-good marble-smp8-test.img unchanged.
+Prior latest saved in a725-ahb-readonly-42040333616/previous-latest.img.
+No phone/rootfs/partition operation. Unrelated preexisting changes remain
+excluded; saved under research/a725-0110/preexisting.patch.
+
+After USER cold reboot, manual only:
+`fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img`
+Photograph ten-second a725-ahb-readonly-v1(mode10): map R/W PAs and raw PAR,
+REFUSAL, CFG read count, GCC_CFG,12 named S0/S1 rows/counts and CAPTURE result.
+PA fields valid only PAR.F0; config fields valid only below CFG READS count;
+missing GPU slots print NOT READ. Expected capture:03d9911c/03d993f0/00181004,
+R/W PAR fault0 attr00, REFUSAL0 CFG READS2 GPU READS12/12 CAPTURE COMPLETE,
+terminal stage10 result CAPTURED writes0 AHB_STATE_UNRESOLVED, then normal
+SpringBoard/touch/SMP8. AHB0/0 is observation, not clock failure or success.
+Snapshot state is inherited cold boot, not0109's powered state. Firmware gate
+stays blocked even on successful capture until independent AHB evidence.
+
+Failure/refusal/all-ones/mismatch/hang/regression: capture, STOP, cold reboot,
+analyze before another GPU experiment. Manual known-good recovery after cold
+reboot: `fastboot boot ~/ios-marble/shim/out/marble-xnu/marble-smp8-test.img`.
+Fallback SHA2562d08c2be1ca1c7841cac85081a6c6b725713980cec16b97bf85cfe8695c402d5.
+Physical0110 PENDING; no controller-write or AHB-frequency proof claimed.
+Caches: research/a725-0110/{gpucc-waipio.c,debugcc-waipio.c,linux-io.h,replay,
+objects,probe-disassembly.txt,package.py,package.log,ci-42040333616.log};
+hashes/inspection in shim/out/marble-xnu/a725-ahb-readonly-42040333616/.
 
 ## Active 0109 AHB latch diagnostic — packaged, physical pending (2026-11-06)
 

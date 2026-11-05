@@ -123,3 +123,36 @@ snapshot read, zero AHB snapshots,26-read allowlist and visual-only delay.
 The extracted module has no device-write/power API. ARM64 object disassembly
 verifies AT S1E1R/W, ISBs and DAIF/PAR preservation. Host AT is mocked; only
 physical testing can supply actual translation/register values.
+
+## Verified build and recovery
+
+Source `97796d814f88055a930c5bbf06b1379c5658fcdf`;
+one successful exact-commit [CI42040333616](https://github.com/Beast9265/ffgfdfdfdfg/actions/runs/42040333616),
+13.5/DEVELOPMENT/MARBLE/keep_going=true. Full110 patch replay/source equality,
+ARM64 Mach-O object/disassembly, SWEET exclusion, modes0–9 preservation,
+actual-C mode10 and0105–0109 regressions,12 firmware/ADT/boot tests and final
+boot-v4/payload/arguments/SMP8/all-six-firmware checks PASS.
+
+Distinct image: `shim/out/marble-xnu/marble-a725-ahb-readonly-test-42040333616.img`.
+Final verified copy: `shim/out/marble-xnu/latest-marble-xnu.img`.
+
+- Kernel SHA256: `420fbfc163bb36ded5fc7118091606b341cbc7d5ef1381917a83bf14800afb38`
+- Payload SHA256: `702e1ae03ddf715d765842b591c9ebd9a51978b3374ae1dc53f86f90b526194e`
+- Image SHA256: `6e19def8477a249ae6688046c1eb31ddde94a71d26641e2d8125ea84b696eb24`
+
+After a user-performed cold reboot, manual only:
+
+```sh
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
+```
+
+After any refusal/failure/hang, stop and cold reboot before recovery or another
+experiment. Known-good manual recovery:
+
+```sh
+fastboot boot ~/ios-marble/shim/out/marble-xnu/marble-smp8-test.img
+```
+
+0105–0109 and known-good recovery hashes were verified unchanged. No phone,
+rootfs or partition operation performed. Physical0110 remains pending;
+AHB/controller state and permission to start firmware remain unresolved.
