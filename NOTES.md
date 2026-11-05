@@ -1,6 +1,6 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
-## Active 0109 AHB investigation — local validation (2026-11-06)
+## Active 0109 AHB latch diagnostic — packaged, physical pending (2026-11-06)
 
 USER physical0108 result for669acd653a5babca624c514dfa5fafc530bec440,
 CI42033150162: MX/CX/AOP/CX/parent/roots and GMU/CXO/AXI/MEMNOC ACK;
@@ -10,23 +10,61 @@ iOS subsequently booted normal SpringBoard with touch/gestures working.
 Baseline preserved; GPU initialization FAILED/unverified. This supersedes
 all0108-pending statements below. Cold reboot before another GPU experiment.
 
+Source `ea712baa8d0e42cfcb981350c8c25982b0d160da` pushed to origin/marble;
+single exact CI `42036219174` PASSED, 13.5/DEVELOPMENT/MARBLE/keep_going=true.
+No retry or old-kernel substitution. Exact artifact SHA256SUMS verified.
+Distinct image: `shim/out/marble-xnu/marble-a725-ahb-latch-test-42036219174.img`
+Final verified copy: `shim/out/marble-xnu/latest-marble-xnu.img`.
+Kernel SHA256 `54c2bead97a936522a42a3358b4def82a3b090c68f422b3ba265c07df2d35c2e`
+Payload SHA256 `e738871573f92f086d01bb5107e7230889e96f0daa3fd425c11044d8eb417d32`
+Boot SHA256 `d36a9c2f568ec76376e0f44010537c84cf1a782355f30bbf7501be13cb4f0e6f`
+
 Pinned Cape audit confirms AHB911c bit0, BRANCH_HALT_DELAY10us, RO parent
 divider9430 -> HUB root93ec.0108 failed additional bit0 readback, not vendor
 halt polling. No verified root cause/extra ownership override found.
 GCC CFG_AHB81004 inherited enable guard was missing versus yukoimi reference.
-New isolated mode9 captures config/dividers/CX/GX/HUB state and at most one
+Isolated mode9 captures config/dividers/CX/GX/HUB state and at most one
 AHB write with0/1/10/100/200us raw readbacks. Retains10us requirement; no
 late-latch promotion, reset/extra vote/PLL/firmware/SMMU/GX operation.
 On uncertain AHB state retain branches and upstream leases. Correct DT
 hub_clk is HUB_CX_INT9148, not sibling HUB_AON93e8; both observed only.
-Details: docs/MARBLE_A725_AHB_AUDIT.md. Primary reference remains
-8e50e532f09b3042165048c3c72e04b5a8e68898. No physical0109 result yet.
+Before AHB, require inherited running HUB_CX_INT, owned CX, collapsed GX,
+qualified parent/root and no unknown AHB controls. Final normal HUB check
+only follows stable AHB latch/post-guards. No physical0109 result yet.
+Details/seven-question audit: docs/MARBLE_A725_AHB_AUDIT.md. Primary reference
+remains yukoimi/hackios-marble8e50e532f09b3042165048c3c72e04b5a8e68898.
+No hardware TRM/security-ownership proof obtained; root cause remains UNKNOWN.
 
-Local real-C fault tests and existing0105–0108 tests PASS; full109 strict
-reverse/replay exact source match PASS; modes0–8 byte-equivalence PASS.
-MARBLE ARM64 Mach-O object and SWEET exclusion compile PASS;12 firmware/ADT/
-boot unit tests PASS. Source ready for one CI build and exact-artifact package. No phone/rootfs/partition operation.
-Preexisting changes preserved in research/a725-0109/preexisting.patch.
+Local PASS: full109 strict reverse/replay with exact source equality;
+modes0–8 byte equivalence except supported range; MARBLE ARM64 Mach-O object
+compile and SWEET exclusion; actual-C ignored/late/self-clearing/invalid AHB
+reads, inherited lease, config/GX/HUB/divider/control refusals, post-parent
+loss, RCG/cleanup failures and retention; existing0105–0108 tests;12 firmware/
+ADT/boot unit tests. Final boot-v4/locator/exact payload/cmdline/SMP8/all six
+firmware hashes PASS. Rebuilt BOARD=marble-xnu shim, stock boot_a repack.
+Working UFS/bitbang touch/SMP8 args preserved; marblegpu=9 marblegpuvisual=1.
+0105–0108 images and known-good marble-smp8-test.img hashes unchanged.
+Previous latest saved in a725-ahb-latch-42036219174/previous-latest.img.
+No phone, rootfs or partition interaction. Unrelated preexisting changes
+preserved/excluded (research/a725-0109/preexisting.patch).
+
+After USER cold reboot, manual only:
+`fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img`
+Photograph ten-second a725-ahb-latch-v1(mode9): config gate/refusal/write,
+RO dividers, HUB siblings, CX/GX, AHB BEFORE/T0/T1/T10/T100/T200/AFTER,
+all clocks and cleanup/releases. T labels are requested delay offsets, not
+independent timestamps. AFTER valid only when branch cleanup ACK. PASS needs
+stable bit0 at10/100/200us, refusal0, error0, all six clocks ACK (APB skipped),
+branch/root cleanup, CX rollback and both releases ACK, RETAINED0, terminal
+stage9 result PASS and normal SpringBoard/touch/SMP8. No frequency or GPU
+execution claim follows. Any failure/timeout/retention/hang: STOP, cold reboot,
+analyze before another experiment. No firmware startup before physical
+clock dependency PASS. Known-good fallback remains marble-smp8-test.img
+SHA2562d08c2be1ca1c7841cac85081a6c6b725713980cec16b97bf85cfe8695c402d5.
+
+Caches: research/a725-0109/{cape-gpu.dtsi,clk-regmap-divider.c,replay,objects,
+package.py,package.log,ci-42036219174.log}; image inspection/hashes under
+shim/out/marble-xnu/a725-ahb-latch-42036219174/.
 
 ## Active 0108 GMU dependencies (2026-11-06) — packaged, physical test pending
 

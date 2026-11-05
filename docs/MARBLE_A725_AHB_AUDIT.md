@@ -103,3 +103,40 @@ readback, config-bus/GX/HUB/divider/control refusals, each RCG timeout and faile
 branch cleanup. Tests enforce one AHB enable write, bounded capture, no HUB
 progress after AHB failure, no forbidden writes and upstream retention.
 Power services are mocked; host PASS does not replace physical testing.
+
+Further prepare-path audit: `clk_regmap_div_ro_ops` has round/recalc/init/debug
+callbacks, no enable or set-rate callback. AHB's `clk_prepare_regmap` returns
+immediately without a branch-specific `vdd_data.rate_max`, which this AHB
+initializer does not supply. Parent RCG voltage dependencies remain covered
+by the existing rail/root stage. This is source evidence against inventing an
+AHB-only vote, not proof of the physical bus/security state.
+
+T0/T1/T10/T100/T200 denote requested cumulative delay offsets after the one
+write (or inherited-state observation), not independently timestamped sample
+latencies or measured clock rates. Interrupts can stretch those intervals.
+
+## Verified build and manual image
+
+Source commit `ea712baa8d0e42cfcb981350c8c25982b0d160da`;
+one successful exact-commit [CI42036219174](https://github.com/Beast9265/ffgfdfdfdfg/actions/runs/42036219174),
+13.5/DEVELOPMENT/MARBLE/keep_going=true. No retry/older artifact substitution.
+Full109 replay, source equality, modes0–8 preservation, ARM64 Mach-O object,
+SWEET exclusion, new actual-C and0105–0108 tests,12 firmware/ADT/boot tests and
+final boot-v4/payload/cmdline/SMP8/all-six-firmware checks PASS.
+
+Distinct image: `shim/out/marble-xnu/marble-a725-ahb-latch-test-42036219174.img`.
+Final verified copy: `shim/out/marble-xnu/latest-marble-xnu.img`.
+
+- Kernel SHA256: `54c2bead97a936522a42a3358b4def82a3b090c68f422b3ba265c07df2d35c2e`
+- Payload SHA256: `e738871573f92f086d01bb5107e7230889e96f0daa3fd425c11044d8eb417d32`
+- Image SHA256: `d36a9c2f568ec76376e0f44010537c84cf1a782355f30bbf7501be13cb4f0e6f`
+
+After a user-performed cold reboot, manual command only:
+
+```sh
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
+```
+
+No phone/rootfs/partition operation performed. Physically tested0107,
+baseline-preserving0108 and known-good SMP8 image hashes remain unchanged.
+Physical0109 result and cause of the0108 AHB failure remain unverified.
