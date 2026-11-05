@@ -1,5 +1,15 @@
 # 0110: read-only AHB mapping audit
 
+## Physical0110 result confirmed
+
+The user confirms REFUSAL00, CFG READS2 and snapshots12/12; exact AHB/HUB/GCC
+mappings; AHB0/0 and GCC_CFG1/1; normal SpringBoard, touch and gestures afterward.
+Unpowered HUB_CX_INT/GMU_CBCR/CXO_CBCR have bit31 set, unlike their qualified
+powered0109 state. This capture proves neither AHB-off nor AHB-on. The shared
+debug-engine registers were not included. See
+[the0111 measurement audit](MARBLE_A725_AHB_MEASUREMENT_PLAN.md) for the remaining
+ownership and restoration gate. This supersedes historical pending0110 text.
+
 ## Physical 0109 evidence
 
 User reports `a725-ahb-latch-v1` mode9, source
@@ -154,5 +164,5 @@ fastboot boot ~/ios-marble/shim/out/marble-xnu/marble-smp8-test.img
 ```
 
 0105–0109 and known-good recovery hashes were verified unchanged. No phone,
-rootfs or partition operation performed. Physical0110 remains pending;
+rootfs or partition operation performed. Physical0110 capture is confirmed;
 AHB/controller state and permission to start firmware remain unresolved.

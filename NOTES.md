@@ -1,5 +1,49 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## Active 0111 measurement investigation — active writes withheld (2026-11-06)
+
+USER confirms physical0110 read-only capture PASS: REFUSAL00, CFG READS2,
+snapshots12/12, AHB/HUB/GCC PA03d9911c/03d993f0/00181004, AHB0/0,
+GCC_CFG1/1; no device writes/votes/startup. Normal SpringBoard, touchscreen
+and gestures afterward, no observed baseline regression. Supersedes all
+pending0110 statements below. User also reports bit31 set on unpowered
+HUB_CX_INT/GMU_CBCR/CXO_CBCR, versus powered0109 HUB1 and GMU/CXO ACKs.
+Consistent with power-dependent state/visibility; no AHB clock proof.
+
+Audited pinned992742f9cdcc5ba27e07464a5b2c6a8474ffd1f0 debugcc-waipio.c,
+clk-debug.c/h, clk-rpmh.c, GPUCC and yukoimi8e50e532f09b3042165048c3c72e04b5a8e68898.
+Route: GPU debug9564 selector16 AHB -> GCC72000 selector16e; postdiv9270/
+72004 each /2. Gates9274/72008, XO/4 gate7200c; CTL72038, STATUS7203c.
+Nominal reference confirmed: boardXO76.8MHz /RPMh4 /measurement4 =4.8MHz.
+Two windows4096/131072 ticks ~0.853333/27.306667ms; total output scale4.
+
+DECISION: no active0111 patch/mode/image. User requires ownership/current
+state and safe restoration established before writes; those gates are NOT
+met.0110 did not capture any of the nine shared debug registers. No reviewed
+in-tree debug-engine writer found, but inherited/firmware owner unknown.
+Vendor wait is unbounded and not an ownership protocol; vendor/reference
+cleanup does not prove bounded stop and exact owned-field restoration.
+Reference's GMU/HUB measurements are not our AHB evidence. Do not port it
+unchanged or repeatedly force AHB. Full8-condition audit, exact missing
+physical evidence and future timeout/retention policy:
+docs/MARBLE_A725_AHB_MEASUREMENT_PLAN.md.
+
+Implemented host-only source/selector/reference audit and counter arithmetic
+validator; always writes_authorized=false, never AHB PASS.3 unit tests and
+actual-source selector/offset/XO fault injections PASS. Unchanged kernel
+full110 strict replay/source match, ARM64 MARBLE object, SWEET exclusion,
+existing0105–0110 actual-C fault tests PASS. Existing0110 boot-v4/payload/
+arguments/SMP8/all six firmware/latest/recovery hashes revalidated PASS.
+No new CI: kernel source and images unchanged. Last kernel source97796d814f88055a930c5bbf06b1379c5658fcdf,
+CI42040333616. Existing0110 SHA256
+6e19def8477a249ae6688046c1eb31ddde94a71d26641e2d8125ea84b696eb24;
+SMP8 recovery2d08c2be1ca1c7841cac85081a6c6b725713980cec16b97bf85cfe8695c402d5.
+No phone/rootfs/partition operation; no new boot command. Modes0–10,
+working images and recovery preserved. No GMU/HFI/GX/CP startup permitted.
+Unrelated preexisting changes remain excluded; research/a725-0111 contains
+preexisting.patch, pinned source cache, source-audit.json, replay/objects,
+package-check.log, boot-inspect.json and owner-search evidence.
+
 ## Active 0110 read-only AHB mapping audit — packaged, physical pending (2026-11-06)
 
 USER physical0109 ea712baa8d0e42cfcb981350c8c25982b0d160da:
