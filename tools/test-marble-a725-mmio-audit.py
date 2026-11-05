@@ -15,7 +15,7 @@ typedef bool boolean_t;
 #define FALSE false
 '''
 constants=s[s.index('#define A725_BUILD_ID'):s.index('struct a725_firmware_spec')]
-code=s[s.index('struct a725_io_translation {'):s.index('void\nmarble_a725_probe(void)')]
+code=s[s.index('struct a725_io_translation {'):s.index('void\nmarble_a725_probe(void)')].split('/* Pinned clk-debug.c reads CTL')[0]
 a=code.index('static void\na725_io_translate');b=code.index('static uint64_t\na725_io_par_pa',a)
 mock=r'''
 static unsigned translates,reads,elapsed,gcc_reads,gpu_reads;

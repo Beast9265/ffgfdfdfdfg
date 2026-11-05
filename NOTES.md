@@ -1,5 +1,39 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## Active 0111 snapshot and host preparation — local validation (2026-11-06)
+
+Continuing1a1f78a. Driver audit finds non-destructive read contracts for all
+nine shared debug words: mux/div/gates/CTL are normal reads/RMW; STATUS is
+polled repeatedly, not read-clear; CLR_CNT is a write. Isolated mode11 adds
+read-only two-pass inherited snapshot with ten CPU translation checks, config
+gate first each pass,20-read allowlist, counts, change mask, EN/CLR/DONE/count.
+No measurement/counter/clock/rail/AHB/GMU/SMMU/firmware/HFI/GX/CP operation.
+Modes0–10 byte-identical except accepted range. Busy/changing is observation,
+not permission or AHB PASS. Snapshot is not the active measurement withheld
+in the prior handoff. Details: docs/MARBLE_A725_DEBUG_SNAPSHOT.md.
+
+Host preparation library integrated at gpu/a725, NOT linked to kernel:
+individual A725 VMA/reservation/TCM rules from yukoimi8e50e532; unmodified
+AdrenoFirmware40fdb8ea and ArmSmmu4K4d0d6598 sources/licenses; pinned KGSL
+51cf4da5 independently verifies VMA and TCM dword/byte offsets. Actual factory
+firmware:6 reservations/51 pages/0x33000 backing,4 payloads,135 TCM words.
+Implements structure/profile validation, ordinary RAM staging/zero padding,
+TCM shadow overlay and inactive4KiB GMU tables (SID5/flags400). All live ops
+hard-disabled regardless of evidence bits; no device callback/activation API.
+Kernel allocation, live SMMU/TCM/firmware loading and cache lifecycle remain
+unimplemented and physically gated. See gpu/a725/PROVENANCE.md.
+
+Local PASS: full111 strict reverse/replay exact source match; mode0–10 byte
+equivalence; MARBLE ARM64 snapshot object and SWEET exclusion; portable library
+ARM64 Mach-O objects; real-C snapshot map/read/refusal/busy/change/no-write
+fault tests, prior0105–0110 regressions; actual-firmware ASan/UBSan all-truncation,
+RAM/TCM contents/guard bytes, inactive leaf/permission/alias/capacity tests;
+15 firmware/ADT/boot/measurement Python unit tests; factory firmware inventory.
+Commit, one exact-commit CI and distinct mode11 package pending.
+No phone/rootfs/partition interaction. Preexisting changes preserved/excluded
+under research/a725-0111-snapshot/preexisting.patch. Physical0110 capture and
+normal SpringBoard/touch/gestures already confirmed; mode11 physical pending.
+
 ## Active 0111 measurement investigation — active writes withheld (2026-11-06)
 
 USER confirms physical0110 read-only capture PASS: REFUSAL00, CFG READS2,

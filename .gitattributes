@@ -16,3 +16,4 @@ xnu/patches/0107-marble-a725-voted-parent-roots.patch whitespace=-blank-at-eol,-
 xnu/patches/0108-marble-a725-gmu-dependencies.patch whitespace=-blank-at-eol,-space-before-tab
 xnu/patches/0109-marble-a725-ahb-latch-audit.patch whitespace=-blank-at-eol,-space-before-tab
 xnu/patches/0110-marble-a725-ahb-readonly-map-audit.patch whitespace=-blank-at-eol,-space-before-tab
+xnu/patches/0111-marble-a725-debug-inherited-snapshot.patch whitespace=-blank-at-eol,-space-before-tab

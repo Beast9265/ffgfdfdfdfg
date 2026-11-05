@@ -1,0 +1,26 @@
+[
+  {
+    "file": "AdrenoFirmware.LICENSE",
+    "sha256": "03a8ab50f4b3b4c65f070d07302a3522e7badbf54dde090cca59bb3e746bba3f"
+  },
+  {
+    "file": "AdrenoFirmware.c",
+    "sha256": "c3cc714a65ce90216a0fc5c6f0e102ae1769c45e559c08f94a0b5f6fa3e97070"
+  },
+  {
+    "file": "AdrenoFirmware.h",
+    "sha256": "6b2e308f2feae92642f21da2667c3665a2e234ef79e7c5400e7aac7dd3c5b7ed"
+  },
+  {
+    "file": "ArmSmmu4K.LICENSE",
+    "sha256": "7a730b868c1ff986cdfc210a7b140ab4e0a31bf7db1d15db901427973efaa70f"
+  },
+  {
+    "file": "ArmSmmu4K.c",
+    "sha256": "0adb19b483e56e723014ed6cfe2c29f9d9735ae2770f62cf0057b22937dbd157"
+  },
+  {
+    "file": "ArmSmmu4K.h",
+    "sha256": "e25063b9134afc7eb79e7c030bc2858608cf0ade5da714d5dfd600fee5007e8e"
+  }
+]

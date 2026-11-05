@@ -1,0 +1,111 @@
+diff --git a/bsd/dev/marble_a725_probe.c b/bsd/dev/marble_a725_probe.c
+--- a/bsd/dev/marble_a725_probe.c
++++ b/bsd/dev/marble_a725_probe.c
+@@ -2204,13 +2204,89 @@
+      complete ? "CAPTURED" : "REFUSED");
+ }
+ 
++/* Pinned clk-debug.c reads CTL by RMW and polls STATUS; neither is
++ * clear-on-read. All commands (CNT_EN/CLR_CNT) require writes, absent here. */
++#define A725_DEBUG_SNAPSHOT_COUNT 9u
++static const struct { const char *name; boolean_t gpucc; uint32_t offset; }
++a725_debug_snapshot_regs[A725_DEBUG_SNAPSHOT_COUNT] = {
++ {"GPU_MUX", TRUE, 0x9564}, {"GPU_DIV", TRUE, 0x9270},
++ {"GPU_GATE", TRUE, 0x9274}, {"GCC_MUX", FALSE, 0x72000},
++ {"GCC_DIV", FALSE, 0x72004}, {"GCC_GATE", FALSE, 0x72008},
++ {"XO4_GATE", FALSE, 0x7200c}, {"COUNTER_CTL", FALSE, 0x72038},
++ {"COUNTER_STATUS", FALSE, 0x7203c},
++};
++struct a725_debug_snapshot {
++ struct a725_io_translation mapping[A725_DEBUG_SNAPSHOT_COUNT + 1];
++ uint32_t values[2][A725_DEBUG_SNAPSHOT_COUNT], cfg[2];
++ unsigned maps, cfg_reads, reads[2], refusal, changed;
++};
++static boolean_t
++a725_debug_snapshot_capture(const struct marble_a725_resources *r,
++    struct a725_debug_snapshot *s)
++{
++ for (unsigned i = 0; i <= A725_DEBUG_SNAPSHOT_COUNT; i++) {
++  boolean_t gpu = i < A725_DEBUG_SNAPSHOT_COUNT ? a725_debug_snapshot_regs[i].gpucc : FALSE;
++  uint32_t off = i < A725_DEBUG_SNAPSHOT_COUNT ? a725_debug_snapshot_regs[i].offset : 0x81004;
++  vm_offset_t va = (gpu ? r->gpucc : r->gcc) + off;
++  uint64_t pa = (gpu ? A725_GPUCC_PA : A725_GCC_PA) + off;
++  a725_io_translate(va, &s->mapping[i]); s->maps++;
++  if (!a725_io_translation_valid(&s->mapping[i], va, pa)) s->refusal |= 1u << i;
++ }
++ if (s->refusal) return FALSE; /* No device reads under a bad mapping. */
++ for (unsigned pass = 0; pass < 2; pass++) {
++  s->cfg[pass] = a725_read32(r->gcc, 0x81004); s->cfg_reads++;
++  if (!(s->cfg[pass] & 1u) || s->cfg[pass] == ~0u) {s->refusal |= 1u << 10; return FALSE;}
++  for (unsigned i = 0; i < A725_DEBUG_SNAPSHOT_COUNT; i++) {
++   vm_offset_t base = a725_debug_snapshot_regs[i].gpucc ? r->gpucc : r->gcc;
++   s->values[pass][i] = a725_read32(base, a725_debug_snapshot_regs[i].offset);
++   s->reads[pass]++;
++   if (s->values[pass][i] == ~0u) {s->refusal |= 1u << 11; return FALSE;}
++   if (pass && s->values[0][i] != s->values[1][i]) s->changed |= 1u << i;
++  }
++  if (!pass) delay(1000);
++ }
++ return TRUE;
++}
++static void
++a725_debug_snapshot_test(const struct marble_a725_resources *r, boolean_t visual)
++{
++ struct a725_debug_snapshot s = {0};
++ boolean_t complete = a725_debug_snapshot_capture(r, &s);
++ printf("\n============================================================\n");
++ printf(" MARBLE a725-debug-inherited-v1 (mode11)\n");
++ printf(" READ ONLY; NO COUNTER COMMAND / NO CLOCK OR RAIL WRITE\n");
++ printf(" MAPS=%u/10 REFUSAL=%03x CFG READS=%u\n", s.maps, s.refusal, s.cfg_reads);
++ printf(" GCC_CFG S0=%08x S1=%08x (slots valid below CFG READS)\n", s.cfg[0], s.cfg[1]);
++ printf(" SNAPSHOT COUNTS=%u/%u (target9/9) CHANGED=%03x\n", s.reads[0], s.reads[1], s.changed);
++ for (unsigned i = 0; i < A725_DEBUG_SNAPSHOT_COUNT; i++) {
++  printf(" %-14s ", a725_debug_snapshot_regs[i].name);
++  if (i < s.reads[0]) printf("S0=%08x ", s.values[0][i]); else printf("S0=NOT READ ");
++  if (i < s.reads[1]) printf("S1=%08x\n", s.values[1][i]); else printf("S1=NOT READ\n");
++ }
++ if (complete) {
++  printf(" CTL S0 EN=%u CLR=%u; S1 EN=%u CLR=%u\n",
++      !!(s.values[0][7] & (1u << 20)), !!(s.values[0][7] & (1u << 21)),
++      !!(s.values[1][7] & (1u << 20)), !!(s.values[1][7] & (1u << 21)));
++  printf(" STATUS S0 DONE=%u COUNT=%u; S1 DONE=%u COUNT=%u\n",
++      !!(s.values[0][8] & (1u << 25)), s.values[0][8] & 0x1ffffffu,
++      !!(s.values[1][8] & (1u << 25)), s.values[1][8] & 0x1ffffffu);
++ }
++ printf(" %s; OWNERSHIP AND AHB CLOCK STATE UNRESOLVED\n", complete ? "CAPTURE COMPLETE" : "CAPTURE REFUSED");
++ printf(" Busy/changing values are observations, not permission to write\n");
++ printf(" GMU/SMMU/FIRMWARE/HFI/GX/CP NOT ACTIVATED\n");
++ printf("============================================================\n");
++ if (visual) delay(10000000);
++ printf("MARBLE A725: stage=11 stop=DEBUG_INHERITED_SNAPSHOT result=%s writes=0\n",
++     complete ? "CAPTURED" : "REFUSED");
++}
++
+ void
+ marble_a725_probe(void)
+ {
+ 	uint32_t enabled = 0, visual = 0;
+ 	PE_parse_boot_argn("marblegpu", &enabled, sizeof(enabled));
+ 	PE_parse_boot_argn("marblegpuvisual", &visual, sizeof(visual));
+-	if (enabled < 1 || enabled > 10) {
++	if (enabled < 1 || enabled > 11) {
+ 		return;
+ 	}
+ 	if (enabled >= 2 && !a725_validate_firmware()) {
+@@ -2223,6 +2299,16 @@
+ 	    A725_GMU_PA, A725_GMU_SIZE, A725_GMU_HFI_SPI, A725_GMU_SPI,
+ 	    A725_GPUCC_PA, A725_GPUCC_SIZE, A725_SMMU_PA, A725_SMMU_SIZE);
+ 
++	if (enabled == 11) {
++		r.gpucc = ml_io_map(A725_GPUCC_PA, A725_GPUCC_SIZE);
++		r.gcc = ml_io_map(A725_GCC_PA, A725_GCC_SIZE);
++		if (!r.gpucc || !r.gcc) {
++			printf("MARBLE A725: stage=11 stop=DEBUG_MAP_FAILED writes=0\n");
++			return;
++		}
++		a725_debug_snapshot_test(&r, visual == 1);
++		return;
++	}
+ 	if (enabled == 10) {
+ 		r.gpucc = ml_io_map(A725_GPUCC_PA, A725_GPUCC_SIZE);
+ 		r.gcc = ml_io_map(A725_GCC_PA, A725_GCC_SIZE);
