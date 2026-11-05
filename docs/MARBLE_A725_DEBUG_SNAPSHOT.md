@@ -40,7 +40,9 @@ No writes, clock/rail votes, counter start/stop/clear, mux programming or AHB
 enable attempt occurs. No SMMU/GMU/TCM execution aperture is accessed.
 
 Busy, DONE, nonzero counts or changing words are preserved and reported as
-observations. No clock/ownership readiness is inferred. The changed-word mask
+observations. S0/S1 are inherited snapshots, NOT newly initiated short/full
+measurement windows; never feed them to the two-window rate decoder as if
+this mode had measured a clock. No clock/ownership readiness is inferred. The changed-word mask
 uses table order above, bit0=GPU selector through bit8=STATUS. Existing firmware
 structure/hash preflight remains mandatory. Modes0–10 retain their source
 functions and semantics; only the accepted mode range is extended.
@@ -113,3 +115,37 @@ No automated phone operation is permitted. Known-good recovery is unchanged.
 5. Before a device firmware copy/start: pinned identities, verified mappings,
    guarded TCM snapshot/readback/rollback and retained backing on uncertain
    quiescence, secure prerequisites, then separately gated CM3 readiness/HFI.
+
+## Verified image
+
+Source `c1e23e859bde1d7336cf0c80276c91c10a78f2a9`;
+one successful exact-commit [CI42048501290](https://github.com/Beast9265/ffgfdfdfdfg/actions/runs/42048501290),
+13.5/DEVELOPMENT/MARBLE/keep_going=true. No retry/older artifact substitution.
+Full111 patch replay/source equality, MARBLE ARM64 object, SWEET exclusion,
+portable ARM64 library objects, mode0–10 preservation, new snapshot/host
+sanitizer tests, prior0105–0110 regressions,15 Python unit tests and final
+boot-v4/payload/arguments/SMP8/all-six-firmware checks PASS.
+
+Distinct image: `shim/out/marble-xnu/marble-a725-debug-inherited-test-42048501290.img`.
+Final verified copy: `shim/out/marble-xnu/latest-marble-xnu.img`.
+
+- Kernel SHA256: `c1566f0b10adb41c609da90dd3cbe9fb0229c873d370b39859d99824137955ee`
+- Payload SHA256: `33bdbbdffa186b4829b9155ce4dfe40ac3307fe20a9adae07b52dfecd9a9a61a`
+- Image SHA256: `b58d3b01109ef1b335c1896ba505cb48ce6afdc31828b238766551ed214b36a4`
+
+After user cold reboot, manual only:
+
+```sh
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
+```
+
+For failure/uncertain state, photograph, stop and cold reboot before another
+experiment. Known-good manual recovery after cold reboot:
+
+```sh
+fastboot boot ~/ios-marble/shim/out/marble-xnu/marble-smp8-test.img
+```
+
+0105–0110 and recovery image hashes remain unchanged. No phone, rootfs or
+partition operation occurred. Physical mode11 capture remains pending. AHB
+measurement, live SMMU/TCM/firmware loading and GMU execution remain unverified.

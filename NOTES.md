@@ -1,38 +1,70 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
-## Active 0111 snapshot and host preparation — local validation (2026-11-06)
+## Active 0111 snapshot + host preparation — packaged, physical pending (2026-11-06)
 
-Continuing1a1f78a. Driver audit finds non-destructive read contracts for all
-nine shared debug words: mux/div/gates/CTL are normal reads/RMW; STATUS is
-polled repeatedly, not read-clear; CLR_CNT is a write. Isolated mode11 adds
-read-only two-pass inherited snapshot with ten CPU translation checks, config
-gate first each pass,20-read allowlist, counts, change mask, EN/CLR/DONE/count.
-No measurement/counter/clock/rail/AHB/GMU/SMMU/firmware/HFI/GX/CP operation.
+Continuing1a1f78a. Source `c1e23e859bde1d7336cf0c80276c91c10a78f2a9` pushed;
+one exact-commit CI `42048501290` PASSED (13.5/DEVELOPMENT/MARBLE/keep_going=true).
+No retry/older artifact substitution. Exact artifact SHA256SUMS verified.
+Distinct image: `shim/out/marble-xnu/marble-a725-debug-inherited-test-42048501290.img`.
+Final verified copy: `shim/out/marble-xnu/latest-marble-xnu.img`.
+Kernel SHA256 `c1566f0b10adb41c609da90dd3cbe9fb0229c873d370b39859d99824137955ee`
+Payload SHA256 `33bdbbdffa186b4829b9155ce4dfe40ac3307fe20a9adae07b52dfecd9a9a61a`
+Boot SHA256 `b58d3b01109ef1b335c1896ba505cb48ce6afdc31828b238766551ed214b36a4`
+
+Driver audit supports non-destructive reads of all9 debug words: mux/div/
+gates/CTL normal reads/RMW, STATUS repeatedly polled, CLR_CNT write-only
+command action (CTL itself is readable, not read-clear). Isolated mode11
+adds two-pass inherited snapshot with10 CPU translation checks, config gate
+first each pass,20-read allowlist, read counts, changed mask, EN/CLR/DONE/count.
+No active measurement/counter/clock/rail/AHB/GMU/SMMU/firmware/HFI/GX/CP operation.
 Modes0–10 byte-identical except accepted range. Busy/changing is observation,
-not permission or AHB PASS. Snapshot is not the active measurement withheld
-in the prior handoff. Details: docs/MARBLE_A725_DEBUG_SNAPSHOT.md.
+not permission or AHB PASS. S0/S1 are NOT newly initiated short/full count
+windows. Snapshot is not the active measurement withheld in prior handoff.
+Read contracts/physical acceptance: docs/MARBLE_A725_DEBUG_SNAPSHOT.md.
 
-Host preparation library integrated at gpu/a725, NOT linked to kernel:
-individual A725 VMA/reservation/TCM rules from yukoimi8e50e532; unmodified
-AdrenoFirmware40fdb8ea and ArmSmmu4K4d0d6598 sources/licenses; pinned KGSL
-51cf4da5 independently verifies VMA and TCM dword/byte offsets. Actual factory
-firmware:6 reservations/51 pages/0x33000 backing,4 payloads,135 TCM words.
-Implements structure/profile validation, ordinary RAM staging/zero padding,
-TCM shadow overlay and inactive4KiB GMU tables (SID5/flags400). All live ops
-hard-disabled regardless of evidence bits; no device callback/activation API.
-Kernel allocation, live SMMU/TCM/firmware loading and cache lifecycle remain
-unimplemented and physically gated. See gpu/a725/PROVENANCE.md.
+Host preparation at gpu/a725, NOT linked to kernel:
+A725 VMA/reservation/TCM rules from yukoimi8e50e532; unmodified parser
+AdrenoFirmware40fdb8ea and inactive builder ArmSmmu4K4d0d6598 with licenses;
+pinned KGSL51cf4da5 independently verifies VMA and TCM dword/byte offsets.
+Actual factory profile:6 reservations/51 pages/0x33000 backing,4 payloads,
+135 TCM words. Implements structure/profile plan, ordinary RAM staging/zero
+padding, TCM shadow overlay and inactive4KiB GMU tables (SID5/flags400).
+Live operations fixed disabled regardless of evidence/boot arguments; no
+device callback/activation API. Kernel allocation, log/HFI buffers, live
+SMMU/TCM/firmware loading/cache lifecycle remain unimplemented and physically
+gated. Provenance, limitations and tests: gpu/a725/PROVENANCE.md.
 
 Local PASS: full111 strict reverse/replay exact source match; mode0–10 byte
-equivalence; MARBLE ARM64 snapshot object and SWEET exclusion; portable library
-ARM64 Mach-O objects; real-C snapshot map/read/refusal/busy/change/no-write
-fault tests, prior0105–0110 regressions; actual-firmware ASan/UBSan all-truncation,
-RAM/TCM contents/guard bytes, inactive leaf/permission/alias/capacity tests;
-15 firmware/ADT/boot/measurement Python unit tests; factory firmware inventory.
-Commit, one exact-commit CI and distinct mode11 package pending.
-No phone/rootfs/partition interaction. Preexisting changes preserved/excluded
-under research/a725-0111-snapshot/preexisting.patch. Physical0110 capture and
-normal SpringBoard/touch/gestures already confirmed; mode11 physical pending.
+equivalence; MARBLE ARM64 snapshot object/SWEET exclusion; portable library
+ARM64 Mach-O objects; real-C snapshot all-map/read/gate refusal, busy/change,
+no-write tests; prior0105–0110 regressions; actual-firmware ASan/UBSan all-
+truncation, RAM/TCM content/padding/guard bytes, inactive leaf/permission/alias/
+capacity and live-disabled tests;15 Python firmware/ADT/boot/measurement unit
+tests; factory firmware validator. Final boot-v4/locator/exact payload/cmdline,
+SMP8 and all six firmware hashes PASS. BOARD=marble-xnu shim rebuilt, stock
+boot_a repack. Existing UFS/bitbang touch/SMP8 args unchanged except marblegpu=11
+marblegpuvisual=1.0105–0110 images and recovery hashes unchanged; previous
+latest saved under a725-debug-inherited-42048501290/previous-latest.img.
+No phone/rootfs/partition operation; unrelated preexisting changes excluded.
+
+After USER cold reboot, manual only:
+`fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img`
+Photograph a725-debug-inherited-v1(mode11) ten-second screen. Expected capture:
+MAPS10/10 REFUSAL0 CFG READS2 snapshot counts9/9 CAPTURE COMPLETE, terminal
+stage11 resultCAPTURED writes0; normal SpringBoard, touch/gestures/SMP8.
+Busy/DONE/changing counts may be captured; do NOT clear/start/stop the engine
+or treat stable zeros as exclusive ownership. Owner/AHB state remains unresolved.
+Failure/refusal/all-ones/partial capture/hang/regression: stop, cold reboot,
+analyze before another GPU experiment. Known-good recovery unchanged:
+marble-smp8-test.img SHA2562d08c2be1ca1c7841cac85081a6c6b725713980cec16b97bf85cfe8695c402d5.
+Physical0111 pending; physical0110 capture + working SpringBoard/touch already
+confirmed. Next evidence:9 raw pairs plus baseline result; debug/reference
+ownership and safe bounded stop/restore before active measurement; independent
+powered AHB evidence; safe SMMU IDR/stream/context/backing/coherency and reset
+quiescence before live device firmware copies. No startup gate is bypassed.
+Caches: research/a725-0111-snapshot/{preexisting.patch,replay,objects,pinned
+KGSL sources,firmware-validation.json,package.py,package.log,ci-42048501290.log};
+image metadata in shim/out/marble-xnu/a725-debug-inherited-42048501290/.
 
 ## Active 0111 measurement investigation — active writes withheld (2026-11-06)
 
