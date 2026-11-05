@@ -111,3 +111,37 @@ Remote snapshots and selected source files are cached under ignored
 | dipa-studio/ios-sweet | 45263bee51df4a0f55cdf9c649af886399488ddb | Latest website work; SWEET hardware not applicable |
 
 These are source audits, not independent physical verification of those projects.
+
+Recent-diff details retained for later integration: Apollo0185 replaces one
+stalled copy slot with `fFlipCopyFence[3]`, retiring each frame only after its
+own fence; Turnip0102 implements WAIT_PENDING as submission-state waiting
+instead of unconditional success and avoids recursive submit-mutex waits.
+Topaz0948 publishes TimingElements/ColorElements and current-mode selector79
+block0x40 at 60Hz; this is a CA scheduling contract, not a measurement of
+MARBLE's panel. None of these changes is imported before our CP/render proof.
+
+## Build and local verification
+
+Source `669acd653a5babca624c514dfa5fafc530bec440`; exact successful Actions
+run [42033150162](https://github.com/Beast9265/ffgfdfdfdfg/actions/runs/42033150162).
+Full108 strict reverse/replay/source equality; modes0–7 byte equivalence;
+MARBLE ARM64 Mach-O object compile; SWEET exclusion; real-C dependency and
+0105–0107 tests;12 firmware/ADT/boot unit tests; factory firmware validation
+and final SMP8/firmware/cmdline/boot-v4 audits all PASS. Host tests use synthetic
+MMIO and stubbed existing power services; they do not prove hardware behavior.
+
+Distinct image: `shim/out/marble-xnu/marble-a725-gmu-dependencies-test-42033150162.img`.
+Final verified copy: `shim/out/marble-xnu/latest-marble-xnu.img`.
+
+- Kernel SHA256: `38a629ab911f5c7692e1796ef9e09fec4a1e29c9f4834772b46de509dbe5c63e`
+- Payload SHA256: `f38010263e862b7d85f1ef2ac5ea9955cf276840af642756cf03c0ec9b79152b`
+- Image SHA256: `4441684f7eee40ebe172d442886f110d9b182b755d692cd16b1a7609ff1549c7`
+
+Manual command (not executed by automation):
+
+```sh
+fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img
+```
+
+Known-good SMP8 and0105–0107 images were hash-checked unchanged. No phone,
+partition or rootfs operation occurred. Physical mode8 result is pending.

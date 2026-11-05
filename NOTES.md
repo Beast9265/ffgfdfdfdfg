@@ -1,6 +1,6 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
-## Active 0108 GMU dependencies (2026-11-06)
+## Active 0108 GMU dependencies (2026-11-06) — packaged, physical test pending
 
 USER reports PHYSICAL 0107 PASS on POCO F5, a725-voted-roots-v1:
 MX/CX/ACD/CX enable, GPLL0 parent PASS; GMU/HUB/XO CFG
@@ -8,17 +8,59 @@ MX/CX/ACD/CX enable, GPLL0 parent PASS; GMU/HUB/XO CFG
 CX rollback and CX/MX releases PASS. Supersedes all pending0107 statements.
 Photos described by user, not attached here. No GMU/GPU execution proven.
 
-Implementing opt-in mode8, isolated from modes0–7: root lease encloses existing
-six branch dependencies and reverse branch cleanup; uncertain AON/branch/root
-state retains root/CX/rails; failed CX rollback/release retains upstream rails.
-Source audit and physical acceptance: docs/MARBLE_A725_GMU_DEPENDENCIES.md.
-Primary reference yukoimi/hackios-marble 8e50e532f09b3042165048c3c72e04b5a8e68898.
-No phone operation, rootfs, SMP, touch, display or userspace change.
-Local PASS: actual-C mode8 failure/timeout/retention tests; existing0105–0107
-tests; full108 strict reverse/replay and byte match; modes0–7 equivalence;
-MARBLE ARM64 compile; SWEET exclusion compile; 12 firmware/ADT/boot unit tests;
-factory firmware inventory and eight-core firmware ADT. CI/package pending. Existing unrelated changes saved
-in research/a725-0108/preexisting.patch, remain excluded from task commit.
+Source commit `669acd653a5babca624c514dfa5fafc530bec440` pushed to origin/marble.
+Exact CI `42033150162` PASSED (13.5/DEVELOPMENT/MARBLE/keep_going=true).
+No build retry or older artifact substitution. Initial gh dispatch selected
+upstream and was rejected403; no upstream run created; explicit repository
+dispatch succeeded. Exact artifact SHA256SUMS verified. ARM64 Mach-O kernel.
+
+Distinct test image:
+`shim/out/marble-xnu/marble-a725-gmu-dependencies-test-42033150162.img`
+Verified copy: `shim/out/marble-xnu/latest-marble-xnu.img`
+Kernel SHA256 `38a629ab911f5c7692e1796ef9e09fec4a1e29c9f4834772b46de509dbe5c63e`
+Payload SHA256 `f38010263e862b7d85f1ef2ac5ea9955cf276840af642756cf03c0ec9b79152b`
+Boot SHA256 `4441684f7eee40ebe172d442886f110d9b182b755d692cd16b1a7609ff1549c7`
+
+Mode8 alone encloses the existing six branch dependencies inside voted roots.
+Reverse unwind: branches, roots/div gate, CX, CX vote, MX vote. AON clocks must
+be inherited ON; no AON off write. Unknown AON/branch timeout/failed cleanup
+retains root/CX/rails; failed CX rollback retains rails; failed CX release
+retains MX. No PLL configuration/inherited APSS vote change, GMU reset/start,
+GX, SMMU, SCM, CP or GPU userspace implementation. Modes0–7 unchanged.
+Primary audit/adaptation: yukoimi/hackios-marble
+8e50e532f09b3042165048c3c72e04b5a8e68898; detailed comparison, references,
+physical criteria and remaining gates: docs/MARBLE_A725_GMU_DEPENDENCIES.md.
+
+Local PASS: full108 strict reverse/replay with exact source match; modes0–7
+byte equivalence except accepted mode range; actual-C root/branch write allowlist,
+inherited ownership, every branch/RCG timeout, cleanup/CX/release retention;
+existing0105–0107 tests; MARBLE ARM64 object compile (Mach-O verified); SWEET
+exclusion compile;12 firmware/ADT/boot unit tests; factory firmware validator;
+eight-core firmware ADT. Final boot-v4/locator/payload/cmdline/MPIDRs/all six
+firmware hashes passed. Rebuilt BOARD=marble-xnu shim and stock boot_a repack.
+Preserved working UFS/bitbang touch/SMP8 args, marblegpu=8 marblegpuvisual=1.
+0105/0106/physically-tested0107 and marble-smp8-test.img hashes unchanged.
+Previous latest preserved under a725-gmu-dependencies-42033150162/previous-latest.img.
+No phone interaction, rootfs/partition or SMP/touch/display/userspace change.
+Unrelated preexisting changes remain excluded; saved research/a725-0108/preexisting.patch.
+
+USER manual command only:
+`fastboot boot ~/ios-marble/shim/out/marble-xnu/latest-marble-xnu.img`
+Photograph ten-second `a725-gmu-dependencies-v1 (mode8)` screen. Require all
+power/parent/roots, six normal branches, branch/root cleanup, CX rollback and
+both releases ACKNOWLEDGED; apb_pclk NOT ATTEMPTED is correct; branch/root
+errors0 and RESOURCE RETAINED0; terminal stage8 result PASS, then normal
+SpringBoard and touch. Any fail/timeout/retention/hang: STOP, cold reboot and
+analyze before another GPU experiment. Manual recovery image remains
+`shim/out/marble-xnu/marble-smp8-test.img` SHA2562d08c2be... unchanged.
+
+Physical mode8 PENDING. Next after physical PASS: separate PDC/RSCC and
+secure-CX prerequisite audit; inactive GMU4KiB memory mappings/firmware/TCM
+verification; ZAP, CM3 readiness, HFI, GX, CP fence/readback, rendered test,
+then IOKit/Mesa FD725/EAGL/CA integration. No accelerated SpringBoard claim.
+Caches: research/a725-0108/{reference,remotes,replay,objects,package.py,
+package.log,ci-42033150162.log,firmware.json}; hashes/inspection under
+shim/out/marble-xnu/a725-gmu-dependencies-42033150162/.
 
 ## Active0107 vote-controlled parent/root test (2026-10-31)
 
