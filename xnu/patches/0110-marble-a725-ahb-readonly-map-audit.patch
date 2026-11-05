@@ -1,0 +1,151 @@
+diff --git a/bsd/dev/marble_a725_probe.c b/bsd/dev/marble_a725_probe.c
+--- a/bsd/dev/marble_a725_probe.c
++++ b/bsd/dev/marble_a725_probe.c
+@@ -2088,13 +2088,129 @@
+ 	return TRUE;
+ }
+ 
++/* Read-only CPU translation plus inherited GPUCC inventory. AT S1E1W
++ * checks stage-1 write permission; it does NOT issue a device store.
++ * Preserve DAIF and PAR on this CPU, like XNU's mmu_kvtop sequence. */
++struct a725_io_translation { uint64_t read_par, write_par; };
++
++static void
++a725_io_translate(vm_offset_t va, struct a725_io_translation *t)
++{
++ uint64_t daif, saved, rd, wr;
++ __asm__ volatile(
++     "mrs %0, daif\n\t"
++     "msr daifset, #3\n\t"
++     "mrs %1, par_el1\n\t"
++     "at s1e1r, %4\n\tisb\n\tmrs %2, par_el1\n\t"
++     "at s1e1w, %4\n\tisb\n\tmrs %3, par_el1\n\t"
++     "msr par_el1, %1\n\tmsr daif, %0"
++     : "=&r"(daif), "=&r"(saved), "=&r"(rd), "=&r"(wr)
++     : "r"(va) : "memory");
++ t->read_par = rd; t->write_par = wr;
++}
++
++static uint64_t
++a725_io_par_pa(uint64_t par, vm_offset_t va)
++{
++ return (par & 0x0000fffffffff000ULL) | (va & 0xfffu);
++}
++
++static boolean_t
++a725_io_translation_valid(const struct a725_io_translation *t,
++    vm_offset_t va, uint64_t expected)
++{
++ /* VM_WIMG_IO outside DRAM is MAIR_DISABLE (Device-nGnRnE=00).
++  * Reject a fault or unexpected attribute; never compensate by remapping. */
++ return !(t->read_par & 1u) && !(t->write_par & 1u) &&
++     (t->read_par >> 56) == 0 && (t->write_par >> 56) == 0 &&
++     a725_io_par_pa(t->read_par, va) == expected &&
++     a725_io_par_pa(t->write_par, va) == expected;
++}
++
++#define A725_IO_AUDIT_REGS 12u
++static const struct { const char *name; uint32_t offset; } a725_io_regs[] = {
++ {"AHB_CBCR", 0x911c}, {"CX_GDSCR", 0x9108}, {"CX_HWCTRL", 0x953c},
++ {"GX_GDSCR", 0x905c}, {"HUB_AHB_DIV", 0x9430}, {"HUB_CX_DIV", 0x942c},
++ {"HUB_AON", 0x93e8}, {"HUB_CX_INT", 0x9148}, {"HUB_CMD", 0x93ec},
++ {"HUB_CFG", 0x93f0}, {"GMU_CBCR", 0x913c}, {"CXO_CBCR", 0x9144},
++};
++struct a725_io_audit {
++ struct a725_io_translation map[3];
++ uint32_t cfg_bus[2], value[2][A725_IO_AUDIT_REGS];
++ unsigned maps, cfg_reads, reads[2], refusal;
++};
++
++static boolean_t
++a725_io_readonly_capture(const struct marble_a725_resources *r,
++    struct a725_io_audit *a)
++{
++ const vm_offset_t va[3] = {r->gpucc + 0x911c, r->gpucc + 0x93f0, r->gcc + 0x81004};
++ const uint64_t pa[3] = {0x03d9911cULL, 0x03d993f0ULL, 0x00181004ULL};
++ for (unsigned i = 0; i < 3; i++) {
++  a725_io_translate(va[i], &a->map[i]); a->maps++;
++  if (!a725_io_translation_valid(&a->map[i], va[i], pa[i])) a->refusal |= 1u << i;
++ }
++ /* Do not even read MMIO if CPU translation/protection/attributes differ. */
++ if (a->refusal) return FALSE;
++ for (unsigned pass = 0; pass < 2; pass++) {
++  a->cfg_bus[pass] = a725_read32(r->gcc, 0x81004); a->cfg_reads++;
++  if (!(a->cfg_bus[pass] & 1u) || a->cfg_bus[pass] == ~0u) {
++   a->refusal |= 8u; return FALSE;
++  }
++  for (unsigned i = 0; i < A725_IO_AUDIT_REGS; i++) {
++   a->value[pass][i] = a725_read32(r->gpucc, a725_io_regs[i].offset);
++   a->reads[pass]++;
++   if (a->value[pass][i] == ~0u) { a->refusal |= 16u; return FALSE; }
++  }
++  if (pass == 0) delay(1000);
++ }
++ return TRUE;
++}
++
++static void
++a725_io_readonly_test(const struct marble_a725_resources *r, boolean_t visual)
++{
++ struct a725_io_audit a = {0};
++ boolean_t complete = a725_io_readonly_capture(r, &a);
++ const vm_offset_t va[3] = {r->gpucc + 0x911c, r->gpucc + 0x93f0, r->gcc + 0x81004};
++ const char *names[3] = {"AHB", "HUB_CFG", "GCC_CFG"};
++ printf("\n============================================================\n");
++ printf(" MARBLE a725-ahb-readonly-v1 (mode10)\n");
++ printf(" CPU TRANSLATION AUDIT; NO DEVICE STORES OR RAIL VOTES\n");
++ for (unsigned i = 0; i < a.maps; i++) {
++  printf(" %s PA R=%llx W=%llx\n", names[i],
++      (unsigned long long)a725_io_par_pa(a.map[i].read_par, va[i]),
++      (unsigned long long)a725_io_par_pa(a.map[i].write_par, va[i]));
++  printf(" PAR R=%016llx W=%016llx\n", (unsigned long long)a.map[i].read_par,
++      (unsigned long long)a.map[i].write_par);
++ }
++ printf(" PA fields valid only when the matching PAR fault bit0=0\n");
++ printf(" REFUSAL=%02x CFG READS=%u (only these slots valid)\n", a.refusal, a.cfg_reads);
++ printf(" GCC_CFG S0=%08x S1=%08x\n", a.cfg_bus[0], a.cfg_bus[1]);
++ printf(" READ COUNTS S0=%u S1=%u (target12 each)\n", a.reads[0], a.reads[1]);
++ for (unsigned i = 0; i < A725_IO_AUDIT_REGS; i++) {
++  if (i < a.reads[0] || i < a.reads[1]) {
++   printf(" %-12s ", a725_io_regs[i].name);
++   if (i < a.reads[0]) printf("S0=%08x ", a.value[0][i]); else printf("S0=NOT READ ");
++   if (i < a.reads[1]) printf("S1=%08x\n", a.value[1][i]); else printf("S1=NOT READ\n");
++  }
++ }
++ printf(" %s; AHB CLOCK STATE UNRESOLVED\n", complete ? "CAPTURE COMPLETE" : "CAPTURE REFUSED");
++ printf(" PAR proves CPU mapping only, not controller write acceptance\n");
++ printf(" No GMU/HFI/GX/CP operation; no GPU clock success claimed\n");
++ printf("============================================================\n");
++ if (visual) delay(10000000);
++ printf("MARBLE A725: stage=10 stop=MMIO_AUDIT_COMPLETE result=%s writes=0 AHB_STATE=UNRESOLVED\n",
++     complete ? "CAPTURED" : "REFUSED");
++}
++
+ void
+ marble_a725_probe(void)
+ {
+ 	uint32_t enabled = 0, visual = 0;
+ 	PE_parse_boot_argn("marblegpu", &enabled, sizeof(enabled));
+ 	PE_parse_boot_argn("marblegpuvisual", &visual, sizeof(visual));
+-	if (enabled < 1 || enabled > 9) {
++	if (enabled < 1 || enabled > 10) {
+ 		return;
+ 	}
+ 	if (enabled >= 2 && !a725_validate_firmware()) {
+@@ -2107,6 +2223,16 @@
+ 	    A725_GMU_PA, A725_GMU_SIZE, A725_GMU_HFI_SPI, A725_GMU_SPI,
+ 	    A725_GPUCC_PA, A725_GPUCC_SIZE, A725_SMMU_PA, A725_SMMU_SIZE);
+ 
++	if (enabled == 10) {
++		r.gpucc = ml_io_map(A725_GPUCC_PA, A725_GPUCC_SIZE);
++		r.gcc = ml_io_map(A725_GCC_PA, A725_GCC_SIZE);
++		if (!r.gpucc || !r.gcc) {
++			printf("MARBLE A725: stage=10 stop=MMIO_MAP_FAILED writes=0\n");
++			return;
++		}
++		a725_io_readonly_test(&r, visual == 1);
++		return;
++	}
+ 	if (enabled == 6) {
+ 		r.gcc = ml_io_map(A725_GCC_PA, A725_GCC_SIZE);
+ 		if (!r.gcc) {

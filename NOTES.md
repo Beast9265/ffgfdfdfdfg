@@ -1,5 +1,38 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## Active 0110 read-only AHB mapping audit (2026-11-06)
+
+USER physical0109 ea712baa8d0e42cfcb981350c8c25982b0d160da:
+CFG_AHB1 REFUSAL0 WRITE1; dividers0; HUB_AON/HUB_CX_INT1;
+AHB before/T0/T1/T10/T100/T200 all0; TIMEOUT errno60 RETAINED1.
+Normal SpringBoard and touchscreen afterward. Baseline preserved;
+AHB/GPU operation unresolved. Supersedes0109-pending statements below.
+Cold reboot before next experiment, even when SpringBoard works.
+
+Exact pinned Cape driver re-fetch byte-matches earlier source. Physical
+GPUCC base/size matches live DT. ml_io_map uses Device IO mapping; AHB and
+previously successful roots share4KiB address page, not proof of AHB write
+acceptance.0108/0109 bit0 test is stricter than vendor DELAY10us callback;
+zero readback alone proves neither off nor on. No secure readback contract
+or hidden reset/vote prerequisite established. Actual write is STR32+DSB SY.
+
+Smallest justified0110: isolated opt-in mode10, no device stores/rail/power/
+clock writes. CPU AT read/write preflight/PAR audits actual AHB/HUB_CFG/GCC_CFG
+PA and Device-nGnRnE attributes; only then two inherited read-only snapshots,
+GCC CFG gate first each pass. No mapping compensation or unsafe peripheral
+probe. CAPTURE COMPLETE is not clock PASS; AHB_STATE always UNRESOLVED.
+Pinned debugcc has independent AHB measurement selector16 (GMU1e/HUB20);
+shared measurement engine is NOT touched. Future measurement requires own
+ownership/control/scaling/two-window/rollback audit before device writes.
+Audit: docs/MARBLE_A725_AHB_READONLY.md. No GMU/HFI/GX/CP startup.
+
+Local actual-C translation/refusal/read allowlist tests, existing0105–0109
+regression tests, ARM64 object compile/disassembly and full110 strict replay
+with source equality PASS. Modes0–9 byte-equivalence PASS;12 firmware/ADT/boot
+unit tests and SWEET exclusion compile PASS. Commit/CI/package pending.
+No phone/rootfs/partition operation; preexisting changes saved under
+research/a725-0110/preexisting.patch and remain excluded.
+
 ## Active 0109 AHB latch diagnostic — packaged, physical pending (2026-11-06)
 
 USER physical0108 result for669acd653a5babca624c514dfa5fafc530bec440,
