@@ -14,7 +14,7 @@ parts={n.targets[0].id:ast.literal_eval(n.value) for n in tree.body
 constants=s[s.index('#define A725_BUILD_ID'):s.index('struct a725_firmware_spec')]
 sampler=s[s.index('struct a725_pll_sample {'):s.index('/* Same strict prerequisites')]
 roots=s[s.index('static boolean_t\na725_root_parent_acquire'):s.index('static boolean_t\na725_enable_gmu_clocks')]
-voted=s[s.index('static boolean_t\na725_voted_pll_ready'):s.index('static boolean_t\na725_root_stage_test(')]
+voted=s[s.index('static boolean_t\na725_voted_pll_ready'):s.index('static boolean_t\na725_root_stage_test(')].split('static boolean_t\na725_dependency_stage_test(')[0]
 mock=parts['mock'].replace('static unsigned writes, elapsed, updates;', 'static unsigned writes, elapsed, updates;\nstatic bool lose_on_gate;static unsigned lose_on_update;')
 mock=mock.replace('if(!ignore_vote){gcc[off/4]=v;}', 'if(!ignore_vote){gcc[off/4]=v;}\n  if(lose_on_gate)gcc[A725_GPLL0_MODE/4]&=~(1u<<31);')
 mock=mock.replace('updates++;if(updates!=fail_update)', 'updates++;if(updates==lose_on_update)gcc[A725_GPLL0_MODE/4]&=~(1u<<31);if(updates!=fail_update)')

@@ -1,5 +1,25 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## Active 0108 GMU dependencies (2026-11-06)
+
+USER reports PHYSICAL 0107 PASS on POCO F5, a725-voted-roots-v1:
+MX/CX/ACD/CX enable, GPLL0 parent PASS; GMU/HUB/XO CFG
+00100602/00100603/00100001 PASS; ROOT ERROR0; root cleanup,
+CX rollback and CX/MX releases PASS. Supersedes all pending0107 statements.
+Photos described by user, not attached here. No GMU/GPU execution proven.
+
+Implementing opt-in mode8, isolated from modes0–7: root lease encloses existing
+six branch dependencies and reverse branch cleanup; uncertain AON/branch/root
+state retains root/CX/rails; failed CX rollback/release retains upstream rails.
+Source audit and physical acceptance: docs/MARBLE_A725_GMU_DEPENDENCIES.md.
+Primary reference yukoimi/hackios-marble 8e50e532f09b3042165048c3c72e04b5a8e68898.
+No phone operation, rootfs, SMP, touch, display or userspace change.
+Local PASS: actual-C mode8 failure/timeout/retention tests; existing0105–0107
+tests; full108 strict reverse/replay and byte match; modes0–7 equivalence;
+MARBLE ARM64 compile; SWEET exclusion compile; 12 firmware/ADT/boot unit tests;
+factory firmware inventory and eight-core firmware ADT. CI/package pending. Existing unrelated changes saved
+in research/a725-0108/preexisting.patch, remain excluded from task commit.
+
 ## Active0107 vote-controlled parent/root test (2026-10-31)
 
 Source `acd8db9d1ea366e62a631c59055015b9d8143ed4` pushed; single CI
